@@ -679,10 +679,12 @@ def _build_display_name(sample: dict, fmt: str) -> str:
     Placeholders: {alias}, {detail}, {category}, {bank},
                   {stereo_channel}, {beats}
     """
-    alias = sample.get('alias', '').strip()
-    detail = sample.get('detail', '').strip()
-    category = sample.get('category', 'unknown').strip()
-    bank = sample.get('bank', '').strip()
+    # Sanitize field values so slashes in data (e.g. 'w/o') don't create
+    # spurious subdirectory structure when combined with format templates.
+    alias = _sanitize_filename(sample.get('alias', '').strip())
+    detail = _sanitize_filename(sample.get('detail', '').strip())
+    category = _sanitize_filename(sample.get('category', 'unknown').strip())
+    bank = _sanitize_filename(sample.get('bank', '').strip())
     channel = sample.get('stereo_channel', '').strip()
     beats = str(sample.get('beats', ''))
 
@@ -709,7 +711,7 @@ def organize_output(catalog: list, output_dir: str, fmt: str) -> None:
 
     Updates 'filename' and 'stereo_pair' in each catalog entry to reflect new paths.
     """
-    used_names: dict[str, int] = {}    # collision tracker
+    used_names: set[str] = set()        # tracks every assigned name (lowercased)
     rename_map: dict[str, str] = {}    # old_name -> new_name for stereo_pair fixup
 
     for sample in catalog:
@@ -736,15 +738,28 @@ def organize_output(catalog: list, output_dir: str, fmt: str) -> None:
 
         new_name = f'{safe}.wav'
 
-        # Handle duplicate names
+        # Deduplicate: check both the in-memory set and disk
         key = new_name.lower()
-        if key in used_names:
-            used_names[key] += 1
+        if key in used_names or (
+            os.path.exists(os.path.join(output_dir, new_name))
+            and os.path.abspath(os.path.join(output_dir, new_name))
+            != os.path.abspath(old_path)
+        ):
             base, ext = os.path.splitext(new_name)
-            new_name = f'{base} ({used_names[key]}){ext}'
-        else:
-            used_names[key] = 1
+            counter = 1
+            while True:
+                counter += 1
+                candidate = f'{base} ({counter}){ext}'
+                candidate_key = candidate.lower()
+                candidate_path = os.path.join(output_dir, candidate)
+                if candidate_key not in used_names and (
+                    not os.path.exists(candidate_path)
+                    or os.path.abspath(candidate_path) == os.path.abspath(old_path)
+                ):
+                    new_name = candidate
+                    break
 
+        used_names.add(new_name.lower())
         new_path = os.path.join(output_dir, new_name)
         os.makedirs(os.path.dirname(new_path) or '.', exist_ok=True)
         os.rename(old_path, new_path)
@@ -765,17 +780,20 @@ def detect_source_type(path: str) -> Literal['directory', 'packed_archive', 'sin
     if os.path.isdir(path):
         return 'directory'
     if os.path.isfile(path):
+        # Check for INF companion BEFORE reading magic bytes — packed archives
+        # often start with tPxD bytes (the first embedded sample) and would be
+        # wrongly classified as single_pxd if magic were checked first.
+        for ext in ('.inf', '.INF', '.Inf'):
+            if os.path.isfile(path + ext):
+                return 'packed_archive'
+        # Extension-less file with no INF — still likely a packed archive
+        if '.' not in os.path.basename(path):
+            return 'packed_archive'
+        # Only now check magic bytes to distinguish single PXD from unknown
         with open(path, 'rb') as f:
             magic = f.read(4)
         if magic == PXD_MAGIC or magic == WAV_MAGIC:
             return 'single_pxd'
-        # Check for INF companion → packed archive
-        for ext in ('.inf', '.INF', '.Inf'):
-            if os.path.isfile(path + ext):
-                return 'packed_archive'
-        # Could be a packed archive without INF — check if extension-less
-        if '.' not in os.path.basename(path):
-            return 'packed_archive'
         return 'single_pxd'
     return None
 
