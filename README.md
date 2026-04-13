@@ -10,8 +10,8 @@ and packed archive bundles. This project reverse-engineers those formats and pro
 
 - **`tools/pxd_parser.py`** — Decodes PXD-compressed samples and packed archives to
   standard WAV files, and generates a JSON metadata catalog for each product.
-
-A minimal web-based sound browser is planned as a second milestone.
+- **Sound Browser** — A Vite-powered web app with DaisyUI that lets you search, filter,
+  and play extracted samples in the browser.
 
 ## Supported products
 
@@ -26,9 +26,33 @@ A minimal web-based sound browser is planned as a second milestone.
 | Techno eJay / Techno eJay 3 | Techno |
 | Xtreme eJay | Xtreme |
 
+## Channel Mapping (per product)
+
+Each product's UI arranges samples into named "sound group" tabs (channels). After
+extraction, `tools/reorganize.py` sorts WAV files into channel folders using
+internal-name sub-codes.
+
+| Product | Channels |
+|---------|----------|
+| Dance eJay 1 | Bass, Drum, Effect, Keys, Loop, Voice, Xtra |
+| Dance eJay 2 | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Xtra |
+| Dance eJay 3 | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Xtra |
+| Dance eJay 4 | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Xtra, Groove, Wave |
+| Dance SuperPack | Bass, Drum, Effect, Keys, Loop, Voice, Xtra |
+| Generation Pack 1 | (Dance/Rave: same as Dance 1) |
+| HipHop eJay 2 | Bass, Drum, Effect, Guitar, Keys, Loop, Scratch, Voice, Xtra |
+| HipHop eJay 3 | Bass, Drum, Effect, Guitar, Keys, Loop, Scratch, Voice, Xtra |
+| HipHop eJay 4 | Bass, Drum, Effect, Fellas, Guitar, Keys, Ladies, Loop, Scratch, Xtra |
+| House eJay | Bass, Drum, Effect, Groove, Guitar, Keys, Loop, Voice, Xtra |
+| Rave eJay | Bass, Drum, Effect, Keys, Loop, Voice, Xtra |
+| Techno eJay | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Xtra |
+| Techno eJay 3 | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Wave, Xtra |
+| Xtreme eJay | Bass, Effect, Guitar, Loop, Seq, Voice, Xtra |
+
 ## Requirements
 
-- Python 3.10 or newer (standard library only — no external dependencies)
+- Python 3.10 or newer (standard library only — for extraction tools)
+- Node.js 20 or newer (for the web-based sound browser)
 - Your own legally-owned copies of the eJay products you wish to extract
 
 > **Important**: This tool does not include, distribute, or provide access to any eJay
@@ -37,6 +61,8 @@ A minimal web-based sound browser is planned as a second milestone.
 > jurisdiction.
 
 ## Usage
+
+### Extraction (Python)
 
 ```bash
 # Extract individual PXD files from a directory tree
@@ -54,6 +80,28 @@ python tools/pxd_parser.py archive/Dance_eJay1/dance --output output/Dance_eJay1
 ```
 
 Output: a folder of `.wav` files and a `metadata.json` catalog.
+
+### Sound Browser (Node.js)
+
+```bash
+# Install dependencies
+npm install
+
+# Start the dev server
+npm run serve
+
+# Run tests
+npm test
+
+# Run tests with coverage
+npm run test:coverage
+
+# Type-check
+npm run typecheck
+
+# Build for production
+npm run build
+```
 
 ## License
 

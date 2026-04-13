@@ -1,0 +1,31 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+@theme {
+  --color-primary: #00ff88;
+  --color-primary-content: #031b10;
+  --color-secondary: #ff3366;
+  --color-accent: #7c3aed;
+  --color-base-100: #0f0f1a;
+  --color-base-200: #1a1a2e;
+  --color-base-300: #25253e;
+  --color-base-content: #e0e0e8;
+}
+
+/* Channel accent colors — derived from original eJay sample-block palette */
+:root {
+  --channel-loop: #d4a574;
+  --channel-drum: #d4a574;
+  --channel-bass: #d4a574;
+  --channel-effect: #e8a0a0;
+  --channel-voice: #e8a0a0;
+  --channel-keys: #a0c8e8;
+  --channel-seq: #a0c8e8;
+  --channel-guitar: #a0c8e8;
+  --channel-scratch: #e8a0a0;
+  --channel-xtra: #b8d8b0;
+  --channel-groove: #b8d8b0;
+  --channel-wave: #b8d8b0;
+  --channel-fellas: #e8a0a0;
+  --channel-ladies: #e8a0a0;
+}

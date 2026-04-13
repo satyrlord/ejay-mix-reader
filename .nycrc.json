@@ -1,0 +1,23 @@
+{
+  "all": false,
+  "include": [
+    "src/main.ts"
+  ],
+  "exclude": [
+    "dist/**",
+    "coverage/**",
+    "node_modules/**"
+  ],
+  "excludeAfterRemap": false,
+  "extension": [
+    ".ts",
+    ".js"
+  ],
+  "report-dir": "coverage",
+  "reporter": [
+    "text",
+    "html",
+    "lcov"
+  ],
+  "temp-dir": ".nyc_output"
+}

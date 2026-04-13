@@ -1,0 +1,36 @@
+{
+  "name": "ejay-mix-reader",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Extract and browse audio samples from eJay music software titles.",
+  "scripts": {
+    "serve": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "playwright test",
+    "test:coverage": "tsx scripts/test-coverage.ts",
+    "test:ui": "playwright test --ui",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\"",
+    "validate": "npm run typecheck && npm run lint:md"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/satyrlord/ejay-mix-reader.git"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^25.6.0",
+    "daisyui": "^5.5.19",
+    "markdownlint-cli2": "^0.22.0",
+    "nyc": "^18.0.0",
+    "tailwindcss": "^4.2.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.8",
+    "vite-plugin-istanbul": "^8.0.0"
+  }
+}
