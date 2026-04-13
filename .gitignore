@@ -6,7 +6,11 @@ archive/
 codec/
 
 # Project configuration and agent instructions (workspace-local)
-.github/
+.github/agents
+.github/instructions
+.github/prompts
+.github/skills
+copilot-instructions.md
 
 # Extracted audio output (derived from copyrighted source material)
 output/
