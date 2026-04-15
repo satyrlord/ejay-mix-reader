@@ -1,7 +1,11 @@
 {
   "all": false,
   "include": [
-    "src/main.ts"
+    "src/main.ts",
+    "src/data.ts",
+    "src/library.ts",
+    "src/player.ts",
+    "src/render.ts"
   ],
   "exclude": [
     "dist/**",

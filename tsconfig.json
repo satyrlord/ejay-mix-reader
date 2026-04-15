@@ -8,6 +8,7 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
+  // tools/**/*.ts is Node-only; browser runtime files are covered by tsconfig.browser.json
+  "include": ["*.ts", "scripts/**/*.ts", "tests/**/*.ts", "tools/**/*.ts"],
   "exclude": ["node_modules", "vite.config.ts"]
 }

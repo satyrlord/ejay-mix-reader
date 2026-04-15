@@ -19,6 +19,7 @@ output/
 *.wav
 *.exe
 *.dll
+*.csv
 
 # Python
 __pycache__/
@@ -30,6 +31,7 @@ __pycache__/
 # Node.js
 node_modules/
 dist/
+data/
 coverage/
 .nyc_output/
 playwright-report/

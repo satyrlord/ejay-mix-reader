@@ -1,15 +1,60 @@
 @import "tailwindcss";
-@plugin "daisyui";
 
-@theme {
+@plugin "daisyui" {
+  themes: dark --default --prefersdark;
+}
+
+@plugin "daisyui/theme" {
+  name: "dark";
+  default: true;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: #0a0a0c;
+  --color-base-200: #111115;
+  --color-base-300: #18181e;
+  --color-base-content: #e7e3dd;
   --color-primary: #00ff88;
   --color-primary-content: #031b10;
   --color-secondary: #ff3366;
-  --color-accent: #7c3aed;
-  --color-base-100: #0f0f1a;
-  --color-base-200: #1a1a2e;
-  --color-base-300: #25253e;
-  --color-base-content: #e0e0e8;
+  --color-secondary-content: #2d0812;
+  --color-accent: #6f63ff;
+  --color-accent-content: #f6f4ff;
+  --color-neutral: #202028;
+  --color-neutral-content: #f5efe9;
+  --color-info: #7bd8ff;
+  --color-info-content: #07161f;
+  --color-success: #00ff88;
+  --color-success-content: #031b10;
+  --color-warning: #ffaa00;
+  --color-warning-content: #2d1b00;
+  --color-error: #ff6633;
+  --color-error-content: #2f0f00;
+
+  --radius-selector: 9999px;
+  --radius-field: 1rem;
+  --radius-box: 1.25rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@theme {
+  --font-sans: "Segoe UI Variable Text", "Aptos", "Trebuchet MS", sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", "SFMono-Regular", monospace;
+}
+
+:root {
+  --bg: var(--color-base-100);
+  --surface: var(--color-base-200);
+  --surface2: var(--color-base-300);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --text: var(--color-base-content);
+  --text-dim: rgba(231, 227, 221, 0.65);
+  --accent: var(--color-primary);
+  --accent2: var(--color-secondary);
 }
 
 /* Channel accent colors — derived from original eJay sample-block palette */
@@ -21,6 +66,7 @@
   --channel-voice: #e8a0a0;
   --channel-keys: #a0c8e8;
   --channel-seq: #a0c8e8;
+  --channel-sphere: #59d7ea;
   --channel-guitar: #a0c8e8;
   --channel-scratch: #e8a0a0;
   --channel-xtra: #b8d8b0;
@@ -28,4 +74,26 @@
   --channel-wave: #b8d8b0;
   --channel-fellas: #e8a0a0;
   --channel-ladies: #e8a0a0;
+}
+
+body {
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+/* Back-navigation button — matches album-review site-nav-link style */
+.nav-back-btn {
+  background: color-mix(in srgb, var(--color-base-content) 10%, transparent) !important;
+  border: 1px solid transparent !important;
+  border-radius: 16px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+.nav-back-btn:hover {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent) !important;
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent) !important;
+  color: var(--color-primary) !important;
 }

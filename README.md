@@ -8,10 +8,24 @@ released in the late 1990s and early 2000s.
 eJay products ship hundreds of audio samples in a proprietary compressed format (`.PXD`)
 and packed archive bundles. This project reverse-engineers those formats and provides:
 
-- **`tools/pxd_parser.py`** — Decodes PXD-compressed samples and packed archives to
+- **`tools/pxd-parser.ts`** — Decodes PXD-compressed samples and packed archives to
   standard WAV files, and generates a JSON metadata catalog for each product.
 - **Sound Browser** — A Vite-powered web app with DaisyUI that lets you search, filter,
-  and play extracted samples in the browser.
+  sort, and play extracted samples in the browser.
+
+## Sound Browser Notes
+
+- Product pages use the selected product name as the top-bar title instead of a
+  fixed app title.
+- The sample table uses five columns: play control, `Name`, `Category`,
+  `Beats`, and `Duration`.
+- The `Name` cell merges the sample category and display name as
+  `<Category> - <Name>` when a category is present.
+- `Name` and `Category` sort alphabetically; `Beats` and `Duration` sort
+  numerically with ascending/descending toggles.
+- The browser UI uses the term `Category` for sample-group classification.
+  This avoids confusion with audio channel count, where `channels` still means
+  mono/stereo metadata.
 
 ## Supported products
 
@@ -29,7 +43,7 @@ and packed archive bundles. This project reverse-engineers those formats and pro
 ## Channel Mapping (per product)
 
 Each product's UI arranges samples into named "sound group" tabs (channels). After
-extraction, `tools/reorganize.py` sorts WAV files into channel folders using
+extraction, `tools/reorganize.ts` sorts WAV files into channel folders using
 internal-name sub-codes.
 
 | Product | Channels |
@@ -46,13 +60,29 @@ internal-name sub-codes.
 | House eJay | Bass, Drum, Effect, Groove, Guitar, Keys, Loop, Voice, Xtra |
 | Rave eJay | Bass, Drum, Effect, Keys, Loop, Voice, Xtra |
 | Techno eJay | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Xtra |
-| Techno eJay 3 | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Wave, Xtra |
+| Techno eJay 3 | Bass, Drum, Effect, Hyper, Keys, Loop, Sphere, Voice, Wave, Xtra |
 | Xtreme eJay | Bass, Effect, Guitar, Loop, Seq, Voice, Xtra |
+
+## How to Run
+
+**Clone and run locally** — this is the only supported way to use the Sound Browser.
+
+The app needs to serve your extracted WAV files alongside the web assets.
+Running it from a hosted static page (e.g. GitHub Pages) is not possible because
+there is no way to expose a local sample library folder to a remote static server.
+
+```bash
+git clone https://github.com/satyrlord/ejay-mix-reader.git
+cd ejay-mix-reader
+npm install
+npm run serve   # opens http://127.0.0.1:3000
+```
+
+Then click **Choose output folder** and point the picker at your `output/` directory.
 
 ## Requirements
 
-- Python 3.10 or newer (standard library only — for extraction tools)
-- Node.js 20 or newer (for the web-based sound browser)
+- Node.js 20 or newer
 - Your own legally-owned copies of the eJay products you wish to extract
 
 > **Important**: This tool does not include, distribute, or provide access to any eJay
@@ -62,26 +92,26 @@ internal-name sub-codes.
 
 ## Usage
 
-### Extraction (Python)
+### Extraction
 
 ```bash
 # Extract individual PXD files from a directory tree
-python tools/pxd_parser.py archive/Dance_eJay1/dance --output output/Dance_eJay1
+tsx tools/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1
 
 # Extract from a packed archive (INF catalog auto-detected)
-python tools/pxd_parser.py archive/Dance_eJay3/eJay/pxd/dance30 --output output/Dance_eJay3
+tsx tools/pxd-parser.ts archive/Dance_eJay3/eJay/pxd/dance30 --output output/Dance_eJay3
 
 # Extract a single PXD file
-python tools/pxd_parser.py path/to/sample.pxd --output output/test
+tsx tools/pxd-parser.ts path/to/sample.pxd --output output/test
 
 # Organize output into named subfolders using metadata
-python tools/pxd_parser.py archive/Dance_eJay1/dance --output output/Dance_eJay1 \
+tsx tools/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1 \
     --format "{category}/{alias}"
 ```
 
 Output: a folder of `.wav` files and a `metadata.json` catalog.
 
-### Sound Browser (Node.js)
+### Sound Browser
 
 ```bash
 # Install dependencies

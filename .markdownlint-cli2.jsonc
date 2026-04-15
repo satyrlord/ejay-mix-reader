@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/markdownlint-cli2/schema/markdownlint-cli2-config-schema.json",
+  // Treat gitignored paths as out of scope for markdown linting.
+  "gitignore": ".gitignore",
+  // Source archives contain product assets and text resources that should not be parsed as Markdown.
+  "ignores": [
+    "archive/**"
+  ]
+}

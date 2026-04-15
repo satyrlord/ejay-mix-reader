@@ -85,6 +85,7 @@ badges, and waveform tints.
 | Keys / Seq | `#a0c8e8` | `--channel-keys` | Light blue blocks |
 | Guitar | `#a0c8e8` | `--channel-guitar` | Light blue blocks |
 | Scratch | `#e8a0a0` | `--channel-scratch` | Pink/salmon blocks |
+| Sphere | `#59d7ea` | `--channel-sphere` | Bright cyan pad/sphere blocks |
 | Xtra / Hyper | `#b8d8b0` | `--channel-xtra` | Light green blocks |
 | Wave / Groove | `#b8d8b0` | `--channel-wave` | Light green blocks |
 
@@ -118,10 +119,13 @@ Each of the 14 products is displayed as a DaisyUI `card` on the home/browse view
 
 ### Sample Row / Tile
 
-Individual samples are displayed in a list or grid within a product view.
+Individual samples are displayed in a sortable table within a product view.
 
-- Each sample shows: display name, channel badge (colored), beat count, and a
-  play button.
+- Each sample row shows: play button, merged sample name, category badge,
+  beat count, and duration.
+- The merged name uses `<Category> - <Name>` when a category is present.
+- Column headers for `Name`, `Category`, `Beats`, and `Duration` are clickable
+  sort toggles.
 - The play button uses DaisyUI `btn btn-circle btn-sm` with a play/pause icon.
 - Active/playing state highlights the row with `primary` accent.
 - Channel badge color comes from the channel color palette above.
@@ -141,9 +145,14 @@ as the centered play/stop/record bar).
 Mirrors the bottom panel of the original eJay UI where category buttons filter
 the visible sample tiles.
 
-- Channel filter buttons use DaisyUI `btn` with channel-specific accent colors.
+- Category filter buttons use DaisyUI `btn` with category-specific accent
+  colors.
 - Active filter state uses `btn-active` or a filled variant.
-- Sample tiles inside the panel show the display alias and are clickable.
+- The browser uses `Category` as the UI term for sample-group classification.
+  This avoids overloading `channel`, which remains the audio mono/stereo field
+  in sample metadata.
+- Techno eJay 3's `sphere` category uses a dedicated cyan badge color to match
+  the original app's pad/sphere lane.
 
 ### Volume Mixer
 
@@ -158,6 +167,8 @@ Inspired by the 16-channel mixer visible in screenshot 2.
 - The app is a single-page application with a single HTML entry point.
 - Top-level layout: header (product selector / search), main content area
   (sample list/grid), and fixed bottom transport bar.
+- On product pages, the header title switches from the app name to the current
+  product name.
 - Main content scrolls independently; header and transport bar remain fixed.
 - On desktop (≥1024px): sidebar for channel filters + main sample grid.
 - On tablet/mobile (<1024px): channel filters collapse to horizontal scroll
