@@ -1,0 +1,936 @@
+# MIX File Format Analysis & Compatibility Abstraction Layer
+
+Comprehensive reverse-engineering analysis of the `.MIX` project file format used
+by eJay music software (1997–2003). Covers all 14 products across 4 format
+generations, with a proposed abstraction layer for browser-based playback.
+
+## File Inventory
+
+231 `.MIX` files across 14 products. 11 products ship MIX folders directly;
+Dance SuperPack and Generation Pack 1 share mixes with Dance eJay 1 / HipHop 1 /
+Rave eJay respectively.
+
+### Per-Product Listing
+
+| Product | MIX Count | Size Range | Format |
+|---------|-----------|------------|--------|
+| Dance eJay 1 | 4 | 11,234 (all identical) | A |
+| Dance eJay 2 | 13 | 1,553–8,219 | B |
+| Dance eJay 3 | 16 | 2,852–6,362 | C |
+| Dance eJay 4 | 12 (+1 empty) | 5,055–9,924 | C |
+| Dance SuperPack | 16 | 11,234–11,413 | A |
+| Generation Pack 1 (Dance) | 16 | 11,234–11,413 | A |
+| Generation Pack 1 (HipHop) | 17 | 12,692 (all identical) | A |
+| Generation Pack 1 (Rave) | 15 | 11,276–11,326 | A |
+| HipHop eJay 2 | 20 | 1,532–8,841 | B |
+| HipHop eJay 3 | 18 | 3,546–6,865 | C |
+| HipHop eJay 4 | 15 | 14,648–23,721 | D |
+| House eJay | 14 | 11,356–20,694 | D |
+| Rave eJay | 15 | 11,276–11,326 | A |
+| Techno eJay | 13 | 2,144–6,243 | B |
+| Techno eJay 3 | 20 | 3,988–6,232 | C |
+| Xtreme eJay | 4 | 7,960–21,270 | C |
+
+**Note**: `Dance_eJay4/Mix/.mix` is a 2-byte empty file (just `0x00 0x00`).
+Ignore it during parsing.
+
+---
+
+## Format Families
+
+Binary analysis reveals **4 distinct MIX format generations**, identified by the
+uint32 LE value at offset 0x00, file size patterns, and structural markers:
+
+| Family | Gen | Products | App ID (uint32 LE @ 0x00) | Fixed Size? | Text Sections | SKKENNUNG | Mixer State |
+|--------|-----|----------|---------------------------|-------------|---------------|-----------|-------------|
+| **A** | 1 | Dance 1, Rave, HipHop 1, SuperPack, GP1 | `0x0A06`–`0x0A08` | Yes | No | No | None |
+| **B** | 2 | Dance 2, Techno, HipHop 2 | `0x0889`–`0x11E9` | No | Yes | Yes | None |
+| **C** | 3a | Dance 3/4, HipHop 3, Techno 3, Xtreme | `0x2571`–`0x2D41` | No | Yes | Yes | BOOU/DrumEQ/FX text |
+| **D** | 3b | HipHop 4, House | `0x11D6`–`0x15DC` | No | Yes | Yes | Full mixer text |
+
+### Cross-Product Header Table
+
+| Product | App ID | File Size | F04 | BPM1 | BPM2 | SKKENNUNG |
+|---------|--------|-----------|-----|------|------|-----------|
+| Dance 1 | `0x00000A06` | 11,234 | (grid data) | (implicit 140) | — | No |
+| Rave | `0x00000A07` | 11,276 | (grid data) | (implicit 140) | — | No |
+| HipHop 1 | `0x00000A08` | 12,692 | (grid data) | (implicit 90) | — | No |
+| Dance 2 | `0x00000A19` | 6,124 | 219 | 140 | 140 | Yes |
+| Techno | `0x00000889` | 5,224 | 216 | 140 | 140 | Yes |
+| HipHop 2 | `0x000011E9` | 4,784 | 158 | 90 | 94 | Yes |
+| Dance 3 | `0x00002571` | 6,362 | 87 | 140 | 140 | Yes |
+| Dance 4 | `0x00002D41` | 7,578 | 129 | 140 | 140 | Yes |
+| HipHop 3 | `0x00002573` | 4,708 | 110 | 90 | 91 | Yes |
+| HipHop 4 | `0x000015DC` | 17,183 | 139 | 90 | 90 | Yes |
+| House | `0x000011D6` | 11,712 | 79 | 125 | 125 | Yes |
+| Techno 3 | `0x00002572` | 6,232 | 142 | 140 | 140 | Yes |
+| Xtreme | `0x00002964` | 21,270 | 214 | 160 | 160 | Yes |
+
+**BPM note**: HipHop 2 has BPM1=90, BPM2=94; HipHop 3 has BPM1=90, BPM2=91.
+All other products have BPM1 === BPM2. Hypothesis: BPM2 is the user-adjusted
+playback tempo while BPM1 is the original library BPM. Default to BPM1 for
+playback.
+
+---
+
+## Detailed Format Specifications
+
+### Format A — Gen 1 Binary Grid (No Header)
+
+Used by: Dance eJay 1, Rave eJay, Dance SuperPack, Generation Pack 1
+
+```text
+Offset  Size  Field
+------  ----  -----
+0x00    4     App identifier (uint32 LE):
+                0x0A06 = Dance eJay 1 / SuperPack
+                0x0A07 = Rave eJay
+                0x0A08 = HipHop eJay 1
+0x04    ...   Grid data: uint16 LE sample IDs in a fixed-width matrix
+```
+
+#### Grid Structure
+
+- **Row width**: 16 bytes (8 × uint16 LE values per row), confirmed by `0xCF04`
+  spacing analysis showing consistent 16-byte intervals.
+- **Cell values**: uint16 LE sample IDs. `0x0000` = empty cell. Non-zero values
+  are 10-bit to 11-bit sample IDs (range ~700–2000 for Dance, ~800–2000 for Rave).
+- **Grid extent**: Active data ends well before file end. Dance 1 `START.MIX`
+  has last non-zero byte at offset `0x052D` (1325 bytes), with 9,908 bytes of
+  zero padding to fill the fixed file size of 11,234.
+- **Total rows**: ~83 rows of 8 cells = 664 cells (enough for 8 channels × ~83
+  beats, approximately 35 seconds at 140 BPM).
+
+#### Common uint16 Value Histogram (Dance 1 START.MIX)
+
+```text
+0x04CF (1231): 33 occurrences — likely a specific sample (most used)
+0x077F (1919): 15 occurrences
+0x02EA ( 746): 13 occurrences
+0x034B ( 843): 12 occurrences
+0x0359 ( 857): 10 occurrences
+... (49 unique non-zero values total)
+```
+
+#### Product-Specific Grid Dimensions
+
+| Product | File Size | Grid Start | Active Data End | Zero Padding | Implied Grid |
+|---------|-----------|------------|-----------------|--------------|--------------|
+| Dance 1 | 11,234 | 0x04 | ~0x052D | 9,908 bytes | 8 cols × ~83 rows |
+| Rave | 11,276 | 0x04 | varies | varies | 8 cols × ~84 rows |
+| HipHop 1 | 12,692 | 0x04 | varies | varies | 8 cols × ~99 rows |
+
+#### Sample ID Mapping (Unknown — Key Risk)
+
+Gen 1 has no INF catalog. Sample IDs in the grid must map to PXD files in the
+bank directories (AA, AB, ..., BW). Hypothesized encoding:
+
+```text
+sample_id = bank_index × bank_size + file_index_within_bank
+```
+
+Where `bank_index` maps alphabetically (AA=0, AB=1, ..., BW=~75) and
+`bank_size` is the max files per bank. The Pxddance catalog
+(`Dance_SuperPack/dance/EJAY/Pxddance`) may contain the definitive mapping.
+
+**Validation approach**: Decode START.MIX grid, list all referenced sample IDs,
+then match against known PXD bank contents and the Pxddance catalog to build the
+lookup table.
+
+---
+
+### Format B — Gen 2 Header + Text + Grid
+
+Used by: Dance eJay 2, Techno eJay (Gen 2), HipHop eJay 2
+
+```text
+Offset  Size  Field
+------  ----  -----
+0x00    4     App identifier (uint32 LE)
+0x04    4     Entry count / complexity metric (uint32 LE)
+0x08    2     BPM (uint16 LE) — e.g., 140
+0x0A    2     BPM2 (uint16 LE) — usually equals BPM
+0x0C    2     Unknown (uint16 LE) — always 0x0000
+0x0E    2     Metadata length N (uint16 LE)
+0x10    N     Metadata block (null-terminated strings):
+                - Author name (e.g., "MC Magic")
+                - "#SKKENNUNG#:NNNNNNN" — registration/serial key
+```
+
+After the metadata block, a `0x01` tag byte separates sections.
+
+#### Section 1: Mix Title
+
+```text
+0x10+N  1     Tag: 0x01
+0x11+N  2     Title length (uint16 LE)
+0x13+N  ...   Title string (null-terminated), e.g., "Take me by the Hand"
+0x??    1     Tag: 0x01
+```
+
+#### Section 2: Master Volume Grid
+
+```text
+0x??    2     Padding/flags (0x00 0x00)
+0x??    ...   Array of uint16 LE volume values, one per beat position.
+              Values observed: 0x6800 (26624), 0xB068 (probably normalized).
+              0x0000 marks empty positions.
+              Additional byte flags (0x00, 0x01, 0x02) appear after each uint16,
+              possibly indicating beat emphasis or automation.
+```
+
+#### Section 3: Sample Catalog (Product Packs)
+
+A repeating structure listing available sample libraries:
+
+```text
+For each catalog entry:
+  0x00  2     Padding (0x00 0x00)
+  0x02  2     Name length (uint16 LE)
+  0x04  ...   Product/pack name (null-terminated), e.g., "Dance eJay 2.0"
+  0x??  1     Tag: 0x01
+  0x??  2     Unknown (0x09 0x00)
+  0x??  4     ID range start (uint32 LE), e.g., 0x07D0 = 2000
+  0x??  4     ID range end (uint32 LE), e.g., 0x0D47 = 3399
+```
+
+Known catalog entries from Dance eJay 2 `START.MIX`:
+
+| Pack Name | ID Start | ID End |
+|-----------|----------|--------|
+| Dance eJay 2.0 | 2000 | 3399 |
+| DanceMachine Samples | 3400 | 3899 |
+| DanceMachine Samplekit Vol. 1 Raps & Voices | 3900 | 4475 |
+| DanceMachine Samplekit Vol. 2 Drums & Synthies | 4476 | 5011 |
+| DanceMachine Samplekit Vol. 3 Space Sounds | 5012 | 5787 |
+| Dance eJay Samplekit Vol. 4 House | 5800 | 6499 |
+| Dance eJay Samplekit Vol. 5 Trance | 6500 | 7199 |
+| Dance eJay Samplekit Vol. 6 Latin Dance | 7200 | (end) |
+
+#### Section 4: Track Entries
+
+After the catalog, each placed sample has a variable-length record:
+
+```text
+For each track entry:
+  0x00  2     Tag/flags (includes 0x02 marker)
+  0x02  2     Unknown
+  0x04  1     Tag: 0x01
+  0x05  2     Sample ID (uint16 LE) — matches catalog range
+  0x07  2     Unknown (byte pair)
+  0x09  ...   PXD filename (length-prefixed, null-terminated), e.g., "humn.9"
+  0x??  1     Tag: 0x01
+  0x??  2     Timeline position (int16 LE, beat offset, can be negative)
+  0x??  4     Sample data length (uint32 LE)
+```
+
+Some track entries also contain **ticker text** for the UI's scrolling message
+display, with text labels like "You", "can", "even", "create", "some", "funky",
+"lines", "with", "your", "Groove", "generat", "or  if", "you", "want", "!!!!".
+
+---
+
+### Format C — Gen 3 Early (Mixer State + Text Tracks)
+
+Used by: Dance eJay 3, Dance eJay 4, HipHop eJay 3, Techno eJay 3, Xtreme eJay
+
+```text
+Offset  Size  Field
+------  ----  -----
+0x00    4     App identifier (uint32 LE)
+0x04    4     Entry count / metadata offset (uint32 LE)
+0x08    2     BPM (uint16 LE)
+0x0A    2     BPM2 (uint16 LE)
+0x0C    2     Unknown (uint16 LE) — always 0x0000
+0x0E    2     Metadata length N (uint16 LE)
+0x10    N     Metadata block:
+                - Author name (null-terminated), e.g., "marc", "DJ Emzee",
+                  "eJay rules", or "-" for anonymous
+                - "#SKKENNUNG#:NNNNNNN" — registration key (null-terminated)
+```
+
+After metadata, `0x01` tag then a uint16 LE value followed by the title string
+(null-terminated).
+
+#### Mixer State Section
+
+Immediately after the title, a text-encoded mixer state block begins. The format
+uses `0xB0 0x5F` (`°_`) as field separators:
+
+```text
+<ControlName>#°_#<Value>%°_%
+```
+
+Repeated for all active controls. The `#` characters delimit control name and
+value; `%` terminates each value; `°_` (bytes `0xB0 0x5F`) acts as the
+inter-field separator.
+
+##### Mixer Controls by Product
+
+**Dance eJay 3** (67 unique controls):
+
+```text
+Channel controls (10 channels, 0–9):
+  BOOU1_{0..9}     — Channel volume (balance fader 1)
+  BOOU2_{0..9}     — Channel volume (balance fader 2)
+  DrumEQ{0..9}     — Per-channel EQ level
+
+Master boost:
+  BoostCompressorDrive, BoostCompressorGain, BoostCompressorSpeed
+  BoostEQ_{0..9}   — 10-band master EQ
+  BoostStereoWide  — Stereo spread
+
+Drum effects:
+  DrumEcho, DrumOver (overdrive)
+  DrumK_SFX_ECHOFEEDBACK, DrumK_SFX_ECHOTIME, DrumK_SFX_ECHOVOLUME
+  DrumK_SFX_OVERDRIVE, DrumK_SFX_OVERFILTER
+
+FX send levels (16 slots):
+  FX_{0..15}
+```
+
+**Dance eJay 4** (79 unique controls):
+
+All Dance 3 controls plus:
+
+```text
+  DrumChorus, DrumEchoType, DrumHall
+  DrumK_CHORUSCOLOR, DrumK_CHORUSVOLUME
+  DrumK_MIDSWEEPGAIN, DrumK_MIDSWEEPRANGE, DrumK_MIDSWEEPSPEED
+  DrumK_SFX_REVERBPRE, DrumK_SFX_REVERBTIME, DrumK_SFX_REVERBVOLUME
+  DrumMidsweep
+  DrumU1_{0..9}    — Additional per-channel controls
+```
+
+**HipHop eJay 3** (60 unique controls):
+
+Same as Dance 3, without DrumEcho, DrumOver, and the SFX sub-controls.
+
+**Techno eJay 3** (63 unique controls):
+
+Dance 3 controls plus: `BoostCompressorLED`, `BoostStereoLED`, `BoostEQ`.
+
+**Xtreme eJay** (36 unique controls):
+
+Minimal set: `BOOU1_{0..9}`, `BOOU2_{0..9}`, boost compressor/EQ/stereo,
+plus unique `Style` and `VideoMix` controls.
+
+##### Control Value Encoding
+
+- Numeric values: `50` (default center), `500` (max), `0` (min), `1` (enabled)
+- String values: `passive` (disabled), `active` (enabled)
+- Values represent UI slider positions normalized to product-specific ranges
+
+#### Sample Catalog Section
+
+Same structure as Format B. Lists available sample packs with ID ranges.
+
+Example from Dance 3 `start.mix`:
+
+```text
+"Dance eJay 3.0"      — main library
+"HipHop eJay1"         — cross-product samples
+"HipHop Samplekit Vol. 1 Breakdance"
+"HipHop Samplekit Vol. 2 Unplugged"
+```
+
+**Cross-product references** are common in Gen 3 mixes. The catalog section
+enumerates all products required to fully resolve the mix.
+
+Empty catalog slots use `0x02 0x00 0x00 0x01` (marking unused pack entries).
+
+#### Track Entry Section
+
+Each placed sample is a variable-length record:
+
+```text
+For each track entry:
+  0x00  2     Binary metadata (offset/size related)
+  0x02  2     Tag: 0x01
+  0x04  2     Unknown / record length
+  0x06  4     File offset or ID (uint32 LE)
+  0x0A  2     Unknown
+  0x0C  ...   Display name (length-prefixed, null-terminated), e.g., "kick28"
+  0x??  ...   Padding (null bytes)
+  0x??  4     Sample data size (uint32 LE)
+  0x??  2     Path length (uint16 LE)
+  0x??  ...   Left temp path (null-terminated), e.g., "c:\windows\TEMP\pxd32pd.tmp"
+  0x??  2     Path length (uint16 LE)
+  0x??  ...   Right temp path (null-terminated) — same path for mono, different for stereo
+  0x??  2     Terminator: 0xFFFF
+  0x??  ...   Padding / additional metadata
+```
+
+The temp file paths (`c:\windows\TEMP\pxd32p{x}.tmp`) are artifacts of the
+original eJay application's runtime — it decompressed PXD samples to temp WAV
+files during session load. The alphabetical suffix (`d`, `e`, `f`, ...) indicates
+the loading order, not a persistent identifier.
+
+---
+
+### Format D — Gen 3 Late (Full Mixer + Drum Machine)
+
+Used by: HipHop eJay 4, House eJay
+
+Same header structure as Format C, but with a dramatically expanded mixer state
+and integrated drum machine parameters.
+
+#### Mixer State — Extended
+
+**HipHop eJay 4** (503 unique controls):
+
+```text
+Per-track mixer (49 tracks):
+  MixVolume{1..49}    — Track volume
+  MixPan{1..49}       — Track pan
+  MixMute{1..49}      — Track mute (boolean)
+  MixSolo{1..49}      — Track solo (boolean)
+  MixRec{1..49}       — Track record-arm (boolean)
+
+Drum machine (16 pads):
+  DrumName{1..16}     — Pad sample name (string)
+  DrumNummer{1..16}   — Pad number/ID
+  DrumVolume{1..16}   — Pad volume
+  DrumPan{1..16}      — Pad pan (note: DrumPan1 is implicit/absent)
+  DrumPitch{1..16}    — Pad pitch shift
+  DrumReverse{1..16}  — Pad reverse playback (boolean)
+  DrumFX{1..16}       — Pad FX assignment ("passive" or FX name)
+
+Drum effects chain:
+  DRUMchoDri, DRUMchoLED, DRUMchoSpe              — Chorus
+  DRUMech{1,2,3,5}, DRUMechFee, DRUMechLED,
+    DRUMechTim, DRUMechVie, DRUMechVol             — Echo/delay
+  DRUMequ{1,2,3}, DRUMequLED, DRUMequU1, DRUMequU2 — EQ
+  DRUMmidLED, DRUMmidMod, DRUMmidRes, DRUMmidSpe  — Mid-sweep
+  DRUMoveDri, DRUMoveFil, DRUMoveLED               — Overdrive
+  DRUMrev{1..5}, DRUMrevLED, DRUMrevPre,
+    DRUMrevtim, DRUMrevVol                          — Reverb
+  DRUMvolume                                        — Drum master volume
+
+FX chain (same params as drum, with FX prefix):
+  FXchoDri, FXchoLED, FXchoSpe                     — Chorus
+  FXech{1,2,3,5}, FXechFee, FXechLED, FXechTim,
+    FXechVie, FXechVol                              — Echo
+  FXequ{1,2,3}, FXequLED, FXequU1, FXequU2         — EQ
+  FXharLED, FXhar{M5,M8,P4,P5,P8}                  — Harmonizer
+  FXmidLED, FXmidMod, FXmidRes, FXmidSpe           — Mid-sweep
+  FXorgGro, FXorgNam, FXorgSam                      — Organ/groove
+  FXoveDri, FXoveFil, FXoveLED                      — Overdrive
+  FXrev{1..5}, FXrevLED, FXrevPre, FXrevtim, FXrevVol — Reverb
+  FXsemiTones                                        — Pitch transpose
+  FXtraLED, FXtraPit                                 — Transposer
+  FXvocCon, FXvocLED, FXvocTon                       — Vocoder
+  FXvolume                                           — FX master volume
+  FXcarNam, FXcarSam                                 — Carrier sample
+
+Master boost:
+  BO_COMP_DRIVE_SCROLL, BO_COMP_GAIN_SCROLL,
+    BO_COMP_LED, BO_COMP_SPEED_SCROLL               — Compressor
+  BO_Equalizer{0..9}                                 — 10-band EQ
+  BO_EQUALIZER_{1,2,3}, BO_EQUALIZER_LED,
+    BO_EQUALIZER_USER_{EINS,ZWEI}, BO_EinsEQvalue,
+    BO_ZweiEQvalue                                   — EQ presets
+  BO_STEREOWIDE_LED, BO_STEREOWIDE_SPREAD_SCROLL     — Stereo
+  BOcom{Dri,Gai,LED,Spe}, BOequ{1,2,3,LED,U1,U2},
+    BOste{LED,Spr}                                   — Short aliases
+
+  DP_Equalizer{0..9}                                 — Display EQ
+
+Globals:
+  MainPitch, MA_PITCH                                — Master pitch
+  LastButton, LastSpecial                             — UI state
+```
+
+**House eJay** (311 unique controls):
+
+Same structure as HipHop 4 but with 25 mixer tracks (MixVolume{1..25}) and
+10 drum pads instead of 16. Also includes `DM_METRONOME` control and
+`FX_ZweiEQvalue`.
+
+#### Track Entries — Extended
+
+Format D track entries are similar to Format C, but each sample placement
+includes drum machine per-pad state:
+
+```text
+  DrumPan1#°_#50%°_%
+  DrumVolume1#°_#500%°_%
+  DrumPitch1#°_#0%°_%
+  DrumFX1#°_#passive%°_%
+  DrumReverse1#°_#passive%°_%
+  DRUMchoLED#°_#passive%°_%
+  ...
+```
+
+This means each mix file snapshot captures the complete drum machine kit
+configuration, not just the timeline placement.
+
+---
+
+## Sample Reference Resolution
+
+### Resolution Chain
+
+```text
+MIX file sample ref → match method → metadata.json → output/*.wav
+```
+
+The match method varies by format:
+
+| Format | Primary Reference | Match Strategy |
+|--------|-------------------|----------------|
+| A | uint16 sample ID | Map via Gen 1 bank directory structure + Pxddance catalog |
+| B | PXD filename string | Match against `metadata.json[].id` or filename |
+| C | Display name string | Match against `metadata.json[].alias` |
+| D | Display name string | Match against `metadata.json[].alias` |
+
+### Cross-Product Sample Libraries
+
+Gen 2/3 MIX files can reference samples from multiple products. The catalog
+section enumerates which products are needed:
+
+**Dance eJay 2 `START.MIX` catalogs:**
+
+- Dance eJay 2.0 (main library, IDs 2000–3399)
+- DanceMachine Samples (IDs 3400–3899)
+- DanceMachine Samplekit Vol. 1–3
+- Dance eJay Samplekit Vol. 4–6
+
+**Dance eJay 3 `minimalist.mix` catalogs:**
+
+- Dance eJay 3.0 (main library)
+- HipHop eJay1
+- HipHop Samplekit Vol. 1 Breakdance
+- HipHop Samplekit Vol. 2 Unplugged
+
+**Resolution strategy**: Search across all `output/*/metadata.json` files,
+keyed by the product name listed in the catalog, then by display name or
+internal filename within that product's metadata.
+
+### Gen 1 Sample ID Mapping (Unresolved)
+
+Gen 1 files use raw uint16 IDs with no accompanying text. The mapping from
+these IDs to PXD bank/file positions requires:
+
+1. Enumerate all PXD files in each bank directory (AA→BW) for Dance 1
+2. Build an ordered list: `bank_index × files_per_bank + file_index = sample_id`
+3. Validate against the Pxddance binary catalog which maps bank/position to
+   category and alias names
+4. Cross-reference with known demo mix content (e.g., the "WELCOME" mix ships
+   with every product and should produce recognizable audio)
+
+---
+
+## Channel/Track Layout per Product
+
+Derived from `seiten` application config files:
+
+### Soundgruppe Tab Mapping (from seiten)
+
+**Dance eJay 2** (12 channels):
+
+```text
+01: loop       05: sequence    09: effect
+02: drum       06: layer       10: xtra
+03: bass       07: rap         11: groove
+04: guitar     08: voice       12: wave
+```
+
+**Dance eJay 3** (13 channels):
+
+```text
+01: loop       05: sequence    09: effect     13: (OnOff button)
+02: drum       06: groove      10: xtra
+03: bass       07: rap         11: layer
+04: guitar     08: voice       12: wave
+```
+
+**Dance eJay 4**: Same as Dance 3
+
+**HipHop eJay 2** (10 channels):
+
+```text
+01: loop       04: guitar      07: scratch     10: xtra
+02: drum       05: sequence    08: voice
+03: bass       06: layer       09: effect
+```
+
+**HipHop eJay 3**: Same layout as Dance 3 with scratch track support
+
+**Techno eJay 3** (10 channels via seiten):
+
+```text
+01: loop       04: keys        07: effect     10: wave
+02: drum       05: sphere      08: xtra
+03: bass       06: voice       09: hyper
+```
+
+**Xtreme eJay**: Uses a different seiten structure (`:Soundgruppen` + `EJAY00`),
+with `G_PREVIEW` and `B_FULLSCREEN` controls. Channel layout from INF: Loop,
+Drum, Bass, Guitar, Seq, Voice, Effect, Xtra.
+
+### Mixer Track Counts (from control analysis)
+
+| Product | Mixer Tracks | Drum Pads | FX Slots | Control Naming |
+|---------|-------------|-----------|----------|----------------|
+| Dance 3 | 10 (BOOU) | 0 | 16 (FX_) | BOOU1/2_{N}, DrumEQ{N} |
+| Dance 4 | 10 (BOOU) | 0 | 5 (FX_) | BOOU1/2_{N}, DrumEQ{N}, DrumU1_{N} |
+| HipHop 3 | 10 (BOOU) | 0 | 16 (FX_) | BOOU1/2_{N}, DrumEQ{N} |
+| HipHop 4 | 49 (MixVolume) | 16 (DrumName) | Full chain | MixVolume{N}, DrumName{N} |
+| House | 25 (MixVolume) | 10 (DrumName) | Full chain | MixVolume{N}, DrumName{N} |
+| Techno 3 | 10 (BOOU) | 0 | 16 (FX_) | BOOU1/2_{N}, DrumEQ{N} |
+| Xtreme | 10 (BOOU) | 0 | 0 | BOOU1/2_{N} only |
+
+---
+
+## Format Auto-Detection Algorithm
+
+```text
+read uint32 LE at offset 0 → app_id
+
+if app_id in [0x0A06, 0x0A07, 0x0A08]:
+    return Format A
+
+if file contains "#SKKENNUNG#":
+    if file contains "MixVolume" or "DrumPan":
+        return Format D
+    elif file contains "BOOU" or "DrumEQ":
+        return Format C
+    else:
+        return Format B
+
+return UNKNOWN
+```
+
+This is O(1) for the initial check and O(n) for the string scan fallback.
+In practice, a single `indexOf` on the first ~200 bytes for `SKKENNUNG` and
+the first ~1000 bytes for `MixVolume`/`BOOU` suffices.
+
+---
+
+## Proposed Compatibility Abstraction Layer
+
+### Architecture Overview
+
+```text
+┌────────────────┐     ┌──────────────┐     ┌─────────────┐
+│  Format A/B/C/D │ ──► │  MIX Parser  │ ──► │   MixIR     │
+│  .mix binary    │     │  (per-format)│     │  (unified)  │
+└────────────────┘     └──────────────┘     └──────┬──────┘
+                                                    │
+                       ┌──────────────┐             │
+                       │ Sample Index │◄────────────┘
+                       │ (data/index  │  resolve sample refs
+                       │  .json +     │  to output WAV paths
+                       │ metadata.json│
+                       └──────────────┘
+                                │
+                       ┌────────▼────────┐
+                       │  Web Audio API  │
+                       │  Playback Engine│
+                       └─────────────────┘
+```
+
+### MixIR Schema (TypeScript)
+
+```typescript
+interface MixIR {
+  format: 'A' | 'B' | 'C' | 'D';
+  product: string;                    // e.g., "Dance_eJay2"
+  appId: number;                      // uint32 from offset 0x00
+  bpm: number;                        // beats per minute
+  bpmAdjusted: number | null;         // BPM2 if different from BPM
+  author: string | null;              // null for Format A
+  title: string | null;               // null for Format A
+  registration: string | null;        // SKKENNUNG key
+
+  tracks: TrackPlacement[];           // all sample placements on the timeline
+  mixer: MixerState;                  // normalized mixer settings
+  drumMachine: DrumMachineState | null; // only Format D
+  tickerText: string[];               // scrolling text messages (Format B only)
+  catalogs: CatalogEntry[];           // referenced sample packs
+}
+
+interface CatalogEntry {
+  name: string;                       // e.g., "Dance eJay 2.0"
+  idRangeStart: number;               // first sample ID in this pack
+  idRangeEnd: number;                 // last sample ID in this pack
+}
+
+interface TrackPlacement {
+  beat: number;                       // timeline position (0-indexed beat)
+  channel: number;                    // track/row index (0-indexed)
+  sampleRef: SampleRef;               // resolved sample reference
+  volume: number;                     // 0.0–1.0 normalized
+  pan: number;                        // -1.0 (L) to 1.0 (R)
+  muted: boolean;
+}
+
+interface SampleRef {
+  rawId: number;                      // original uint16 from the grid
+  internalName: string | null;        // PXD filename (e.g., "D5MA060")
+  displayName: string | null;         // human name (e.g., "kick28")
+  resolvedPath: string | null;        // output WAV path or null if unmapped
+  product: string;                    // which product's sample library
+  category: string | null;            // channel/category (e.g., "drum")
+}
+
+interface MixerState {
+  masterVolume: number;
+  channels: ChannelState[];           // per-track mixer state
+  eq: number[];                       // 10-band master EQ (0–100 per band)
+  compressor: CompressorState | null;
+  stereoWide: number | null;          // stereo spread (0–100)
+}
+
+interface ChannelState {
+  index: number;
+  volume: number;                     // normalized 0.0–1.0
+  pan: number;                        // -1.0 to 1.0
+  eq: number;                         // per-channel EQ level
+  muted: boolean;
+  solo: boolean;
+}
+
+interface CompressorState {
+  drive: number;
+  gain: number;
+  speed: number;
+  enabled: boolean;
+}
+
+interface DrumMachineState {
+  pads: DrumPad[];                    // 10 (House) or 16 (HipHop 4) pads
+  effects: DrumEffectsChain;
+  masterVolume: number;
+}
+
+interface DrumPad {
+  index: number;                      // 1-based pad number
+  name: string;                       // display name
+  sampleRef: SampleRef | null;
+  volume: number;                     // 0–1000 → normalized 0.0–1.0
+  pan: number;                        // 0–100 → -1.0 to 1.0
+  pitch: number;                      // semitone offset
+  reversed: boolean;
+  fx: string;                         // "passive" or FX routing name
+}
+
+interface DrumEffectsChain {
+  chorus: { drive: number; speed: number; enabled: boolean };
+  echo: {
+    time: number; feedback: number; volume: number;
+    type: number; enabled: boolean;
+  };
+  eq: { low: number; mid: number; high: number; enabled: boolean };
+  midsweep: { modulation: number; resonance: number; speed: number; enabled: boolean };
+  overdrive: { drive: number; filter: number; enabled: boolean };
+  reverb: {
+    preDelay: number; time: number; volume: number;
+    type: number; enabled: boolean;
+  };
+}
+```
+
+### Implementation Plan — 3 Phases
+
+#### Phase 1: Format Parsers (`tools/mix-parser.ts`)
+
+One parser function per format family, all emitting `MixIR`:
+
+| Parser | Input | Key Challenge | Approach |
+|--------|-------|---------------|----------|
+| `parseFormatA(buf, productHint)` | Gen 1 binary grid | Grid dimensions unknown, sample ID mapping undocumented | Determine grid width empirically (8 uint16/row = 16 bytes). Build ID→WAV lookup from Gen 1 PXD bank directory listing. Product hint needed for implicit BPM. |
+| `parseFormatB(buf)` | Gen 2 header + text + grid | Variable-length records with embedded PXD filenames | Parse header, iterate catalog by `0x01` tags, parse track records using known string-length patterns. |
+| `parseFormatC(buf)` | Gen 3 early: header + mixer + tracks | BOOU/DrumEQ mixer state text encoding | Parse `#°_#...%°_%` key-value pairs. Track entries follow same pattern as B but with display names + temp paths. |
+| `parseFormatD(buf)` | Gen 3 late: header + mixer + drum + tracks | Complex drum machine state, 49-track mixer | Same key-value parser as C, extended with DrumName/DrumPitch/MixVolume/MixPan/MixMute/MixSolo arrays. |
+
+#### Phase 2: Sample Resolution Layer (`tools/mix-resolver.ts` / `src/mix-resolver.ts`)
+
+Maps `SampleRef` fields to actual output WAV files:
+
+1. **Gen 1 ID→WAV mapping**: Build a lookup table from PXD bank directories.
+   Each bank directory (AA, AB, ..., BW) contains numbered PXD files. The
+   uint16 sample ID encodes `(bank_index × bank_size + file_index)`. Validate
+   against the Pxddance catalog and known demo mix content.
+
+2. **Gen 2 name→WAV mapping**: Each track entry contains a PXD filename (e.g.,
+   `humn.9`) or display name. Match against `metadata.json[].id` field.
+
+3. **Gen 3 name→WAV mapping**: Track entries contain display names (e.g.,
+   `kick28`) that match INF `display_alias`. Resolve via each product's
+   `metadata.json[].alias`.
+
+4. **Cross-product resolution**: Catalog sections enumerate required products.
+   Search across all `output/*/metadata.json` using the existing
+   `data/index.json` as a unified index.
+
+#### Phase 3: Browser Playback Engine (`src/mix-player.ts`)
+
+Uses the Web Audio API for real-time mix playback:
+
+1. **Sample loading**: Preload all referenced WAVs from `output/` as
+   `AudioBuffer`s using `fetch()` + `AudioContext.decodeAudioData()`. Only
+   load samples listed in `MixIR.tracks` and `MixIR.drumMachine.pads`.
+
+2. **Timeline scheduling**: Use `AudioContext.currentTime` with
+   `AudioBufferSourceNode.start(when)` for sample-accurate beat scheduling.
+   Beat timing: `beatDuration = 60 / MixIR.bpm` seconds.
+
+3. **Mixer routing**: Per-channel audio graph:
+
+   ```text
+   AudioBufferSourceNode
+     → GainNode (volume)
+     → StereoPannerNode (pan)
+     → masterGain
+     → AudioContext.destination
+   ```
+
+   Apply mute via gain=0, solo by muting all non-solo tracks.
+
+4. **Drum machine** (Format D only): Trigger drum pad samples at scheduled
+   beats with per-pad pitch shift (via `playbackRate`), reverse (pre-reversed
+   `AudioBuffer`), and FX routing.
+
+5. **Effects chain** (progressive enhancement):
+
+   | Effect | Web Audio Node | Complexity |
+   |--------|---------------|------------|
+   | EQ | `BiquadFilterNode` bank (10 bands) | Medium |
+   | Compressor | `DynamicsCompressorNode` | Low |
+   | Echo/Delay | `DelayNode` + `GainNode` feedback | Medium |
+   | Reverb | `ConvolverNode` with synthetic IR | Medium |
+   | Chorus | `OscillatorNode` → `DelayNode` modulation | High |
+   | Overdrive | `WaveShaperNode` + `BiquadFilterNode` | Medium |
+   | Harmonizer | Pitch-shifted parallel `AudioBufferSourceNode`s | High |
+   | Vocoder | `AnalyserNode` + filter bank | Very High |
+
+### Feature Priority Matrix
+
+| Feature | Priority | Complexity | Impact | Formats |
+|---------|----------|------------|--------|---------|
+| Sample placement on timeline | **P0** | Medium | Core playback | All |
+| BPM-accurate timing | **P0** | Low | Core playback | All |
+| Format auto-detection | **P0** | Low | Required for parsing | All |
+| Per-channel volume | **P1** | Low | Mix balance | B/C/D |
+| Per-channel pan | **P1** | Low | Stereo image | C/D |
+| Mute/Solo | **P2** | Low | Interactive control | D |
+| Play/Pause/Seek transport | **P2** | Medium | UX essential | All |
+| Waveform visualization | **P2** | Medium | Visual feedback | All |
+| Master EQ | **P3** | Medium | Tonal color | C/D |
+| Drum machine pads | **P3** | Medium | HipHop4/House only | D |
+| Echo/Delay | **P4** | Medium | Optional effect | C/D |
+| Compressor | **P4** | Low | Web Audio built-in | C/D |
+| Reverb | **P4** | Medium | Spatial effect | D |
+| Chorus | **P5** | High | Rare effect | D |
+| Overdrive | **P5** | Medium | Distortion effect | C/D |
+| Mid-sweep filter | **P5** | High | Modulation effect | D |
+| Harmonizer/Vocoder | **P6** | Very High | Exotic, rare | D |
+
+### Degradation Strategy
+
+When effects or mixer parameters cannot be reproduced:
+
+1. **Ignore gracefully** — omit the effect, play samples dry
+2. **Log a warning** — note which controls were skipped for diagnostics
+3. **Approximate** — use the closest available Web Audio node
+4. **Never crash** — unknown control names are ignored, not errors
+
+---
+
+## Key Risks & Unknowns
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Gen 1 sample ID→WAV mapping is unverified | **High** | Start with Dance 1 START.MIX: decode grid IDs, compare against PXD bank contents. Cross-reference with Pxddance catalog. Build/test incrementally. |
+| Grid dimensions for Format A are empirical | **Medium** | Validated 16-byte row spacing via CF04 pattern analysis. Need to verify total columns and row count against known song lengths (Dance 1 demo = ~35 sec at 140 BPM). |
+| Gen 2 track record format has variable-length fields | **Medium** | Parse opportunistically using `0x01` tags and string length prefixes. Use STEP.MIX (1,553 bytes, smallest file) as the reference implementation. |
+| Cross-product sample resolution may require fuzzy matching | **Low** | Catalog sections enumerate required products. Start with exact-match by display name. Fall back to substring/Levenshtein if needed. |
+| BPM2 field differs from BPM in HipHop 2/3 | **Low** | Investigate whether BPM2 is user-adjusted tempo. Default to BPM1 for playback; expose both in MixIR. |
+| Ticker text (Format B) has no audio equivalent | **Low** | Preserve in MixIR for display purposes. Render as subtitle overlay in the UI. |
+| SuperPack Gen 1+ files may have extended grid | **Low** | Dream.mix (11,413 bytes) is 179 bytes larger than START.MIX (11,234). Tail contains catalog strings. May indicate a Format A variant with appended catalog. |
+| Empty .mix file in Dance 4 | **None** | Skip 2-byte files during parsing. |
+
+---
+
+## File Touchpoints for Implementation
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `tools/mix-parser.ts` | **New** | Format A/B/C/D binary parsers → MixIR |
+| `tools/mix-resolver.ts` | **New** | Sample ID/name → output WAV resolution |
+| `src/mix-player.ts` | **New** | Web Audio API playback engine |
+| `src/data.ts` | **Extend** | Add MIX file listing to data loading |
+| `data/index.json` | **Extend** | Include mix file inventory per product |
+| `scripts/build-index.ts` | **Extend** | Scan archive MIX folders during build |
+| `docs/file-formats.md` | **Extend** | Add MIX format section to existing doc |
+| `vite.config.ts` | **Extend** | Include mix-player.ts in browser build |
+| `.nycrc.json` | **Extend** | Add mix-player.ts to coverage includes |
+| `tsconfig.browser.json` | **Extend** | Add mix-player.ts to browser type-checking |
+| `tools/__tests__/mix-parser.test.ts` | **New** | Unit tests for each format parser |
+| `tests/mix-playback.spec.ts` | **New** | Playwright tests for browser playback |
+
+---
+
+## Raw Hex Samples (Reference)
+
+### Format A — Dance eJay 1 `START.MIX` (first 256 bytes)
+
+```text
+0000: 06 0A 00 00 A2 04 CF 04 00 00 00 00 00 00 00 00
+0010: 00 00 00 00 00 00 CF 04 00 00 00 00 00 00 00 00
+0020: 00 00 00 00 00 00 CF 04 7F 07 00 00 00 00 CD 03
+0030: CE 03 00 00 00 00 CF 04 00 00 00 00 00 00 00 00
+0040: 00 00 00 00 00 00 CF 04 7F 07 00 00 00 00 00 00
+0050: 00 00 00 00 00 00 CF 04 00 00 00 00 00 00 00 00
+0060: 00 00 41 03 00 00 CF 04 7F 07 00 00 00 00 00 00
+0070: 00 00 00 00 00 00 CF 04 00 00 00 00 00 00 00 00
+0080: 00 00 41 03 00 00 CF 04 7F 07 00 00 7F 04 00 00
+0090: 00 00 00 00 00 00 CF 04 00 00 00 00 00 00 00 00
+00A0: 00 00 41 03 47 03 CF 04 7F 07 BF 06 00 00 CD 03
+00B0: CE 03 00 00 00 00 CF 04 00 00 00 00 00 00 00 00
+00C0: 00 00 41 03 47 03 CF 04 7F 07 C0 06 00 00 00 00
+00D0: 00 00 00 00 00 00 CF 04 00 00 00 00 00 00 00 00
+00E0: 00 00 41 03 47 03 CF 04 7F 07 BF 06 00 00 00 00
+00F0: 00 00 00 00 00 00 CF 04 00 00 00 00 00 00 00 00
+```
+
+### Format B — Dance eJay 2 `STEP.MIX` (first 128 bytes)
+
+```text
+0000: 19 0A 00 00 1B 00 00 00 8C 00 8C 00 00 00 1E 00  ................
+0010: 4D 43 20 4D 61 67 69 63 00 23 53 4B 4B 45 4E 4E  MC Magic.#SKKENN
+0020: 55 4E 47 23 3A 30 30 30 30 30 30 30 00 01 0C 00  UNG#:0000000....
+0030: 44 75 63 6B 20 44 61 6E 63 65 00 01 00 00 E3 58  Duck Dance.....X
+0040: 00 00 B0 68 00 00 B0 68 00 00 B0 68 00 00 B0 68  ...h...h...h...h
+0050: 00 00 B0 68 00 00 B0 68 00 00 B0 68 00 00 B0 68  ...h...h...h...h
+0060: 00 00 B0 68 01 00 B0 68 02 00 B0 68 01 00 B0 68  ...h...h...h...h
+0070: 02 00 B0 68 01 00 B0 68 02 00 B0 68 00 00 00 00  ...h...h...h....
+```
+
+### Format C — Dance eJay 3 `start.mix` (first 128 bytes)
+
+```text
+0000: 71 25 00 00 57 00 00 00 8C 00 8C 00 00 00 1A 00  q%..W...........
+0010: 6D 61 72 63 00 23 53 4B 4B 45 4E 4E 55 4E 47 23  marc.#SKKENNUNG#
+0020: 3A 30 30 30 30 30 30 30 00 01 FB 04 44 61 6E 63  :0000000....Danc
+0030: 65 20 65 4A 61 79 20 33 20 44 65 6D 6F 20 4D 69  e eJay 3 Demo Mi
+0040: 78 00 42 4F 4F 55 23 B0 5F 23 31 25 B0 5F 25 42  x.BOOU#._#1%._%B
+0050: 4F 4F 55 31 5F 30 23 B0 5F 23 35 30 25 B0 5F 25  OOU1_0#._#50%._%
+0060: 42 4F 4F 55 32 5F 30 23 B0 5F 23 35 30 25 B0 5F  BOOU2_0#._#50%._
+0070: 25 44 72 75 6D 45 51 30 23 B0 5F 23 35 30 25 B0  %DrumEQ0#._#50%.
+```
+
+### Format D — HipHop eJay 4 `start.mix` (first 128 bytes)
+
+```text
+0000: DC 15 00 00 8B 00 00 00 5A 00 5A 00 00 00 26 00  ........Z.Z...&.
+0010: 6C 61 62 6F 72 64 61 2D 67 6F 6E 7A 61 6C 65 73  laborda-gonzales
+0020: 00 23 53 4B 4B 45 4E 4E 55 4E 47 23 3A 30 30 30  .#SKKENNUNG#:000
+0030: 30 30 30 30 00 01 0E 2E 6E 6F 74 68 69 6E 67 62  0000....nothingb
+0040: 75 74 43 52 41 50 00 44 72 75 6D 50 61 6E 31 23  utCRAP.DrumPan1#
+0050: B0 5F 23 35 30 25 B0 5F 25 44 72 75 6D 56 6F 6C  ._#50%._%DrumVol
+0060: 75 6D 65 31 23 B0 5F 23 35 30 30 25 B0 5F 25 44  ume1#._#500%._%D
+0070: 72 75 6D 50 69 74 63 68 31 23 B0 5F 23 30 25 B0  rumPitch1#._#0%.
+```
