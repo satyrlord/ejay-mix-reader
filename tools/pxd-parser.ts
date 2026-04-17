@@ -559,6 +559,14 @@ export function extractIndividualPxds(
       uniqueFiles.push(p);
     }
   }
+  // Also pick up stand-alone WAV files (e.g. eJay Studio sample libraries)
+  for (const p of globFiles(source, ".wav")) {
+    const key = p.toLowerCase();
+    if (!seenPaths.has(key)) {
+      seenPaths.add(key);
+      uniqueFiles.push(p);
+    }
+  }
 
   let decodedCount = 0;
   let wavCount = 0;
@@ -582,6 +590,7 @@ export function extractIndividualPxds(
         filename: wavName,
         source: relPath,
         bank,
+        alias: stem,
         format: "wav",
       });
       continue;

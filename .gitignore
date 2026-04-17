@@ -20,22 +20,18 @@ output/
 *.exe
 *.dll
 *.csv
-
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-.venv/
-*.egg-info/
+*.log
 
 # Node.js
 node_modules/
 dist/
 data/
 coverage/
+coverage-unit/
 .nyc_output/
 playwright-report/
 test-results/
+.tmp/
 
 # VS Code workspace settings
 .vscode/

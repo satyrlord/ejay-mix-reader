@@ -4,9 +4,16 @@ Detailed technical documentation for the proprietary audio formats used by
 eJay music software. See [copilot-instructions.md](../.github/copilot-instructions.md)
 for build instructions and project conventions.
 
+Detailed `.mix` reverse-engineering, format-family layouts, and playback
+planning live in [mix-format-analysis.md](mix-format-analysis.md) and
+[mix-player-prerequisites.md](mix-player-prerequisites.md). This document is
+limited to the sample/archive formats and supporting catalogs they depend on.
+
 ## Products (14 titles)
 
-All source data lives under `archive/` (read-only).
+All source data lives under `archive/` (read-only). The 14 product folders
+below sit alongside an auxiliary `_userdata/` tree of unsorted/imported
+material that is not itself a shipped eJay title.
 
 | # | Product | Folder | Genre | Gen | Sample Formats | Catalog File(s) |
 |---|---------|--------|-------|-----|----------------|-----------------|
@@ -14,8 +21,8 @@ All source data lives under `archive/` (read-only).
 | 2 | Dance eJay 2 | `Dance_eJay2` | Dance | 2 | Individual PXD + packed archive | `DANCE20.INF`, `DANCESK4-6.INF` |
 | 3 | Dance eJay 3 | `Dance_eJay3` | Dance | 3 | Packed archive | `dance30.inf` |
 | 4 | Dance eJay 4 | `Dance_eJay4` | Dance | 3 | Packed archive | `DANCE40.inf` |
-| 5 | Dance SuperPack | `Dance_SuperPack` | Dance | 1+ | Individual PXD + WAV | — |
-| 6 | Generation Pack 1 | `GenerationPack1` | Multi | 1 | PXD banks (Dance/Rave) + WAV | — |
+| 5 | Dance SuperPack | `Dance_SuperPack` | Dance | 1+ | Individual PXD + WAV + bundled sample-kit content | — |
+| 6 | Generation Pack 1 | `GenerationPack1` | Multi | 1 | PXD banks (Dance/Rave/HipHop) + WAV bonus folders | — |
 | 7 | HipHop eJay 2 | `HipHop 2` | HipHop | 2 | Packed archive | `HipHop20.inf` |
 | 8 | HipHop eJay 3 | `HipHop 3` | HipHop | 3 | Packed archive | `hiphop30.inf` |
 | 9 | HipHop eJay 4 | `HipHop 4` | HipHop | 3 | Packed archive + WAV | `HipHop40.inf` |
@@ -70,8 +77,8 @@ tsx tools/pxd-parser.ts path/to/file.pxd --output output/test
 | `.PXD` | ~10,623 | PXD-compressed audio samples (or plain WAV disguised as PXD) |
 | (no ext) | ~4,063 | Packed sample archives, config files, etc. |
 | `.WAV` | ~525 | Standard WAV audio (SuperPack Special, GP1 Special, later products) |
-| `.MIX` | ~231 | eJay project/mix files |
-| `.INF` | ~15 | Sample catalog files — text format (excluding DirectX INFs) |
+| `.MIX` | ~231 | eJay project/mix files; see [mix-format-analysis.md](mix-format-analysis.md) |
+| `.INF` | 13 | Sample catalog files — text format (excluding DirectX INFs) |
 
 ## PXD Format (Decoded)
 
@@ -184,8 +191,8 @@ Verified by cross-referencing with the `seiten` application config file (see
 Xtreme eJay: `1`=Loop, `2`=Drum, `3`=Bass, `4`=Guitar, `5`=Sequence,
 `8`=Voice, `9`=Effect, `10`=Xtra.
 
-**Sample catalog INF files** (not the DirectX-related INFs shipped with the
-app):
+**Sample catalog INF files** (13 files currently present; not the
+DirectX-related INFs shipped with the app):
 
 | Product | INF Path | Packed Archive |
 |---------|----------|----------------|
@@ -255,40 +262,177 @@ as a 2–3 letter sub-code:
 Product-specific codes are handled by dedicated regex+map in
 `tools/reorganize.ts`.
 
-## Pxddance Catalog Format (Gen 1 Enrichment)
+## Gen 1 Sample-ID Catalogs (`MAX`, `Pxddance`, `PXD.TXT`)
 
-Binary catalog files (e.g., `Dance_SuperPack/dance/EJAY/Pxddance`) map Gen 1
-bank/file positions to human-readable category names and aliases. Used with
-`--catalog` flag for category enrichment during extraction.
+Gen 1 products (Dance eJay 1, Dance SuperPack, Rave eJay, GenerationPack 1 —
+Dance / Rave / HipHop) store the authoritative `uint16 sample_id → pxd_path`
+mapping used by `.mix` files in a plain-text catalog called **`MAX`**
+(`MAX.TXT` on Dance eJay 1). **Line number N = sample ID N** — there is no
+`bank_index × bank_size + file_index` formula; the table is a direct lookup.
+
+This section documents the catalog files themselves. For the verified Gen 1
+`.mix` grid layout, trailer structure, overflow handling, and resolver
+follow-ups, use [mix-format-analysis.md](mix-format-analysis.md) and
+[mix-player-prerequisites.md](mix-player-prerequisites.md) as the source of
+truth.
+
+### MAX / MAX.TXT Layout
+
+One record per line; two on-disk dialects:
+
+| Dialect | Products | Example line |
+|---------|----------|--------------|
+| Quoted (CRLF) | Dance eJay 1, Dance SuperPack, GP1-Dance | `"ba\aaaf.pxd"\r\n` |
+| Unquoted (CRLF) | Rave eJay, GP1-Rave, GP1-HipHop | `ba\r1da006.pxd\r\n` |
+
+Empty slots in the quoted dialect appear as `""`. All paths are relative to
+the product's `dance/` or `RAVE/` or `HIPHOP/` sample root and may contain
+multiple path segments (e.g. `dmkit2\04\fx316.pxd`).
+
+### MAX Catalog Sizes (verified)
+
+| Product | MAX path | IDs | Populated |
+|---------|----------|----:|----------:|
+| Dance eJay 1 | `dance/DMACHINE/MAX.TXT` | 1,352 | 1,352 |
+| Dance SuperPack | `dance/EJAY/MAX` | 2,845 | 2,845 |
+| GP1-Dance | `Dance/dance/EJAY/MAX` | 2,845 | 2,845 |
+| Rave eJay | `RAVE/EJAY/MAX` | 3,146 | 3,145 |
+| GP1-Rave | `Rave/RAVE/EJAY/MAX` | 3,146 | 3,145 |
+| GP1-HipHop | `HipHop/HIPHOP/EJAY/MAX` | 1,381 | 1,381 |
+
+> SuperPack and GP1-Dance MAX files are byte-identical (51,746 bytes);
+> Rave and GP1-Rave MAX files are byte-identical (64,812 bytes).
+
+### `MIN` Catalog
+
+A parallel `MIN` / `MIN.TXT` file exists alongside every `MAX` and contains a
+strict subset of the MAX paths (897 lines for Dance, 1,353 for Rave,
+1,221 for GP1-HipHop — confirmed smaller in every product). Purpose is not
+fully confirmed; hypothesis is that it enumerates the "minimum" starter kit
+loaded by the UI, while MAX is the full addressable space. Not required for
+`.mix` playback.
+
+### `Pxddance` Enrichment (SuperPack / GP1-Dance only)
+
+`dance/EJAY/Pxddance` is a quoted-CRLF file of **6-line records** providing
+category/group metadata for the first 1,352 IDs (the Dance eJay 1 base kit):
+
+```text
+"bm\asjo.pxd"      ← path (matches a MAX entry)
+""                 ← stereo / reserved flag (blank for mono)
+"loop"             ← channel category
+"2"                ← variant / beat-count indicator
+"Grp. 1"           ← group label
+"Vers1"            ← version / alias label
+```
+
+Records are **not** ordered by sample ID — join by path to enrich a MAX
+catalog. Files `kit1.txt`, `kit2.txt`, `kit3.txt` in `dance/EJAY/` carry the
+same per-file metadata for the DMachine kit samples (IDs ≥ 1,352).
+
+### `PXD.TXT` Header (Dance eJay 1 fallback)
+
+Dance eJay 1 has no `Pxddance`. Its `dance/DMACHINE/PXD.TXT` begins with
+**9 pairs of `(start_id, count)` values** that define the per-tab ID ranges
+in Dance 1's native tab order:
+
+| Pair | Range | Channel |
+|------|-------|---------|
+| 1 | 0 – 125 | loop |
+| 2 | 126 – 239 | drum |
+| 3 | 240 – 354 | bass |
+| 4 | 355 – 454 | guitar |
+| 5 | 455 – 535 | sequence |
+| 6 | 536 – 835 | voice |
+| 7 | 836 – 1064 | rap |
+| 8 | 1065 – 1191 | effect |
+| 9 | 1192 – 1351 | xtra |
+
+The remaining lines of PXD.TXT hold 4-field per-sample records (decoded
+size, channel count, group, version/alias) and are not currently used by the
+extractor.
+
+### Parser: `tools/gen1-catalog.ts`
+
+Parses `MAX` / `MAX.TXT` (either dialect), optionally enriches with
+`Pxddance` (preferred) or `PXD.TXT` channel ranges, and emits one JSON
+catalog per product at `output/<product>/gen1-catalog.json`:
+
+```bash
+# Build every known Gen 1 product catalog.
+tsx tools/gen1-catalog.ts
+
+# Or a single product.
+tsx tools/gen1-catalog.ts --product Dance_SuperPack
+tsx tools/gen1-catalog.ts --product Dance_eJay1 \
+  --out output/Dance_eJay1/gen1-catalog.json
+
+# Or ad-hoc against a specific MAX file.
+tsx tools/gen1-catalog.ts --max path/to/MAX --pxddance path/to/Pxddance
+```
+
+Output schema (per entry):
+
+```json
+{
+  "id": 1231,
+  "path": "ai/bvjp.pxd",
+  "bank": "AI",
+  "file": "BVJP",
+  "category": "loop",
+  "group": "Grp. 1",
+  "version": "Vers1"
+}
+```
+
+### MIX Integration Note
+
+These catalogs are consumed by the MIX parser and resolver, but the `.mix`
+format rules are documented only in
+[mix-format-analysis.md](mix-format-analysis.md) and
+[mix-player-prerequisites.md](mix-player-prerequisites.md).
 
 ## Channel Mapping (per product)
 
-Each product's UI arranges samples into named "sound group" tabs (channels).
-After extraction, `tools/reorganize.ts` sorts WAV files into channel folders
-using internal-name sub-codes.
+For Gen 2/3 products that ship a `seiten` file, the names below come from the
+archive's `Soundgruppe` tab definitions. For Gen 1 products and later products
+without `seiten`, the names below reflect the verified project channel groups
+used by the catalogs and extraction tooling. Extracted `output/` folders may
+normalize some labels further (for example `sequence` → `Seq`) via
+`tools/reorganize.ts`.
 
 | Product | Channels |
 |---------|----------|
-| Dance eJay 1 | Bass, Drum, Effect, Keys, Loop, Voice, Xtra |
-| Dance eJay 2 | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Xtra |
-| Dance eJay 3 | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Xtra |
-| Dance eJay 4 | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Xtra, Groove, Wave |
-| Dance SuperPack | Bass, Drum, Effect, Keys, Loop, Voice, Xtra |
-| Generation Pack 1 | (Dance/Rave: same as Dance 1) |
-| HipHop eJay 2 | Bass, Drum, Effect, Guitar, Keys, Loop, Scratch, Voice, Xtra |
-| HipHop eJay 3 | Bass, Drum, Effect, Guitar, Keys, Loop, Scratch, Voice, Xtra |
-| HipHop eJay 4 | Bass, Drum, Effect, Fellas, Guitar, Keys, Ladies, Loop, Scratch, Xtra |
-| House eJay | Bass, Drum, Effect, Groove, Guitar, Keys, Loop, Voice, Xtra |
-| Rave eJay | Bass, Drum, Effect, Keys, Loop, Voice, Xtra |
-| Techno eJay | Bass, Drum, Effect, Guitar, Keys, Loop, Voice, Xtra |
-| Techno eJay 3 | Bass, Drum, Effect, Hyper, Keys, Loop, Sphere, Voice, Wave, Xtra |
-| Xtreme eJay | Bass, Effect, Guitar, Loop, Seq, Voice, Xtra |
+| Dance eJay 1 | Loop, Drum, Bass, Guitar, Sequence, Voice, Rap, Effect, Xtra |
+| Dance eJay 2 | Loop, Drum, Bass, Guitar, Sequence, Layer, Rap, Voice, Effect, Xtra, Groove, Wave |
+| Dance eJay 3 | Loop, Drum, Bass, Guitar, Sequence, Groove, Rap, Voice, Effect, Xtra, Layer, Wave |
+| Dance eJay 4 | Loop, Drum, Bass, Guitar, Sequence, Groove, Rap, Voice, Effect, Xtra, Layer, Wave |
+| Dance SuperPack | Loop, Drum, Bass, Guitar, Sequence, Voice, Rap, Effect, Xtra |
+| Generation Pack 1 | Dance: same as Dance eJay 1; HipHop: Loop, Drum, Bass, Guitar, Sequence, Layer, Rap, Voice, Effect, Xtra, Scratch; Rave: same as Rave eJay |
+| HipHop eJay 2 | Loop, Drum, Bass, Guitar, Sequence, Layer, Rap, Voice, Effect, Xtra, Groove, Wave |
+| HipHop eJay 3 | Loop, Drum, Bass, Guitar, Sequence, Groove, Rap, Voice, Effect, Xtra, Layer, Wave |
+| HipHop eJay 4 | Loop, Drum, Bass, Guitar, Keys, Ladies, Fellas, Effect, Scratch, Xtra |
+| House eJay | Loop, Drum, Bass, Guitar, Keys, Voice, Effect, Groove, Xtra |
+| Rave eJay | Loop, Drum, Bass, Keys, Voice, Effect, Xtra |
+| Techno eJay | Loop, Drum, Bass, Guitar, Sequence, Layer, Rap, Voice, Effect, Xtra |
+| Techno eJay 3 | Loop, Drum, Bass, Keys, Hyper, Voice, Effect, Xtra, Sphere, Wave |
+| Xtreme eJay | Loop, Drum, Bass, Guitar, Sequence, Layer, Rap, Voice, Effect, Xtra, Groove, Wave |
 
-**Product-specific channels**: HipHop 4 uses `Ladies` (FEMALE code) and
-`Fellas` (MALE code) instead of generic Voice. House eJay maps `EX` sub-code
-to `Groove` instead of Xtra. Xtreme eJay maps `KY` to `Seq` (Sequence) rather
-than Keys. Techno eJay 3 defines `Sphere` and `Hyper` tabs in `seiten`; the
-`SRC*` bank in `rave30.inf` is a sphere-pad bank, not a scratch bank.
+**Product-specific notes**:
+
+- Dance eJay 1 channel ranges are verified from `dance/DMACHINE/PXD.TXT` rather
+  than a `seiten` file.
+- HipHop eJay 2 and HipHop eJay 3 expose the main `Soundgruppe` tabs above in
+  `seiten`, but scratch-generator controls also exist elsewhere in the UI;
+  `tools/reorganize.ts` still normalizes scratch-coded stems into `Scratch`
+  folders in `output/`.
+- House eJay maps `EX` internal names to `Groove` in `tools/reorganize.ts`.
+- HipHop eJay 4 uses `Ladies` (FEMALE) and `Fellas` (MALE) instead of a single
+  generic voice channel.
+- Techno eJay 3 defines `Sphere` and `Hyper` in `seiten`; the `SRC*` bank in
+  `rave30.inf` belongs to `Sphere`, not `Scratch`.
+- Xtreme eJay ships additional UI controls such as `G_PREVIEW` and
+  `B_FULLSCREEN`; only the `Soundgruppe` names are listed here.
 
 ## Reference Tools
 
@@ -321,55 +465,101 @@ must be documented as `Sphere` instead of `Scratch`.
 
 ## Source Data Layout
 
+This tree focuses on the sample/archive inputs. `.mix` inventory and format
+notes are maintained separately in [mix-format-analysis.md](mix-format-analysis.md).
+Player-ready sample-kit assets used by the mix player live under `output/`
+(for example `output/SampleKit_DMKIT1/`, `output/SampleKit_DMKIT2/`, and
+`output/SampleKit_DMKIT3/`), not under `archive/`.
+
 ```text
 archive/
+├── _userdata/{Dance and House,Hip Hop,Rave,Techno,_unsorted}/
+│                                    — auxiliary unsorted/imported material
 ├── Dance_eJay1/
-│   ├── dance/{AA..BW,DMACHINE}/     — Individual PXD files in bank dirs
+│   ├── dance/{AA..BW,DMACHINE}/     — individual PXD banks + Dance 1 catalogs
 │   └── MIX/                         — 4 mix files
 ├── Dance_eJay2/
-│   └── D_ejay2/
-│       ├── ejay/AUDIO/              — Individual PXD files
-│       ├── ejay/{Audio_d,Audio_e,Audio_f}/  — Localized audio
-│       └── PXD/{DANCE20,DANCESK4-6} — Packed archives + INF catalogs
+│   ├── D_ejay2/
+│   │   ├── ejay/{AUDIO,Audio_d,Audio_e,Audio_f}
+│   │   │                         — app audio + localized assets
+│   │   └── PXD/{DANCE20,DANCESK4-6}
+│   │                         — packed archives + sample catalog INFs
+│   └── MIX/                         — mix files
 ├── Dance_eJay3/
-│   └── eJay/
-│       ├── eJay/                    — Application + metro.pxd
-│       └── pxd/{dance30,dance30.inf} — Packed archive + catalog
+│   ├── eJay/
+│   │   ├── eJay/                    — application runtime + metro.pxd
+│   │   └── pxd/{dance30,dance30.inf}
+│   │                         — packed archive + sample catalog
+│   └── MIX/                         — mix files
 ├── Dance_eJay4/
-│   └── ejay/
-│       ├── eJay/                    — Application + metro.pxd
-│       └── PXD/{DANCE40,DANCE40.inf} — Packed archive + catalog
+│   ├── ejay/
+│   │   ├── eJay/                    — application runtime + metro.pxd
+│   │   └── PXD/{DANCE40,DANCE40.inf}
+│   │                         — packed archive + sample catalog
+│   └── Mix/                         — mix files
 ├── Dance_SuperPack/
-│   ├── dance/{AA..BV,Bw,dmkit1-3,EJAY}/ — PXD banks + drum kits
-│   ├── Special/                     — WAV bonus samples (~168 files)
-│   └── MIX/                         — Mix files
+│   ├── dance/{AA..BV,Bw,dmkit1-3,EJAY}
+│   │                         — Gen 1 banks + bundled DMachine kit banks
+│   ├── eJay SampleKit/{DMKIT1,DMKIT2}
+│   │                         — nested sample-kit installer content
+│   ├── MIX/                         — mix files
+│   └── Special/                     — WAV bonus samples
 ├── GenerationPack1/
-│   ├── Dance/dance/{AA..BV,Bw,EJAY}/ — PXD banks (same layout as Dance 1)
+│   ├── Dance/dance/{AA..BV,Bw,EJAY} — Dance Gen 1 banks
+│   ├── Dance/MIX/                   — Mix files
 │   ├── Dance/Special/               — WAV bonus samples
+│   ├── eJay/setup/                  — bundled demo/setup assets
+│   ├── HipHop/HIPHOP/{AA..BR,EJAY,SCRATCH}
+│   │                         — HipHop Gen 1 banks + scratch assets
+│   ├── HipHop/MIX/                  — Mix files
 │   ├── HipHop/Special/              — WAV bonus samples
-│   ├── Rave/RAVE/{AA..BS,EJAY,HYPER}/ — PXD banks
+│   ├── Rave/RAVE/{AA..BS,EJAY,HYPER}
+│   │                         — Rave Gen 1 banks + hyper assets
 │   └── Rave/MIX/                    — Mix files
 ├── HipHop 2/
-│   └── eJay/
-│       ├── eJay/                    — Application runtime
-│       ├── eJayDemo/{Dance2,Dance3,Techno2}/ — Bundled demos
-│       └── pxd/{HipHop20,HipHop20.inf} — Packed archive + catalog
+│   ├── eJay/
+│   │   ├── eJay/                    — application runtime + scratch/DirectX assets
+│   │   ├── eJayDemo/{Dance2,Dance3,Techno2}
+│   │   │                         — bundled demos
+│   │   └── pxd/{HipHop20,HipHop20.inf}
+│   │                         — packed archive + sample catalog
+│   └── MIX/                         — mix files
 ├── HipHop 3/
-│   └── eJay/pxd/{hiphop30,hiphop30.inf} — Packed archive + catalog
+│   ├── eJay/
+│   │   ├── eJay/                    — application runtime
+│   │   └── pxd/{hiphop30,hiphop30.inf}
+│   │                         — packed archive + sample catalog
+│   └── MIX/                         — mix files
 ├── HipHop 4/
-│   └── eJay/pxd/{HipHop40,HipHop40.inf} — Packed archive + catalog
+│   ├── eJay/
+│   │   ├── eJay/                    — application runtime
+│   │   └── pxd/{HipHop40,HipHop40.inf}
+│   │                         — packed archive + sample catalog
+│   └── MIX/                         — mix files
 ├── House_eJay/
-│   └── ejay/PXD/{House10,HOUSE10.inf} — Packed archive + catalog
+│   ├── ejay/
+│   │   ├── eJay/                    — application runtime
+│   │   └── PXD/{House10,HOUSE10.inf}
+│   │                         — packed archive + sample catalog
+│   └── Mix/                         — mix files
 ├── Rave/
-│   └── RAVE/{AA..BS,EJAY,HYPER}/   — Individual PXD files in bank dirs
+│   ├── RAVE/{AA..BS,EJAY,HYPER}    — individual PXD banks + hyper assets
+│   └── MIX/                        — mix files
 ├── TECHNO_EJAY/
-│   └── EJAY/
-│       ├── EJAY/                    — Application runtime
-│       └── PXD/
-│           ├── HYP1..HYP4/         — Individual PXD files (named by category)
-│           └── {RAVE20,RAVE20.INF}  — Packed archive + catalog
+│   ├── EJAY/
+│   │   ├── EJAY/                    — application runtime + DirectX assets
+│   │   └── PXD/{HYP1..HYP4,RAVE20,RAVE20.INF}
+│   │                         — stem folders + packed archive/catalog
+│   └── MIX/                         — mix files
 ├── Techno 3/
-│   └── eJay/pxd/{rave30,rave30.inf} — Packed archive + catalog
+│   ├── eJay/
+│   │   ├── eJay/                    — application runtime
+│   │   └── pxd/{rave30,rave30.inf}  — packed archive + sample catalog
+│   └── MIX/                         — mix files
 └── Xtreme_eJay/
-    └── eJay/PXD/{xejay10,xejay10.inf} — Packed archive + catalog
+  ├── eJay/
+  │   ├── eJay/                    — application runtime
+  │   └── PXD/{xejay10,xejay10.inf}
+  │                         — packed archive + sample catalog
+  └── mix/                         — mix files
 ```

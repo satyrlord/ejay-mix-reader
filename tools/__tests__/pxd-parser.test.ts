@@ -787,6 +787,27 @@ describe("extractIndividualPxds", () => {
     expect(catalog[0].category).toBe("TheCategory");
     rmSync(tmpDir, { recursive: true });
   });
+
+  it("picks up stand-alone .wav files from directory", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "ext-"));
+    const srcDir = join(tmpDir, "src");
+    const outDir = join(tmpDir, "out");
+    const bankDir = join(srcDir, "genre");
+    mkdirSync(bankDir, { recursive: true });
+
+    const wavData = Buffer.alloc(44, 0);
+    wavData.write("RIFF", 0, "ascii");
+    wavData.write("WAVE", 8, "ascii");
+    writeFileSync(join(bankDir, "sample001.wav"), wavData);
+
+    const catalog = extractIndividualPxds(srcDir, outDir, false);
+    expect(catalog.length).toBe(1);
+    expect(catalog[0].filename).toBe("genre_sample001.wav");
+    expect(catalog[0].alias).toBe("sample001");
+    expect(catalog[0].format).toBe("wav");
+    expect(existsSync(join(outDir, "genre_sample001.wav"))).toBe(true);
+    rmSync(tmpDir, { recursive: true });
+  });
 });
 
 // ── extractPackedArchive ─────────────────────────────────────

@@ -40,6 +40,7 @@ function deriveDisplayName(folderId: string): string {
   return folderId
     .replace(/_/g, " ")
     .replace(/(\d+)$/, " $1")
+    .replace(/\bDMKIT (\d+)\b/g, "DMKIT$1")
     .replace(/  +/g, " ")
     .trim();
 }

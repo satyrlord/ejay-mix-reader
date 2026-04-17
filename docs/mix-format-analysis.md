@@ -4,6 +4,10 @@ Comprehensive reverse-engineering analysis of the `.MIX` project file format use
 by eJay music software (1997–2003). Covers all 14 products across 4 format
 generations, with a proposed abstraction layer for browser-based playback.
 
+> **Scope**: this document is the **format reference**. For the ordered
+> implementation roadmap (parser, resolver, player, UI, tests) see
+> [mix-player-prerequisites.md](mix-player-prerequisites.md).
+
 ## File Inventory
 
 231 `.MIX` files across 14 products. 11 products ship MIX folders directly;
@@ -31,8 +35,9 @@ Rave eJay respectively.
 | Techno eJay 3 | 20 | 3,988–6,232 | C |
 | Xtreme eJay | 4 | 7,960–21,270 | C |
 
-**Note**: `Dance_eJay4/Mix/.mix` is a 2-byte empty file (just `0x00 0x00`).
-Ignore it during parsing.
+**Note**: `archive/Dance_eJay4/Mix/.mix` is a 2-byte empty file (just
+`0x00 0x00`, verified). Skip any `.mix` file smaller than 4 bytes during
+parsing.
 
 ---
 
@@ -41,17 +46,28 @@ Ignore it during parsing.
 Binary analysis reveals **4 distinct MIX format generations**, identified by the
 uint32 LE value at offset 0x00, file size patterns, and structural markers:
 
-| Family | Gen | Products | App ID (uint32 LE @ 0x00) | Fixed Size? | Text Sections | SKKENNUNG | Mixer State |
-|--------|-----|----------|---------------------------|-------------|---------------|-----------|-------------|
-| **A** | 1 | Dance 1, Rave, HipHop 1, SuperPack, GP1 | `0x0A06`–`0x0A08` | Yes | No | No | None |
-| **B** | 2 | Dance 2, Techno, HipHop 2 | `0x0889`–`0x11E9` | No | Yes | Yes | None |
-| **C** | 3a | Dance 3/4, HipHop 3, Techno 3, Xtreme | `0x2571`–`0x2D41` | No | Yes | Yes | BOOU/DrumEQ/FX text |
-| **D** | 3b | HipHop 4, House | `0x11D6`–`0x15DC` | No | Yes | Yes | Full mixer text |
+| Family | Gen | Products | App ID (uint32 LE @ 0x00) | Size profile | Text Sections | SKKENNUNG | Mixer State |
+|--------|-----|----------|---------------------------|--------------|---------------|-----------|-------------|
+| **A** | 1 | Dance 1, Rave, HipHop 1, SuperPack, GP1 | `0x0A06`–`0x0A08` | Near-fixed per product (±~200 B) | No | No | None |
+| **B** | 2 | Dance 2, Techno, HipHop 2 | `0x0889`–`0x11E9` | Variable (1.5–8.8 KB) | Yes | Yes | None |
+| **C** | 3a | Dance 3/4, HipHop 3, Techno 3, Xtreme | `0x2571`–`0x2D41` | Variable (2.8–21.3 KB) | Yes | Yes | BOOU/DrumEQ/FX text |
+| **D** | 3b | HipHop 4, House | `0x11D6`–`0x15DC` | Variable (11.4–23.7 KB) | Yes | Yes | Full mixer text |
+
+> Format A files were once thought to be truly fixed-size, but SuperPack and
+> GP1 (Dance) mixes span 11,234–11,413 bytes and GP1 (Rave) spans 11,276–11,326
+> bytes. The trailing region beyond the active grid is padding, but may
+> optionally carry appended catalog data in SuperPack variants — see the
+> Risks table for details.
 
 ### Cross-Product Header Table
 
-| Product | App ID | File Size | F04 | BPM1 | BPM2 | SKKENNUNG |
-|---------|--------|-----------|-----|------|------|-----------|
+`U32@04` is the uint32 LE value at offset 0x04. In Gen 1 it is the first
+grid row (uint16 LE sample IDs) — cells `[0x04–0x07]` are the two
+left-most cells of row 0. In Gen 2/3 it is an entry count / metadata
+offset.
+
+| Product | App ID | File Size | U32@04 | BPM1 | BPM2 | SKKENNUNG |
+|---------|--------|-----------|--------|------|------|-----------|
 | Dance 1 | `0x00000A06` | 11,234 | (grid data) | (implicit 140) | — | No |
 | Rave | `0x00000A07` | 11,276 | (grid data) | (implicit 140) | — | No |
 | HipHop 1 | `0x00000A08` | 12,692 | (grid data) | (implicit 90) | — | No |
@@ -79,32 +95,92 @@ playback.
 
 Used by: Dance eJay 1, Rave eJay, Dance SuperPack, Generation Pack 1
 
+Prerequisite 2 of the implementation roadmap verifies the grid layout and
+cell width empirically via [`tools/mix-grid-analyzer.ts`](../tools/mix-grid-analyzer.ts).
+Run `npx tsx tools/mix-grid-analyzer.ts --all --out output/mix-grid-summary.json`
+to regenerate the per-file report under `output/mix-grid-summary.json` (83
+Gen 1 `.mix` files across all six products).
+
 ```text
 Offset  Size  Field
 ------  ----  -----
-0x00    4     App identifier (uint32 LE):
-                0x0A06 = Dance eJay 1 / SuperPack
-                0x0A07 = Rave eJay
-                0x0A08 = HipHop eJay 1
-0x04    ...   Grid data: uint16 LE sample IDs in a fixed-width matrix
+0x00    2     App signature (uint16 LE):
+                0x0A06 = Dance eJay 1 / SuperPack / GP1 Dance
+                0x0A07 = Rave eJay / GP1 Rave
+                0x0A08 = HipHop eJay 1 / GP1 HipHop
+0x02    2     Aux header field (uint16 LE). Zero in the majority of
+              files; non-zero in FREAK.MIX, X_Perm.mix, PSYCOA.MIX,
+              SCOOL.MIX, TRANCE.MIX and most GP1-HipHop mixes.
+              Semantics unresolved — likely a checksum or sub-variant
+              marker. Tracked as the `headerAux` field in the analyzer.
+0x04    N     Grid data: uint16 LE sample IDs in a fixed-width matrix
+...     Z     Zero padding / separation (≥ 32 bytes).
+...     M     Optional trailer: structured metadata block (see below).
 ```
 
 #### Grid Structure
 
-- **Row width**: 16 bytes (8 × uint16 LE values per row), confirmed by `0xCF04`
-  spacing analysis showing consistent 16-byte intervals.
-- **Cell values**: uint16 LE sample IDs. `0x0000` = empty cell. Non-zero values
-  are 10-bit to 11-bit sample IDs (range ~700–2000 for Dance, ~800–2000 for Rave).
-- **Grid extent**: Active data ends well before file end. Dance 1 `START.MIX`
-  has last non-zero byte at offset `0x052D` (1325 bytes), with 9,908 bytes of
-  zero padding to fill the fixed file size of 11,234.
-- **Total rows**: ~83 rows of 8 cells = 664 cells (enough for 8 channels × ~83
-  beats, approximately 35 seconds at 140 BPM).
+- **Row width**: 16 bytes (8 × uint16 LE per row). Confirmed by repeated
+  `0xCF04` / `0x04CF` spacing analysis and the analyzer's column-index
+  histograms across all six products.
+- **Cell values**: uint16 LE sample IDs. `0x0000` = empty cell. Non-zero
+  values are the direct MAX/PXD.TXT catalog indices produced by
+  Prerequisite 1 (see [Gen 1 Sample-ID Catalogs](file-formats.md#gen-1-sample-id-catalogs-max-pxddance-pxdtxt)).
+- **Cell width is uint16 LE for every Gen 1 product.** The earlier
+  hypothesis that Rave and HipHop 1 used a byte-wide grid has been
+  refuted: the suspicious "large" u16 values seen in those products
+  (25974 = "ve", 28783 = "op") came from ASCII bytes inside the trailer
+  being misread as grid cells. Restricting the scan to the active grid
+  (first zero-run ≥ 32 bytes after the header) yields sane IDs on every
+  product.
+- **Grid extent**: varies per song. The analyzer locates the active
+  grid by forward-scanning for the first ≥ 32-byte zero run after the
+  header. Row counts observed across the archive range from 20 to 227
+  (X_Perm.mix, SuperPack/GP1 Dance) — much higher than the earlier
+  33-row estimate based on `START.MIX` alone.
+- **Start markers**: `START.MIX` files are short — Dance 1 START ends
+  at offset `0x052D` with no trailer; Rave START grid ends at `0x0239`
+  before a "Dance eJay 1.01" trailer at `0x2be2`; GP1 HipHop START grid
+  ends at `0x04D9` before a structured tail at `0x317A`.
+
+#### Trailer Block
+
+Roughly 70 % of Gen 1 `.mix` files carry a trailer after the zero gap.
+Observed content:
+
+- **Product signature**: `"Dance eJay 1.01"`, `"Rave eJay 1.01"`,
+  `"HipHop eJay 1.01"`, `"DanceMachine 1.05"` (length 15–21 bytes).
+- **Sample-pack label**: `"DanceMachine Sample-Kit Vol. 1"`,
+  `"DanceMachine Sample-Kit Vol. 2"`, `"gung DanceMachine 1.05"`,
+  `"gung -SAMPLE BOX- [Raps && Vocals]"`,
+  `"gung -SAMPLE BOX- [Drams && Synthies]"`,
+  `"gung -SAMPLE BOX- [Space Sounds]"`.
+- **External WAV reference** (rare): `c:\raveejay\hypersav\scool004.wav`
+  in Rave/NODRUGS.MIX — this is a **user-recorded sound** (Rave HyperKit =
+  user save directory), not a commercial sample. The `.mix` player should
+  silently skip any `hypersav` path reference (log a warning, play silence
+  for that cell).
+- **Structured tail**: every trailer ends with the same 8-byte
+  signature `01 00 00 08 00 01 00 02`, likely a format/version marker.
+
+Trailer bytes MUST be excluded from the grid cell scan; otherwise
+ASCII bytes are misinterpreted as sample IDs. The analyzer exposes the
+raw trailer hex, ASCII rendering and extracted printable strings via
+the `trailer` field.
+
+#### Product-Specific Grid Dimensions (verified)
+
+| Product | File Size | Grid Start | Typical Active Rows | Trailer present |
+|---------|-----------|------------|---------------------|-----------------|
+| Dance 1 | 11,234 | 0x04 | 20–74 | No (pure padding) |
+| SuperPack / GP1 Dance | 11,234–11,413 | 0x04 | 20–227 | Yes (~5–12 KB) |
+| Rave / GP1 Rave | 11,276–11,326 | 0x04 | 14–148 | Yes (~8–11 KB) |
+| HipHop 1 / GP1 HipHop | 12,692 | 0x04 | 72–140 | Yes (~1.4–12.6 KB) |
 
 #### Common uint16 Value Histogram (Dance 1 START.MIX)
 
 ```text
-0x04CF (1231): 33 occurrences — likely a specific sample (most used)
+0x04CF (1231): 33 occurrences — "ai/bvjp.pxd" (verified via Prereq 1)
 0x077F (1919): 15 occurrences
 0x02EA ( 746): 13 occurrences
 0x034B ( 843): 12 occurrences
@@ -112,30 +188,45 @@ Offset  Size  Field
 ... (49 unique non-zero values total)
 ```
 
-#### Product-Specific Grid Dimensions
+#### Sample ID Mapping
 
-| Product | File Size | Grid Start | Active Data End | Zero Padding | Implied Grid |
-|---------|-----------|------------|-----------------|--------------|--------------|
-| Dance 1 | 11,234 | 0x04 | ~0x052D | 9,908 bytes | 8 cols × ~83 rows |
-| Rave | 11,276 | 0x04 | varies | varies | 8 cols × ~84 rows |
-| HipHop 1 | 12,692 | 0x04 | varies | varies | 8 cols × ~99 rows |
+Resolved in Prerequisite 1 — sample IDs are a plain lookup into the
+per-product `MAX` / `MAX.TXT` catalog (`line N = ID N`). See the
+[Gen 1 Sample-ID Catalogs](file-formats.md#gen-1-sample-id-catalogs-max-pxddance-pxdtxt)
+section of `file-formats.md` and the generated
+`output/<product>/gen1-catalog.json` files.
 
-#### Sample ID Mapping (Unknown — Key Risk)
+#### Prereq 2 open follow-ups
 
-Gen 1 has no INF catalog. Sample IDs in the grid must map to PXD files in the
-bank directories (AA, AB, ..., BW). Hypothesized encoding:
-
-```text
-sample_id = bank_index × bank_size + file_index_within_bank
-```
-
-Where `bank_index` maps alphabetically (AA=0, AB=1, ..., BW=~75) and
-`bank_size` is the max files per bank. The Pxddance catalog
-(`Dance_SuperPack/dance/EJAY/Pxddance`) may contain the definitive mapping.
-
-**Validation approach**: Decode START.MIX grid, list all referenced sample IDs,
-then match against known PXD bank contents and the Pxddance catalog to build the
-lookup table.
+- **Column-to-channel assignment** (loop / drum / bass / …) cannot be
+  derived from the binary alone; it requires either running a known mix
+  through the original engine and observing channel routing, or cross-
+  referencing the column index of each cell against the PXD.TXT /
+  Pxddance channel category of its sample. Deferred to the player
+  prototype (Prerequisite 8) and the resolver (Prerequisite 5).
+- **ID overflow**: GP1-HipHop mixes reference IDs up to 2071 (MAX
+  catalog size 1381); SuperPack `softvox.mix` / `space.mix` reference
+  IDs up to 4727 (MAX catalog size 2845). The overflow IDs correspond
+  to expansion kits that append their samples after the base MAX:
+  - `DMKIT1` — DanceMachine Sample-Kit Vol. 1 (= gung SAMPLE BOX 1):
+    source installer content → `archive/Dance_SuperPack/eJay SampleKit/DMKIT1/`;
+    extracted output → `output/SampleKit_DMKIT1/`.
+  - `DMKIT2` — DanceMachine Sample-Kit Vol. 2 (= gung SAMPLE BOX 2):
+    source installer content → `archive/Dance_SuperPack/eJay SampleKit/DMKIT2/`;
+    extracted output → `output/SampleKit_DMKIT2/`.
+  - `SpaceSounds` — gung SAMPLE BOX Space Sounds: 417 pre-decoded
+    WAVs staged for playback under `output/SampleKit_DMKIT3/`.
+  The resolver must build a combined catalog by appending each kit in
+  install order after the base product MAX. The trailer’s sample-pack
+  label identifies which kits are active for a given mix file.
+- **`headerAux` semantics** (uint16 at 0x02): zero in most files,
+  non-zero and file-specific otherwise. Candidates: CRC/checksum of
+  the grid region; user registration / sub-variant id; implicit BPM
+  override. Left open for Prereq 3 (binary parser) to revisit.
+- **Extended trailer vocabulary**: the Rave NODRUGS.MIX path reference
+  (`c:\raveejay\hypersav\scool004.wav`) is the only observed external
+  sample import. If other mixes use the same mechanism the resolver
+  will need to honour per-MIX user samples.
 
 ---
 
@@ -586,9 +677,13 @@ Drum, Bass, Guitar, Seq, Voice, Effect, Xtra.
 ## Format Auto-Detection Algorithm
 
 ```text
+if file size < 4 bytes: return UNKNOWN (skip)
+
 read uint32 LE at offset 0 → app_id
 
 if app_id in [0x0A06, 0x0A07, 0x0A08]:
+    # Format A — caller must supply productHint so the parser
+    # knows the implicit BPM and channel layout.
     return Format A
 
 if file contains "#SKKENNUNG#":
@@ -602,9 +697,9 @@ if file contains "#SKKENNUNG#":
 return UNKNOWN
 ```
 
-This is O(1) for the initial check and O(n) for the string scan fallback.
-In practice, a single `indexOf` on the first ~200 bytes for `SKKENNUNG` and
-the first ~1000 bytes for `MixVolume`/`BOOU` suffices.
+O(1) for the initial check and O(n) for the string-scan fallback. In practice
+a single `indexOf` over the first ~200 bytes for `SKKENNUNG` and the first
+~1000 bytes for `MixVolume`/`BOOU` is sufficient.
 
 ---
 
@@ -734,6 +829,11 @@ interface DrumEffectsChain {
 
 ### Implementation Plan — 3 Phases
 
+> The ordered, dependency-aware roadmap for implementing parser → resolver →
+> player lives in [mix-player-prerequisites.md](mix-player-prerequisites.md).
+> The subsections below are a higher-level summary kept here for context; if
+> the two documents disagree, the prerequisites doc wins.
+
 #### Phase 1: Format Parsers (`tools/mix-parser.ts`)
 
 One parser function per format family, all emitting `MixIR`:
@@ -843,13 +943,16 @@ When effects or mixer parameters cannot be reproduced:
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Gen 1 sample ID→WAV mapping is unverified | **High** | Start with Dance 1 START.MIX: decode grid IDs, compare against PXD bank contents. Cross-reference with Pxddance catalog. Build/test incrementally. |
-| Grid dimensions for Format A are empirical | **Medium** | Validated 16-byte row spacing via CF04 pattern analysis. Need to verify total columns and row count against known song lengths (Dance 1 demo = ~35 sec at 140 BPM). |
+| Gen 1 sample ID→WAV mapping is unverified | ~~**High**~~ **Resolved** | Every Gen 1 product ships a plain-text `MAX` catalog where line N = sample ID N. Parsed by `tools/gen1-catalog.ts`; see [file-formats.md](file-formats.md#gen-1-sample-id-catalogs-max-pxddance-pxdtxt). |
+| Grid dimensions for Format A are empirical | ~~**Medium**~~ **Resolved** | Confirmed via `tools/mix-grid-analyzer.ts` across 83 Gen 1 `.mix` files: 4-byte header (uint16 app sig + uint16 aux), 8 columns × uint16 LE cells, variable row count (20–227), optional trailer after a ≥ 32-byte zero gap. Regenerate `output/mix-grid-summary.json` with `tsx tools/mix-grid-analyzer.ts --all --out ...`. |
+| Format A HipHop/SuperPack ID overflow (max id exceeds MAX catalog size) | **Medium** | GP1-HipHop mixes use ids ≤ 2071 (catalog 1381); SuperPack `softvox.mix` uses ids ≤ 4727 (catalog 2845). Overflow concentrated in late rows — likely a second catalog (Pxddance or an extended bank). Investigate in Prereq 5 (resolver). |
+| Format A `headerAux` (uint16 @ 0x02) semantics unresolved | **Low** | Zero in most files; non-zero in FREAK, X_Perm, TRANCE, PSYCOA, SCOOL and GP1-HipHop variants. Likely checksum or sub-variant marker. Surfaced via analyzer `headerAux` for later correlation with file modification/BPM. |
+| External WAV reference in Rave/NODRUGS.MIX trailer | ~~**Low**~~ **Resolved** | Contains literal `c:\raveejay\hypersav\scool004.wav`. This is a user-recorded sound (Rave HyperKit = user save directory), not a commercial sample kit. The `.mix` player should silently skip `hypersav` path references and play silence for that cell. |
 | Gen 2 track record format has variable-length fields | **Medium** | Parse opportunistically using `0x01` tags and string length prefixes. Use STEP.MIX (1,553 bytes, smallest file) as the reference implementation. |
 | Cross-product sample resolution may require fuzzy matching | **Low** | Catalog sections enumerate required products. Start with exact-match by display name. Fall back to substring/Levenshtein if needed. |
 | BPM2 field differs from BPM in HipHop 2/3 | **Low** | Investigate whether BPM2 is user-adjusted tempo. Default to BPM1 for playback; expose both in MixIR. |
 | Ticker text (Format B) has no audio equivalent | **Low** | Preserve in MixIR for display purposes. Render as subtitle overlay in the UI. |
-| SuperPack Gen 1+ files may have extended grid | **Low** | Dream.mix (11,413 bytes) is 179 bytes larger than START.MIX (11,234). Tail contains catalog strings. May indicate a Format A variant with appended catalog. |
+| SuperPack Gen 1+ files may have extended grid | ~~**Low**~~ **Resolved** | SuperPack `dream.mix` (11,413 B), `Mcxtreme.mix` (11,277 B) and peers carry a structured trailer, not an extended grid. The grid ends at the first ≥ 32-byte zero run; everything after is trailer metadata (product signature, `"DanceMachine Sample-Kit Vol. N"`, etc.). See the Format A [Trailer Block](#trailer-block) section. |
 | Empty .mix file in Dance 4 | **None** | Skip 2-byte files during parsing. |
 
 ---
