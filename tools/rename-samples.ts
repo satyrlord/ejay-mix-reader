@@ -35,6 +35,7 @@ export interface SampleEntry {
 export interface ProductMetadata {
   samples: SampleEntry[];
   total_samples?: number;
+  alias_mode?: "derive-from-category" | "preserve-stem";
   [key: string]: unknown;
 }
 
@@ -127,6 +128,13 @@ export function deriveAlias(cleanStem: string, cleanCat: string): string {
   return cleanStem;
 }
 
+function resolveAlias(mode: ProductMetadata["alias_mode"], cleanStem: string, cleanCat: string): string {
+  if (mode === "preserve-stem") {
+    return cleanStem;
+  }
+  return deriveAlias(cleanStem, cleanCat);
+}
+
 // ── Core logic ───────────────────────────────────────────────
 
 /**
@@ -136,6 +144,7 @@ export function deriveAlias(cleanStem: string, cleanCat: string): string {
  */
 export function planRenames(productDir: string, meta: ProductMetadata): RenameEntry[] {
   const samples = meta.samples;
+  const aliasMode = meta.alias_mode;
 
   // Step 1 — compute clean stems, extract base names
   interface EntryInfo {
@@ -208,7 +217,7 @@ export function planRenames(productDir: string, meta: ProductMetadata): RenameEn
 
     const newCat = oldCat ? cleanName(oldCat) : "";
     const newDetail = oldDetail ? cleanName(oldDetail) : "";
-    const newAlias = deriveAlias(newStem, newCat);
+    const newAlias = resolveAlias(aliasMode, newStem, newCat);
 
     const changed =
       oldPath !== newPath ||

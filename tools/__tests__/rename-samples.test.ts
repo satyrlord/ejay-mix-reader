@@ -220,6 +220,29 @@ describe("planRenames", () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("preserves full normalized stem as alias when alias_mode is preserve-stem", () => {
+    const tmp = createTempDir();
+    try {
+      const channelDir = join(tmp, "Loop");
+      mkdirSync(channelDir, { recursive: true });
+      writeFileSync(join(channelDir, "LOOP_053_L.wav"), Buffer.alloc(10));
+
+      const meta: ProductMetadata = {
+        alias_mode: "preserve-stem",
+        samples: [
+          { filename: "LOOP_053_L.wav", alias: "LOOP_053_L", category: "loop", channel: "Loop" },
+        ],
+      };
+
+      const plan = planRenames(tmp, meta);
+      expect(plan).toHaveLength(1);
+      expect(plan[0].new_filename).toBe("loop-053-l.wav");
+      expect(plan[0].new_alias).toBe("loop-053-l");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── applyRenames ─────────────────────────────────────────────
