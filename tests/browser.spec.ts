@@ -1228,6 +1228,8 @@ test.describe("render edge cases", () => {
         tabsId: shell.tabs.id,
         tabsInContextStrip: shell.contextStrip.contains(shell.tabs),
         bpmInContextStrip: shell.contextStrip.contains(shell.bpm),
+        hasZoomOutControl: Boolean(shell.contextStrip.querySelector("#sample-zoom-out")),
+        hasZoomInControl: Boolean(shell.contextStrip.querySelector("#sample-zoom-in")),
         legacyTabsRowPresent: Boolean(shellHost.querySelector(".spa-tabs-row")),
         gridId: shell.grid.id,
         bpmValue: shell.bpm.value,
@@ -1244,6 +1246,8 @@ test.describe("render edge cases", () => {
     expect(result.tabsId).toBe("subcategory-tabs");
     expect(result.tabsInContextStrip).toBe(true);
     expect(result.bpmInContextStrip).toBe(true);
+    expect(result.hasZoomOutControl).toBe(true);
+    expect(result.hasZoomInControl).toBe(true);
     expect(result.legacyTabsRowPresent).toBe(false);
     expect(result.gridId).toBe("sample-grid");
     expect(result.bpmValue).toBe("140");
@@ -1327,10 +1331,10 @@ test.describe("render edge cases", () => {
       };
     }, RENDER_MOD);
 
-    expect(result.laneCount).toBe(2);
-    expect(result.firstSpan).toBe("6");
+    expect(result.laneCount).toBe(1);
+    expect(result.firstSpan).toBe("8");
     expect(result.secondSpan).toBe("4");
-    expect(result.thirdSpan).toBe("3");
+    expect(result.thirdSpan).toBe("2");
     expect(result.firstColor).toContain("--channel-bass");
     expect(result.firstResolvedPath).toBe("mock://long.wav");
     expect(result.toggled).toEqual(["mock://long.wav"]);
@@ -2075,6 +2079,66 @@ test.describe("main edge cases", () => {
     await page.locator(".sample-block").first().click();
     await page.locator("#transport-stop").click();
     await expect(page.locator("#transport")).toBeVisible();
+  });
+
+  test("the real app sample zoom controls adjust sample bubble sizing", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(".sample-block").first()).toBeVisible();
+
+    const readFontSize = async (): Promise<number> => page.locator(".sample-block").first().evaluate((element) => {
+      return Number.parseFloat(window.getComputedStyle(element).fontSize);
+    });
+
+    const baseSize = await readFontSize();
+    await page.locator("#sample-zoom-in").click();
+    const zoomedInSize = await readFontSize();
+    await page.locator("#sample-zoom-out").click();
+    const resetSize = await readFontSize();
+
+    expect(zoomedInSize).toBeGreaterThan(baseSize * 1.09);
+    expect(zoomedInSize).toBeLessThan(baseSize * 1.11);
+    expect(resetSize).toBeGreaterThanOrEqual(baseSize * 0.99);
+    expect(resetSize).toBeLessThanOrEqual(baseSize * 1.01);
+  });
+
+  test("the real app zoom-in is clamped at the maximum zoom level", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(".sample-block").first()).toBeVisible();
+
+    const readZoomScale = (): Promise<number> =>
+      page.evaluate(() =>
+        Number.parseFloat(
+          document.documentElement.style.getPropertyValue("--sample-bubble-zoom-scale") || "1",
+        ),
+      );
+
+    // Click zoom-in many more times than the allowed range to hit the ceiling
+    for (let i = 0; i < 20; i++) {
+      await page.locator("#sample-zoom-in").click();
+    }
+
+    const clampedScale = await readZoomScale();
+    expect(clampedScale).toBeLessThanOrEqual(2);
+  });
+
+  test("the real app zoom-out is clamped at the minimum zoom level", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(".sample-block").first()).toBeVisible();
+
+    const readZoomScale = (): Promise<number> =>
+      page.evaluate(() =>
+        Number.parseFloat(
+          document.documentElement.style.getPropertyValue("--sample-bubble-zoom-scale") || "1",
+        ),
+      );
+
+    // Click zoom-out many more times than the allowed range to hit the floor
+    for (let i = 0; i < 20; i++) {
+      await page.locator("#sample-zoom-out").click();
+    }
+
+    const clampedScale = await readZoomScale();
+    expect(clampedScale).toBeGreaterThanOrEqual(0.5);
   });
 
   test("the real app shows only the add button when a category has no configured subcategories and the sample catalog fails", async ({ page }) => {

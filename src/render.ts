@@ -1,7 +1,7 @@
 // DOM rendering functions for the normalized Sound Browser SPA.
 
 import type { CategoryEntry, Sample } from "./data.js";
-import { sampleCategory, sampleDisplayName, UNSORTED_CATEGORY_ID, UNSORTED_SUBCATEGORY_ID } from "./data.js";
+import { sampleCategory, sampleDisplayName, sampleMetadataLine, UNSORTED_CATEGORY_ID, UNSORTED_SUBCATEGORY_ID } from "./data.js";
 import type { Library } from "./library.js";
 import type { Player } from "./player.js";
 
@@ -130,11 +130,54 @@ export interface SpaShellSlots {
   sidebar: HTMLElement;
   tabs: HTMLElement;
   grid: HTMLElement;
+  zoomOut: HTMLButtonElement;
+  zoomIn: HTMLButtonElement;
   bpm: HTMLSelectElement;
   transport: HTMLElement;
   archiveTree: HTMLElement;
   sequencer: HTMLElement;
   contextStrip: HTMLElement;
+}
+
+function createZoomIcon(kind: "in" | "out"): SVGSVGElement {
+  const icon = document.createElementNS(SVG_NS, "svg");
+  icon.classList.add("spa-zoom-icon");
+  icon.setAttribute("viewBox", "0 0 16 16");
+  icon.setAttribute("fill", "none");
+  icon.setAttribute("aria-hidden", "true");
+  icon.setAttribute("focusable", "false");
+
+  const lens = document.createElementNS(SVG_NS, "circle");
+  lens.setAttribute("cx", "6.75");
+  lens.setAttribute("cy", "6.75");
+  lens.setAttribute("r", "3.75");
+  lens.setAttribute("stroke", "currentColor");
+  lens.setAttribute("stroke-width", "1.5");
+
+  const handle = document.createElementNS(SVG_NS, "path");
+  handle.setAttribute("d", "M9.5 9.5 13 13");
+  handle.setAttribute("stroke", "currentColor");
+  handle.setAttribute("stroke-width", "1.5");
+  handle.setAttribute("stroke-linecap", "round");
+
+  const horizontal = document.createElementNS(SVG_NS, "path");
+  horizontal.setAttribute("d", "M5 6.75h3.5");
+  horizontal.setAttribute("stroke", "currentColor");
+  horizontal.setAttribute("stroke-width", "1.5");
+  horizontal.setAttribute("stroke-linecap", "round");
+
+  icon.append(lens, handle, horizontal);
+
+  if (kind === "in") {
+    const vertical = document.createElementNS(SVG_NS, "path");
+    vertical.setAttribute("d", "M6.75 5v3.5");
+    vertical.setAttribute("stroke", "currentColor");
+    vertical.setAttribute("stroke-width", "1.5");
+    vertical.setAttribute("stroke-linecap", "round");
+    icon.append(vertical);
+  }
+
+  return icon;
 }
 
 export function renderHomePage(
@@ -256,6 +299,28 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
   tabs.setAttribute("role", "tablist");
   tabs.setAttribute("aria-label", "Subcategories");
 
+  const zoomWrap = document.createElement("div");
+  zoomWrap.className = "spa-zoom-controls";
+  zoomWrap.setAttribute("aria-label", "Sample zoom controls");
+
+  const zoomOut = document.createElement("button");
+  zoomOut.type = "button";
+  zoomOut.id = "sample-zoom-out";
+  zoomOut.className = "spa-zoom-btn";
+  zoomOut.setAttribute("aria-label", "Zoom out sample bubbles");
+  zoomOut.title = "Zoom out sample bubbles";
+  zoomOut.appendChild(createZoomIcon("out"));
+
+  const zoomIn = document.createElement("button");
+  zoomIn.type = "button";
+  zoomIn.id = "sample-zoom-in";
+  zoomIn.className = "spa-zoom-btn";
+  zoomIn.setAttribute("aria-label", "Zoom in sample bubbles");
+  zoomIn.title = "Zoom in sample bubbles";
+  zoomIn.appendChild(createZoomIcon("in"));
+
+  zoomWrap.append(zoomOut, zoomIn);
+
   const bpmWrap = document.createElement("label");
   bpmWrap.className = "spa-bpm";
   const bpmLabel = document.createElement("span");
@@ -264,7 +329,7 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
   const bpm = createBpmSelect("bpm-filter", "BPM filter");
   bpmWrap.append(bpmLabel, bpm);
 
-  contextControls.append(tabs, bpmWrap);
+  contextControls.append(tabs, zoomWrap, bpmWrap);
   contextStrip.append(contextStatus, contextControls);
 
   // ── Browser area (bottom): category sidebar + sample grid ─
@@ -300,6 +365,8 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
     sidebar,
     tabs,
     grid,
+    zoomOut,
+    zoomIn,
     bpm,
     transport: transportHost.querySelector("#transport") as HTMLElement,
     archiveTree,
@@ -541,10 +608,22 @@ export function renderSampleGrid(
       block.style.setProperty("--block-color", categoryColor(sampleCategory(sample)));
       block.style.setProperty("--block-span", String(blockSpanFromBeats(sample.beats)));
 
+      const name = sampleDisplayName(sample);
+      const meta = sampleMetadataLine(sample);
+
       const label = document.createElement("span");
       label.className = "sample-block-label";
-      label.textContent = sampleDisplayName(sample);
+      label.textContent = name;
       block.appendChild(label);
+
+      if (meta) {
+        const metaEl = document.createElement("span");
+        metaEl.className = "sample-block-meta";
+        metaEl.textContent = meta;
+        block.appendChild(metaEl);
+      }
+
+      block.title = meta ? `${name}\n${meta}` : name;
 
       block.addEventListener("click", () => {
         library.resolveAudioUrl(sample)
@@ -565,6 +644,9 @@ export function renderSampleGrid(
   }
 }
 
+/** Maximum number of CSS grid columns per sample lane (matches the 24-column layout). */
+const MAX_LANE_SPAN = 24;
+
 function buildLanes(samples: Sample[]): Sample[][] {
   const lanes: Sample[][] = [];
   let currentLane: Sample[] = [];
@@ -572,7 +654,7 @@ function buildLanes(samples: Sample[]): Sample[][] {
 
   for (const sample of samples) {
     const span = blockSpanFromBeats(sample.beats);
-    if (currentLane.length > 0 && currentSpan + span > 12) {
+    if (currentLane.length > 0 && currentSpan + span > MAX_LANE_SPAN) {
       lanes.push(currentLane);
       currentLane = [];
       currentSpan = 0;
@@ -589,13 +671,25 @@ function buildLanes(samples: Sample[]): Sample[][] {
   return lanes;
 }
 
+/**
+ * Map a sample's beat count to a CSS grid column span within a MAX_LANE_SPAN (24) column grid.
+ *
+ * Thresholds follow the native eJay beat sizes (4, 8, 16, 32) and the span
+ * values are proportional powers-of-2 so that relative durations are visually
+ * apparent at a glance:
+ *   invalid / ≤4  beats →  1 column   (shortest, single block)
+ *          ≤8  beats →  2 columns
+ *          ≤16 beats →  4 columns
+ *          ≤32 beats →  8 columns
+ *         >32  beats → 12 columns  (half the lane, longest loops)
+ */
 function blockSpanFromBeats(beats: number | undefined): number {
-  if (typeof beats !== "number" || !Number.isFinite(beats) || beats <= 0) return 2;
-  if (beats >= 32) return 6;
-  if (beats >= 16) return 4;
-  if (beats >= 8) return 3;
-  if (beats >= 4) return 2;
-  return 1;
+  if (typeof beats !== "number" || !Number.isFinite(beats) || beats <= 0) return 1;
+  if (beats <= 4) return 1;
+  if (beats <= 8) return 2;
+  if (beats <= 16) return 4;
+  if (beats <= 32) return 8;
+  return 12;
 }
 
 function categoryColor(category: string): string {

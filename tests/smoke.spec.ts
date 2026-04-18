@@ -1,15 +1,20 @@
 import { readFileSync } from "node:fs";
 
 import { test, expect } from "./baseFixtures.js";
+import { readDisplayVersionSeries, readGitCommitCount } from "../scripts/version.js";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")) as {
   version?: string;
-  appVersion?: string;
 };
 
-const expectedTransportVersion = typeof packageJson.appVersion === "string" && packageJson.appVersion.trim().length > 0
-  ? packageJson.appVersion.trim()
-  : `v${packageJson.version ?? "0.0.0"}`;
+const expectedTransportVersion = (() => {
+  const commitCount = readGitCommitCount(new URL("..", import.meta.url));
+  if (commitCount !== null) {
+    return `v${readDisplayVersionSeries(packageJson.version)}.${commitCount}`;
+  }
+
+  return `v${packageJson.version ?? "0.0.0"}`;
+})();
 
 test("page title is set", async ({ page }) => {
   await page.goto("/");

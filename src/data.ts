@@ -394,6 +394,36 @@ export function sampleDisplayName(sample: Pick<Sample, "alias" | "filename">): s
   return sample.filename.replace(/^.*[\\/]/, "").replace(/\.wav$/i, "");
 }
 
+/**
+ * Build a short metadata string for display under the sample label.
+ * Shows product, BPM, and beat count when available.
+ */
+export function sampleMetadataLine(
+  sample: Pick<Sample, "product" | "bpm" | "beats" | "detail">,
+): string {
+  const parts: string[] = [];
+
+  const product = normalizeText(sample.product);
+  if (product) {
+    parts.push(product.replace(/_/g, " "));
+  }
+
+  if (typeof sample.bpm === "number" && sample.bpm > 0) {
+    parts.push(`${sample.bpm} BPM`);
+  }
+
+  if (typeof sample.beats === "number" && sample.beats > 0) {
+    parts.push(`${sample.beats}b`);
+  }
+
+  const detail = normalizeText(sample.detail);
+  if (detail) {
+    parts.push(detail);
+  }
+
+  return parts.join(" \u00B7 ");
+}
+
 /** Humanize ids for display; `compactDmkit` is opt-in so existing callers keep spaced `DMKIT 1` output by default. */
 export function humanizeIdentifier(value: string, options: HumanizeIdentifierOptions = {}): string {
   const humanized = value

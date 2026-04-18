@@ -53,6 +53,7 @@ interface AppState {
   tabs: CategoryTab[];
   activeTab: CategoryTab | null;
   bpm: number;
+  sampleBubbleZoomScale: number;
   isAddingSubcategory: boolean;
   subcategoryDraft: string;
 }
@@ -66,9 +67,15 @@ const state: AppState = {
   tabs: [],
   activeTab: null,
   bpm: 140,
+  sampleBubbleZoomScale: 1,
   isAddingSubcategory: false,
   subcategoryDraft: "",
 };
+
+const SAMPLE_BUBBLE_ZOOM_CSS_VAR = "--sample-bubble-zoom-scale";
+const SAMPLE_BUBBLE_ZOOM_STEP = 0.1;
+const SAMPLE_BUBBLE_ZOOM_MIN = 0.5;
+const SAMPLE_BUBBLE_ZOOM_MAX = 2;
 
 const player = new Player();
 let slots: SpaShellSlots | null = null;
@@ -89,6 +96,19 @@ function clearProgressUpdateInterval(): void {
   if (progressUpdateIntervalId === null) return;
   clearInterval(progressUpdateIntervalId);
   progressUpdateIntervalId = null;
+}
+
+function applySampleBubbleZoom(): void {
+  document.documentElement.style.setProperty(
+    SAMPLE_BUBBLE_ZOOM_CSS_VAR,
+    String(state.sampleBubbleZoomScale),
+  );
+}
+
+function adjustSampleBubbleZoom(delta: number): void {
+  const updated = Number((state.sampleBubbleZoomScale + delta).toFixed(4));
+  state.sampleBubbleZoomScale = Math.min(SAMPLE_BUBBLE_ZOOM_MAX, Math.max(SAMPLE_BUBBLE_ZOOM_MIN, updated));
+  applySampleBubbleZoom();
 }
 
 function clearCategoryConfigWatcher(): void {
@@ -158,6 +178,8 @@ async function startBrowser(library: Library): Promise<void> {
 
   currentSlots.transport.querySelector("#transport-stop")?.addEventListener("click", () => player.stop());
   currentSlots.bpm.value = String(state.bpm);
+  applySampleBubbleZoom();
+
   currentSlots.bpm.addEventListener("change", () => {
     state.bpm = Number(currentSlots.bpm.value);
     if (state.activeCategory) {
@@ -167,6 +189,14 @@ async function startBrowser(library: Library): Promise<void> {
       refreshTabs();
     }
     refreshSamples();
+  });
+
+  currentSlots.zoomOut.addEventListener("click", () => {
+    adjustSampleBubbleZoom(-SAMPLE_BUBBLE_ZOOM_STEP);
+  });
+
+  currentSlots.zoomIn.addEventListener("click", () => {
+    adjustSampleBubbleZoom(SAMPLE_BUBBLE_ZOOM_STEP);
   });
 
   currentSlots.tabs.addEventListener("contextmenu", (event) => {
