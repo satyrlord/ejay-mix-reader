@@ -113,6 +113,11 @@ describe("classifyVoiceSub", () => {
     expect(classifyVoiceSub({ category: "rap verse" }, null)).toBe("misc");
     expect(classifyVoiceSub({ category: "vocal hook" }, null)).toBe("misc");
   });
+
+  it("requires whole-word style keywords for both sing and rap", () => {
+    expect(classifyVoiceSub({ category: "chorusly male" }, null)).toBe("misc");
+    expect(classifyVoiceSub({ category: "rapping female" }, null)).toBe("misc");
+  });
 });
 
 // ── classify ─────────────────────────────────────────────────
@@ -398,6 +403,59 @@ describe("normalize", () => {
       };
       expect(meta.total_samples).toBe(5);
       expect(meta.samples.every((s) => s.product && s.original_filename)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("skips samples whose metadata filename traverses outside the product directory", () => {
+    const root = tmpRoot();
+    try {
+      const product = join(root, "ProductA");
+      mkdirSync(product, { recursive: true });
+      writeFileSync(join(root, "escape.wav"), "outside-product");
+      writeFileSync(
+        join(product, "metadata.json"),
+        JSON.stringify({
+          samples: [{ filename: "../escape.wav", internal_name: "BS001", category: "bass" }],
+        }),
+      );
+
+      const dest = join(root, "_normalized");
+      const result = normalize({ outputRoot: root, dest });
+
+      expect(result.processed).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(existsSync(join(dest, "Bass", "escape.wav"))).toBe(false);
+
+      const meta = JSON.parse(readFileSync(join(dest, "metadata.json"), "utf-8")) as {
+        total_samples: number;
+      };
+      expect(meta.total_samples).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows dot-segment metadata paths that still resolve inside the product directory", () => {
+    const root = tmpRoot();
+    try {
+      const product = join(root, "ProductA");
+      mkdirSync(product, { recursive: true });
+      writeFileSync(join(product, "BS001.wav"), "inside-product");
+      writeFileSync(
+        join(product, "metadata.json"),
+        JSON.stringify({
+          samples: [{ filename: "nested/../BS001.wav", internal_name: "BS001", category: "bass" }],
+        }),
+      );
+
+      const dest = join(root, "_normalized");
+      const result = normalize({ outputRoot: root, dest });
+
+      expect(result.processed).toBe(1);
+      expect(result.skipped).toBe(0);
+      expect(existsSync(join(dest, "Bass", "BS001.wav"))).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

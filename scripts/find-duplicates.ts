@@ -8,14 +8,15 @@
  * header-only differences do not produce false positives.
  *
  * Usage:
- *   tsx tools/find-duplicates.ts [--output-dir PATH] [--csv PATH]
- *   tsx tools/find-duplicates.ts --same-product
- *   tsx tools/find-duplicates.ts --cross-product
+ *   tsx scripts/find-duplicates.ts [--output-dir PATH] [--csv PATH]
+ *   tsx scripts/find-duplicates.ts [--output-dir PATH] [--no-csv]
+ *   tsx scripts/find-duplicates.ts --same-product
+ *   tsx scripts/find-duplicates.ts --cross-product
  */
 
 import { createHash } from "crypto";
-import { createWriteStream, readFileSync, readdirSync, statSync } from "fs";
-import { join, relative } from "path";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
+import { dirname, join, relative } from "path";
 import { parseArgs } from "util";
 
 // --- WAV helpers ---
@@ -23,17 +24,24 @@ import { parseArgs } from "util";
 const RIFF_MAGIC = Buffer.from("RIFF", "ascii");
 const WAVE_MAGIC = Buffer.from("WAVE", "ascii");
 const DATA_ID = Buffer.from("data", "ascii");
+export const DEFAULT_CSV_PATH = join("logs", "duplicates.csv");
 
 /**
- * Return the byte offset of the first PCM sample in data.
- * Walks the RIFF/WAVE chunk tree to find the 'data' sub-chunk.
- * Returns 44 for non-RIFF files (conventional WAV header size).
- * Returns null when the file is a valid RIFF but the 'data' chunk is
+ * Locate the WAV PCM data chunk.
+ *
+ * Returns `{ offset, length }` for valid RIFF/WAVE files where `length` is
+ * the exact size of the `data` chunk in bytes. For non-RIFF files we fall
+ * back to the conventional 44-byte header offset and signal `length: null`
+ * so callers know to read until EOF.
+ *
+ * Returns null when the file is a valid RIFF but the `data` chunk is
  * absent or the chunk tree is malformed.
  */
-export function pcmDataOffset(data: Buffer): number | null {
+export function pcmDataOffset(
+  data: Buffer,
+): { offset: number; length: number | null } | null {
   if (data.length < 12 || !data.subarray(0, 4).equals(RIFF_MAGIC) || !data.subarray(8, 12).equals(WAVE_MAGIC)) {
-    return 44; // not a RIFF/WAVE file — use conventional offset
+    return { offset: 44, length: null }; // not a RIFF/WAVE file — use conventional offset
   }
 
   let offset = 12; // skip RIFF header (4) + file size (4) + "WAVE" (4)
@@ -41,7 +49,7 @@ export function pcmDataOffset(data: Buffer): number | null {
     const chunkId = data.subarray(offset, offset + 4);
     const chunkSize = data.readUInt32LE(offset + 4);
     if (chunkId.equals(DATA_ID)) {
-      return offset + 8; // skip chunk id (4) + chunk size (4)
+      return { offset: offset + 8, length: chunkSize };
     }
     if (offset + 8 + chunkSize > data.length) {
       return null; // malformed chunk_size guard
@@ -66,14 +74,26 @@ export function hashPcm(filePath: string): string | null {
     return null;
   }
 
-  const offset = pcmDataOffset(data);
-  if (offset === null) {
+  if (data.length < 12 || !data.subarray(0, 4).equals(RIFF_MAGIC) || !data.subarray(8, 12).equals(WAVE_MAGIC)) {
+    console.warn(`  WARNING: ${filePath}: not a RIFF/WAVE file — skipping`);
+    return null;
+  }
+
+  const located = pcmDataOffset(data);
+  if (located === null) {
     console.warn(`  WARNING: ${filePath}: could not locate PCM data — skipping`);
     return null;
   }
+  const { offset, length } = located;
   if (offset >= data.length) return null; // empty or header-only file
 
-  const pcm = data.subarray(offset);
+  // Hash exactly the bytes claimed by the WAV `data` chunk. Hashing to EOF
+  // would let trailing chunks (LIST/INFO, id3, padding) cause identical PCM
+  // to produce different digests and miss real duplicates.
+  const end = length === null
+    ? data.length
+    : Math.min(data.length, offset + length);
+  const pcm = data.subarray(offset, end);
   if (pcm.length === 0) return null; // data chunk present but empty
   return createHash("sha256").update(pcm).digest("hex");
 }
@@ -94,7 +114,8 @@ function findWavFiles(dir: string): string[] {
           results.push(fullPath);
         }
       }
-    } catch {
+    } catch (err) {
+      console.warn(`  WARNING: cannot read directory ${currentDir}: ${(err as Error).message}`);
       return;
     }
   }
@@ -106,6 +127,12 @@ function findWavFiles(dir: string): string[] {
 /**
  * Walk outputDir and group WAV files by PCM hash.
  * Returns only groups with 2+ files (genuine duplicates).
+ *
+ * Note: this is intentionally a fully synchronous CLI scanner. Output trees
+ * are bounded in size (low tens of thousands of WAVs) and the tool runs as a
+ * one-shot batch, so the simpler control flow is preferred over async I/O.
+ * If the workload grows substantially, swap `readFileSync`/`createHash` for a
+ * streamed pipeline (`fs.createReadStream` → `crypto.createHash`).
  */
 export function scanOutput(outputDir: string): Map<string, string[]> {
   const groups = new Map<string, string[]>();
@@ -194,8 +221,9 @@ export function printReport(groups: Map<string, string[]>, outputDir: string): v
 }
 
 export function writeCsv(groups: Map<string, string[]>, outputDir: string, csvPath: string): void {
-  const stream = createWriteStream(csvPath, { encoding: "utf-8" });
-  stream.write("hash_prefix,group,product,channel,filename,size_bytes\n");
+  // Buffer the CSV so writeCsv() returns only after the full file is on disk,
+  // which keeps CLI use and tests deterministic after moving away from streams.
+  const lines = ["hash_prefix,group,product,channel,filename,size_bytes\n"];
 
   const sorted = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
   for (let idx = 0; idx < sorted.length; idx++) {
@@ -207,12 +235,21 @@ export function writeCsv(groups: Map<string, string[]>, outputDir: string, csvPa
       const channel = parts.length > 1 ? parts[1] : "";
       const filename = parts[parts.length - 1] ?? p;
       const sizeBytes = statSync(p).size;
-      stream.write(`${h.slice(0, 16)},${idx + 1},${product},${channel},${filename},${sizeBytes}\n`);
+      lines.push(`${h.slice(0, 16)},${idx + 1},${product},${channel},${filename},${sizeBytes}\n`);
     }
   }
 
-  stream.end();
+  mkdirSync(dirname(csvPath), { recursive: true });
+  writeFileSync(csvPath, lines.join(""), "utf-8");
   console.log(`CSV written to ${csvPath}`);
+}
+
+export function resolveCsvOutputPath(csvPath?: string, noCsv = false): string | null {
+  if (noCsv) {
+    return null;
+  }
+
+  return csvPath ?? DEFAULT_CSV_PATH;
 }
 
 // --- CLI ---
@@ -224,6 +261,7 @@ function main(): number {
     options: {
       "output-dir": { type: "string", default: "output" },
       csv: { type: "string" },
+      "no-csv": { type: "boolean", default: false },
       "same-product": { type: "boolean", default: false },
       "cross-product": { type: "boolean", default: false },
     },
@@ -248,8 +286,9 @@ function main(): number {
 
   printReport(groups, outputDir);
 
-  if (values.csv && groups.size > 0) {
-    writeCsv(groups, outputDir, values.csv);
+  const csvPath = resolveCsvOutputPath(values.csv, values["no-csv"]);
+  if (csvPath !== null) {
+    writeCsv(groups, outputDir, csvPath);
   }
 
   return 0;

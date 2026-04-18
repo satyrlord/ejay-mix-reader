@@ -24,9 +24,9 @@
  * back to category info when no Pxddance file is present.
  *
  * Usage:
- *   tsx tools/gen1-catalog.ts --product Dance_SuperPack
- *   tsx tools/gen1-catalog.ts --product Dance_eJay1 --out output/Dance_eJay1/gen1-catalog.json
- *   tsx tools/gen1-catalog.ts --max path/to/MAX [--pxddance path/to/Pxddance]
+ *   tsx scripts/gen1-catalog.ts --product Dance_SuperPack
+ *   tsx scripts/gen1-catalog.ts --product Dance_eJay1 --out output/Dance_eJay1/gen1-catalog.json
+ *   tsx scripts/gen1-catalog.ts --max path/to/MAX [--pxddance path/to/Pxddance]
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";

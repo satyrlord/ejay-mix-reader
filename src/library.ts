@@ -1,47 +1,187 @@
-// Library abstraction: load samples from a Vite-served folder or a
-// user-selected local directory via the File System Access API.
+// Library abstraction for the normalized output tree.
 
-import type { IndexData, ProductEntry, ProductMetadata, Sample } from "./data.js";
-import { sampleAudioPath, sampleChannel } from "./data.js";
+import type { CategoryConfig, IndexData, MetadataCatalog, Sample } from "./data.js";
+import {
+  buildCategoryEntries,
+  buildDefaultCategoryConfig,
+  CATEGORY_CONFIG_FILENAME,
+  normalizeCategoryConfig,
+  sampleAudioPath,
+} from "./data.js";
 
-// ── Public interface ──────────────────────────────────────────
+function normalizeMetadataPath(value: string): string[] {
+  return value.replace(/\\/g, "/").split("/").filter(Boolean);
+}
+
+function isValidPathComponent(value: string): boolean {
+  return value.length > 0 && value !== "." && value !== ".." && !/[\\/]/.test(value);
+}
+
+async function collectCategorySamples(
+  dir: FileSystemDirectoryHandle,
+  categoryName: string,
+  pathParts: string[],
+  samples: Sample[],
+): Promise<void> {
+  for await (const [name, handle] of dir.entries()) {
+    if (handle.kind === "directory") {
+      await collectCategorySamples(
+        handle as FileSystemDirectoryHandle,
+        categoryName,
+        [...pathParts, name],
+        samples,
+      );
+      continue;
+    }
+
+    if (!name.toLowerCase().endsWith(".wav")) continue;
+
+    const subcategory = pathParts.length > 0 ? pathParts[0] : null;
+    const nestedFilename = pathParts.length > 1
+      ? `${pathParts.slice(1).join("/")}/${name}`
+      : name;
+
+    samples.push({
+      filename: nestedFilename,
+      category: categoryName,
+      subcategory,
+      alias: name.replace(/\.wav$/i, ""),
+    });
+  }
+}
+
+function isMetadataCatalog(value: unknown): value is MetadataCatalog {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as MetadataCatalog).samples)
+  );
+}
+
+function isIndexData(value: unknown): value is IndexData {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const parsed = value as Partial<IndexData>;
+  return Array.isArray(parsed.categories) && Array.isArray(parsed.mixLibrary);
+}
+
+async function parseCategoryConfigResponse(response: Response): Promise<CategoryConfig> {
+  if (response.status === 404) return buildDefaultCategoryConfig();
+  if (!response.ok) {
+    throw new Error(`Failed to load category config: ${response.status}`);
+  }
+
+  const parsed: unknown = await response.json();
+  const config = normalizeCategoryConfig(parsed);
+  if (!config) {
+    throw new Error(`Invalid output/${CATEGORY_CONFIG_FILENAME}`);
+  }
+
+  return config;
+}
 
 export interface Library {
   loadIndex(): Promise<IndexData>;
-  loadProductSamples(productId: string): Promise<Sample[]>;
-  resolveAudioUrl(productId: string, sample: Sample): Promise<string>;
-  releaseProduct(productId: string): void;
+  loadSamples(): Promise<Sample[]>;
+  loadCategoryConfig?(options?: { force?: boolean }): Promise<CategoryConfig>;
+  saveCategoryConfig?(config: CategoryConfig): Promise<void>;
+  canWriteCategoryConfig?(): boolean;
+  resolveAudioUrl(sample: Sample): Promise<string>;
   dispose(): void;
 }
 
-// ── Fetch-based library (dev server) ──────────────────────────
-
 export class FetchLibrary implements Library {
+  private indexPromise: Promise<IndexData> | null = null;
+  private samplesPromise: Promise<Sample[]> | null = null;
+  private categoryConfigPromise: Promise<CategoryConfig> | null = null;
+
   async loadIndex(): Promise<IndexData> {
-    const resp = await fetch("data/index.json");
-    if (!resp.ok) throw new Error(`Failed to load index: ${resp.status}`);
-    return resp.json() as Promise<IndexData>;
+    const promise = this.indexPromise ?? (this.indexPromise = (async (): Promise<IndexData> => {
+        const response = await fetch("data/index.json");
+        if (!response.ok) {
+          throw new Error(`Failed to load index: ${response.status}`);
+        }
+
+        const parsed: unknown = await response.json();
+        if (!isIndexData(parsed)) {
+          throw new Error("Invalid data/index.json: missing or malformed categories/mixLibrary");
+        }
+        return parsed;
+      })());
+
+    return promise;
   }
 
-  async loadProductSamples(productId: string): Promise<Sample[]> {
-    const resp = await fetch(`output/${productId}/metadata.json`);
-    if (resp.status === 404) return [];
-    if (!resp.ok) throw new Error(`Failed to load metadata for ${productId}: ${resp.status}`);
-    const meta: unknown = await resp.json();
-    if (!isProductMetadata(meta)) throw new Error(`Invalid metadata for ${productId}`);
-    return meta.samples;
+  async loadSamples(): Promise<Sample[]> {
+    if (!this.samplesPromise) {
+      this.samplesPromise = (async () => {
+        const response = await fetch("output/metadata.json");
+        if (response.status === 404) return [];
+        if (!response.ok) {
+          throw new Error(`Failed to load sample catalog: ${response.status}`);
+        }
+
+        const parsed: unknown = await response.json();
+        if (!isMetadataCatalog(parsed)) {
+          throw new Error("Invalid output/metadata.json");
+        }
+
+        return parsed.samples;
+      })();
+    }
+
+    return this.samplesPromise;
   }
 
-  resolveAudioUrl(productId: string, sample: Sample): Promise<string> {
-    return Promise.resolve(sampleAudioPath(productId, sample));
+  async loadCategoryConfig(options: { force?: boolean } = {}): Promise<CategoryConfig> {
+    const force = options.force ?? false;
+    if (force || !this.categoryConfigPromise) {
+      this.categoryConfigPromise = (async () => {
+        const response = await fetch(`output/${CATEGORY_CONFIG_FILENAME}`, {
+          cache: force ? "no-store" : "default",
+        });
+        return parseCategoryConfigResponse(response);
+      })();
+    }
+
+    return this.categoryConfigPromise;
   }
 
-  releaseProduct(_productId: string): void {}
+  async saveCategoryConfig(config: CategoryConfig): Promise<void> {
+    if (!import.meta.env.DEV) {
+      throw new Error("Category config is read-only in production.");
+    }
 
-  dispose(): void {}
+    const response = await fetch("/__category-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to save category config: ${response.status}`);
+    }
+
+    this.categoryConfigPromise = Promise.resolve(buildDefaultCategoryConfig());
+    this.categoryConfigPromise = Promise.resolve(config);
+  }
+
+  canWriteCategoryConfig(): boolean {
+    return import.meta.env.DEV;
+  }
+
+  resolveAudioUrl(sample: Sample): Promise<string> {
+    return Promise.resolve(sampleAudioPath(sample));
+  }
+
+  dispose(): void {
+    this.indexPromise = null;
+    this.samplesPromise = null;
+    this.categoryConfigPromise = null;
+  }
 }
-
-// ── File System Access API library ────────────────────────────
 
 /* istanbul ignore next -- requires File System Access API; not available in Playwright */
 export class FsLibrary implements Library {
@@ -49,184 +189,147 @@ export class FsLibrary implements Library {
 
   private root: FileSystemDirectoryHandle;
   private blobCache = new Map<string, string>();
+  private indexPromise: Promise<IndexData> | null = null;
+  private samplesPromise: Promise<Sample[]> | null = null;
+  private categoryConfigPromise: Promise<CategoryConfig> | null = null;
 
   constructor(root: FileSystemDirectoryHandle) {
     this.root = root;
   }
 
   async loadIndex(): Promise<IndexData> {
-    const products: ProductEntry[] = [];
-
-    for await (const [name, handle] of this.root.entries()) {
-      if (handle.kind !== "directory") continue;
-      const dirHandle = handle as FileSystemDirectoryHandle;
-
-      // Scan sub-directories for channels and .wav file count
-      const channels = new Set<string>();
-      let sampleCount = 0;
-      for await (const [subName, subHandle] of dirHandle.entries()) {
-        if (subHandle.kind !== "directory") continue;
-        channels.add(subName.toLowerCase());
-        const subDir = subHandle as FileSystemDirectoryHandle;
-        for await (const [fileName, fileHandle] of subDir.entries()) {
-          if (fileHandle.kind === "file" && fileName.toLowerCase().endsWith(".wav")) {
-            sampleCount++;
-          }
-        }
-      }
-
-      // Use metadata.json for enrichment if available
-      try {
-        const metaHandle = await dirHandle.getFileHandle("metadata.json");
-        const file = await metaHandle.getFile();
-        const text = await file.text();
-        const parsed: unknown = JSON.parse(text);
-        if (isProductMetadata(parsed)) {
-          if (parsed.samples.length > sampleCount) {
-            sampleCount = parsed.samples.length;
-          }
-          // Add channels from metadata that might not have their own folder
-          for (const s of parsed.samples) {
-            channels.add(sampleChannel(s));
-          }
-        }
-      } catch {
-        // No metadata.json — rely on folder scan only
-      }
-
-      // Only include products that have at least one channel
-      if (channels.size === 0) continue;
-
-      products.push({
-        id: name,
-        name: deriveDisplayName(name),
-        channels: [...channels].sort(),
-        sampleCount,
-      });
+    if (!this.indexPromise) {
+      this.indexPromise = (async () => {
+        const [samples, categoryConfig] = await Promise.all([
+          this.loadSamples(),
+          this.loadCategoryConfig(),
+        ]);
+        const categories = buildCategoryEntries(samples, categoryConfig.categories);
+        return { categories, mixLibrary: [] };
+      })();
     }
 
-    products.sort((a, b) => a.name.localeCompare(b.name));
-    return { products };
+    return this.indexPromise;
   }
 
-  async loadProductSamples(productId: string): Promise<Sample[]> {
-    const productDir = await this.root.getDirectoryHandle(productId);
+  async loadSamples(): Promise<Sample[]> {
+    if (!this.samplesPromise) {
+      this.samplesPromise = this.loadSamplesUncached();
+    }
 
-    // Try metadata.json first for rich sample data
+    return this.samplesPromise;
+  }
+
+  async loadCategoryConfig(options: { force?: boolean } = {}): Promise<CategoryConfig> {
+    const force = options.force ?? false;
+    if (force || !this.categoryConfigPromise) {
+      this.categoryConfigPromise = this.loadCategoryConfigUncached();
+    }
+
+    return this.categoryConfigPromise;
+  }
+
+  private async loadSamplesUncached(): Promise<Sample[]> {
     try {
-      const metaHandle = await productDir.getFileHandle("metadata.json");
+      const metaHandle = await this.root.getFileHandle("metadata.json");
       const file = await metaHandle.getFile();
       const text = await file.text();
       const parsed: unknown = JSON.parse(text);
-      if (isProductMetadata(parsed)) return parsed.samples;
-      // metadata.json has unexpected shape — fall through to folder scan
+      if (isMetadataCatalog(parsed)) {
+        return parsed.samples;
+      }
     } catch {
-      // No metadata.json — fall through to folder scan
+      // Fall back to scanning the normalized category tree.
     }
 
-    // Scan channel sub-folders for .wav files
     const samples: Sample[] = [];
-    for await (const [channelName, channelHandle] of productDir.entries()) {
-      if (channelHandle.kind !== "directory") continue;
-      const channelDir = channelHandle as FileSystemDirectoryHandle;
-      for await (const [fileName, fileHandle] of channelDir.entries()) {
-        if (fileHandle.kind === "file" && fileName.toLowerCase().endsWith(".wav")) {
-          samples.push({
-            filename: fileName,
-            channel: channelName,
-            alias: fileName.replace(/\.wav$/i, ""),
-          });
-        }
-      }
+    for await (const [name, handle] of this.root.entries()) {
+      if (handle.kind !== "directory") continue;
+      await collectCategorySamples(handle as FileSystemDirectoryHandle, name, [], samples);
     }
     return samples;
   }
 
-  async resolveAudioUrl(productId: string, sample: Sample): Promise<string> {
-    const channel = sample.channel ?? sample.category ?? "unknown";
-    const key = `${productId}/${channel}/${sample.filename}`;
+  private async loadCategoryConfigUncached(): Promise<CategoryConfig> {
+    try {
+      const configHandle = await this.root.getFileHandle(CATEGORY_CONFIG_FILENAME);
+      const file = await configHandle.getFile();
+      const text = await file.text();
+      const parsed: unknown = JSON.parse(text);
+      const config = normalizeCategoryConfig(parsed);
+      if (config) {
+        return config;
+      }
+    } catch {
+      // Fall back to the built-in config when categories.json is missing.
+    }
+
+    return buildDefaultCategoryConfig();
+  }
+
+  canWriteCategoryConfig(): boolean {
+    return false;
+  }
+
+  async resolveAudioUrl(sample: Sample): Promise<string> {
+    const category = sample.category ?? "Unsorted";
+    if (!isValidPathComponent(category)) {
+      throw new Error(`Invalid audio path for sample: ${sample.filename}`);
+    }
+
+    const categoryDir = await this.root.getDirectoryHandle(category);
+
+    let currentDir = categoryDir;
+    if (sample.subcategory) {
+      if (!isValidPathComponent(sample.subcategory)) {
+        throw new Error(`Invalid audio path for sample: ${sample.filename}`);
+      }
+      currentDir = await currentDir.getDirectoryHandle(sample.subcategory);
+    }
+
+    const filenameParts = normalizeMetadataPath(sample.filename);
+    if (filenameParts.some((part) => !isValidPathComponent(part))) {
+      throw new Error(`Invalid audio path for sample: ${sample.filename}`);
+    }
+
+    const key = sampleAudioPath(sample);
     const cached = this.blobCache.get(key);
     if (cached) return cached;
 
-    const productDir = await this.root.getDirectoryHandle(productId);
-
-    let file: File;
-    if (sample.filename.includes("/")) {
-      // Gen 1: channel folder is part of filename (e.g. "rap/Come on!.wav")
-      const parts = sample.filename.split("/");
-      if (parts.some(p => p === ".." || p === "")) {
-        throw new Error(`Invalid audio path component in: ${sample.filename}`);
-      }
-      let dir: FileSystemDirectoryHandle = productDir;
-      for (let i = 0; i < parts.length - 1; i++) {
-        dir = await dir.getDirectoryHandle(parts[i]);
-      }
-      const fileHandle = await dir.getFileHandle(parts[parts.length - 1]);
-      file = await fileHandle.getFile();
-    } else {
-      // Gen 2/3: flat filename, channel folder is separate
-      const channelDir = await productDir.getDirectoryHandle(channel);
-      const fileHandle = await channelDir.getFileHandle(sample.filename);
-      file = await fileHandle.getFile();
+    for (let i = 0; i < filenameParts.length - 1; i++) {
+      currentDir = await currentDir.getDirectoryHandle(filenameParts[i]);
     }
 
+    const fileHandle = await currentDir.getFileHandle(filenameParts[filenameParts.length - 1]);
+    const file = await fileHandle.getFile();
     const url = URL.createObjectURL(file);
+
     if (this.blobCache.size >= FsLibrary.MAX_BLOB_CACHE_SIZE) {
-      // Evict oldest 10% of entries to avoid thrashing on rapid sample loads.
-      // Deleting the current entry during Map iteration is safe per the ES2015 spec.
       const evictCount = Math.max(1, Math.floor(FsLibrary.MAX_BLOB_CACHE_SIZE * 0.1));
       let evicted = 0;
-      for (const [k, u] of this.blobCache.entries()) {
+      for (const [cacheKey, cacheUrl] of this.blobCache.entries()) {
         if (evicted >= evictCount) break;
-        URL.revokeObjectURL(u);
-        this.blobCache.delete(k);
+        URL.revokeObjectURL(cacheUrl);
+        this.blobCache.delete(cacheKey);
         evicted++;
       }
     }
+
     this.blobCache.set(key, url);
     return url;
-  }
-
-  releaseProduct(productId: string): void {
-    const prefix = `${productId}/`;
-
-    // Deleting the current entry during Map iteration is safe per the ES2015 spec.
-    for (const [key, url] of this.blobCache.entries()) {
-      if (!key.startsWith(prefix)) continue;
-      URL.revokeObjectURL(url);
-      this.blobCache.delete(key);
-    }
   }
 
   dispose(): void {
     for (const url of this.blobCache.values()) {
       URL.revokeObjectURL(url);
     }
+
     this.blobCache.clear();
+    this.indexPromise = null;
+    this.samplesPromise = null;
+    this.categoryConfigPromise = null;
   }
 }
-
-// ── Helpers ───────────────────────────────────────────────────
-
-function isProductMetadata(value: unknown): value is ProductMetadata {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Array.isArray((value as ProductMetadata).samples)
-  );
-}
-
-/* istanbul ignore next -- only used by FsLibrary */
-function deriveDisplayName(folderId: string): string {
-  return folderId
-    .replace(/_/g, " ")
-    .replace(/(\d+)$/, " $1")
-    .replace(/\bDMKIT (\d+)\b/g, "DMKIT$1")
-    .replace(/ {2,}/g, " ")
-    .trim();
-}
-
-// ── Folder picker ─────────────────────────────────────────────
 
 /* istanbul ignore next -- requires File System Access API; not available in Playwright */
 export async function pickLibraryFolder(): Promise<FsLibrary> {

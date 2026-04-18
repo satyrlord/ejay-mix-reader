@@ -121,6 +121,16 @@ describe("decodePxdAudio", () => {
     expect(result).toEqual(Buffer.from([0x42, 0x43]));
   });
 
+  it("stops cleanly on truncated opcode payloads", () => {
+    const result = decodePxdAudio(Buffer.from([0xf8, 0x10, 0x22]), 3);
+    expect(result).toEqual(Buffer.from([0x80, 0x80, 0x80]));
+  });
+
+  it("stops cleanly on truncated literal escapes", () => {
+    const result = decodePxdAudio(Buffer.from([0xff]), 2);
+    expect(result).toEqual(Buffer.from([0x80, 0x80]));
+  });
+
   it("handles all define opcodes (0xF4–0xF8)", () => {
     // 0xF4 = define 1-byte snippet
     const f4 = Buffer.from([0xf4, 0x20, 0xdd]);
@@ -770,6 +780,18 @@ describe("extractIndividualPxds", () => {
     const catalog = extractIndividualPxds(srcDir, outDir, false);
     expect(catalog[0].duration_sec).toBeCloseTo(1.0, 2);
     expect(catalog[0].beats).toBe(Math.round(140 / 60));
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it("uses product-specific BPM defaults when deriving beats", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "ext-"));
+    const srcDir = join(tmpDir, "House_eJay");
+    const outDir = join(tmpDir, "out");
+    mkdirSync(srcDir, { recursive: true });
+
+    writeFileSync(join(srcDir, "s.pxd"), makePxd("A", 44100, new Array(44100).fill(0x80)));
+    const catalog = extractIndividualPxds(srcDir, outDir, false);
+    expect(catalog[0].beats).toBe(Math.round(125 / 60));
     rmSync(tmpDir, { recursive: true });
   });
 

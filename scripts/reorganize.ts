@@ -7,13 +7,15 @@
  * per-channel subfolders based on the internal filename prefix.
  *
  * Usage:
- *   tsx tools/reorganize.ts output/Dance_eJay2
- *   tsx tools/reorganize.ts output/Dance_eJay2 --dry-run
+ *   tsx scripts/reorganize.ts output/Dance_eJay2
+ *   tsx scripts/reorganize.ts output/Dance_eJay2 --dry-run
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { basename, extname, join, normalize, relative } from "path";
 import { parseArgs } from "util";
+
+const MAX_DESTINATION_CANDIDATES = 200;
 
 // Maps the type code embedded in internal filenames to eJay channel tabs.
 export const CHANNEL_MAP: Record<string, string> = {
@@ -47,7 +49,7 @@ export const CHANNEL_MAP: Record<string, string> = {
   // Keys / melodic instruments
   PN: "Keys", ON: "Keys", SY: "Keys", KY: "Seq",
   // Scratch loops
-  ST: "Scratch", RX: "Scratch", SRC: "Scratch",
+  ST: "Scratch", SC: "Scratch", RX: "Scratch", SRC: "Scratch",
   // Wave
   EY: "Wave",
   // Techno eJay HYP stem names
@@ -103,6 +105,7 @@ export const PRODUCT_PREFIX_OVERRIDES: Record<string, Array<[string, string]>> =
 export function getChannel(internalName: string, category = "", productName = ""): string {
   const name = internalName.toUpperCase();
   const product = productName.toLowerCase();
+  let hasStructuredPatternMatch = false;
 
   // Product-specific prefix overrides
   const overrides = PRODUCT_PREFIX_OVERRIDES[product] ?? [];
@@ -112,31 +115,49 @@ export function getChannel(internalName: string, category = "", productName = ""
 
   // 1. HipHop 4
   let m = HH4_RE.exec(name);
-  if (m) return HH4_CHANNEL_MAP[m[1].toUpperCase()] ?? "Xtra";
+  if (m) {
+    hasStructuredPatternMatch = true;
+    const channel = HH4_CHANNEL_MAP[m[1].toUpperCase()];
+    if (channel) return channel;
+  }
 
   // 2. House eJay
   m = HS_RE.exec(name);
   if (m) {
+    hasStructuredPatternMatch = true;
     const code = m[1].toUpperCase();
     if (code === "EX") return "Groove";
-    return CHANNEL_MAP[code] ?? "Xtra";
+    const channel = CHANNEL_MAP[code];
+    if (channel) return channel;
   }
 
   // 3. Dance eJay 2
   m = D5_RE.exec(name);
-  if (m) return CHANNEL_MAP[m[1]] ?? "Xtra";
+  if (m) {
+    hasStructuredPatternMatch = true;
+    const channel = CHANNEL_MAP[m[1]];
+    if (channel) return channel;
+  }
 
   // 4. Dance eJay 4
   m = DA_RE.exec(name);
-  if (m) return CHANNEL_MAP[m[1].toUpperCase()] ?? "Xtra";
+  if (m) {
+    hasStructuredPatternMatch = true;
+    const channel = CHANNEL_MAP[m[1].toUpperCase()];
+    if (channel) return channel;
+  }
 
   // 5. Xtreme eJay
   m = X_RE.exec(name);
-  if (m) return CHANNEL_MAP[m[1].toUpperCase()] ?? "Xtra";
+  if (m) {
+    hasStructuredPatternMatch = true;
+    const channel = CHANNEL_MAP[m[1].toUpperCase()];
+    if (channel) return channel;
+  }
 
   // 6. Direct prefix — longest match
   m = PFX_RE.exec(name);
-  if (m) {
+  if (m && !hasStructuredPatternMatch) {
     const code = m[1];
     for (let length = code.length; length > 0; length--) {
       const sub = code.slice(0, length);
@@ -176,8 +197,154 @@ interface DestinationChoice {
   hadConflict: boolean;
 }
 
+interface ResolvedRecord {
+  sourceDir: string;
+  sample: SampleRecord;
+  srcPath: string;
+  channel: string;
+}
+
 function splitPathParts(value: string): string[] {
   return value.split(/[\\/]+/).filter(Boolean);
+}
+
+function normalizeComparePath(value: string): string {
+  const normalizedPath = normalize(value);
+  return process.platform === "win32" ? normalizedPath.toLowerCase() : normalizedPath;
+}
+
+function resolveWithinBase(baseDir: string, pathParts: string[]): string | null {
+  if (pathParts.length === 0) return null;
+  const candidate = normalize(join(baseDir, ...pathParts));
+  const relativePath = relative(baseDir, candidate);
+  if (!relativePath || relativePath === ".") return null;
+  if (relativePath.startsWith("..") || /(^|[\\/])\.\.([\\/]|$)/.test(relativePath)) return null;
+  return candidate;
+}
+
+function sanitizePathToken(value: string): string {
+  const cleaned = value
+    .replace(/[\\/]+/g, "_")
+    .replace(/[^A-Za-z0-9._ -]+/g, "_")
+    .trim();
+  return cleaned || "archive";
+}
+
+function scoreSample(sample: SampleRecord): number {
+  return Object.values(sample).reduce<number>((score, value) => {
+    if (value === undefined || value === null || value === "") return score;
+    return score + 1;
+  }, 0);
+}
+
+function deriveInternalName(sample: SampleRecord): string {
+  if (sample.internal_name) return sample.internal_name;
+  if (sample.source) return basename(sample.source, extname(sample.source));
+  return "";
+}
+
+/**
+ * Reject channel tokens that could escape the product folder. Allows only a
+ * conservative set of filename-safe characters and forbids `..` segments and
+ * any path separator. Returns null for invalid input so callers can fall back
+ * to a safe default.
+ */
+export function sanitizeChannelToken(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed === "." || trimmed === "..") return null;
+  if (/[\\/]/.test(trimmed)) return null;
+  if (!/^[A-Za-z0-9._ -]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function deriveChannel(sample: SampleRecord, productName: string): string {
+  const category = sample.category ?? "";
+  const inferred = getChannel(deriveInternalName(sample), category, productName);
+  if (inferred !== "Xtra") return inferred;
+  const fromMeta = sanitizeChannelToken(sample.channel);
+  return fromMeta ?? inferred;
+}
+
+function resolveSourcePath(
+  productDir: string,
+  sourceDir: string,
+  sample: SampleRecord,
+  channel: string,
+): string | undefined {
+  const filename = sample.filename ?? "";
+  if (!filename) return undefined;
+
+  const sourceBase = basename(filename);
+  const pathParts = splitPathParts(filename);
+  const candidates = new Set<string>();
+
+  if (pathParts.length > 0) {
+    const sourceCandidate = resolveWithinBase(sourceDir, pathParts);
+    const productCandidate = resolveWithinBase(productDir, pathParts);
+    if (sourceCandidate) candidates.add(sourceCandidate);
+    if (productCandidate) candidates.add(productCandidate);
+  }
+  const channelCandidate = resolveWithinBase(productDir, [channel, sourceBase]);
+  if (channelCandidate) candidates.add(channelCandidate);
+
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate) && statSync(candidate).isFile()) {
+        return candidate;
+      }
+    } catch {
+      // try the next candidate path
+    }
+  }
+
+  return undefined;
+}
+
+function dedupeRecords(
+  productDir: string,
+  productName: string,
+  records: Array<[string, SampleRecord]>,
+): { resolved: ResolvedRecord[]; skipped: number } {
+  const resolvedByPath = new Map<string, ResolvedRecord>();
+  const missingKeys = new Set<string>();
+  let skipped = 0;
+
+  for (const [sourceDir, sample] of records) {
+    const filename = sample.filename ?? "";
+    if (!filename) {
+      skipped++;
+      continue;
+    }
+
+    const channel = deriveChannel(sample, productName);
+    const srcPath = resolveSourcePath(productDir, sourceDir, sample, channel);
+    if (!srcPath) {
+      const missingKey = normalizeComparePath(join(sourceDir, ...splitPathParts(filename)));
+      if (!missingKeys.has(missingKey)) {
+        missingKeys.add(missingKey);
+        skipped++;
+      }
+      continue;
+    }
+
+    const resolvedKey = normalizeComparePath(srcPath);
+    const existing = resolvedByPath.get(resolvedKey);
+    if (!existing || scoreSample(sample) > scoreSample(existing.sample)) {
+      resolvedByPath.set(resolvedKey, {
+        sourceDir,
+        sample,
+        srcPath,
+        channel,
+      });
+    }
+  }
+
+  return {
+    resolved: [...resolvedByPath.values()],
+    skipped,
+  };
 }
 
 function chooseDestination(
@@ -191,11 +358,12 @@ function chooseDestination(
   const sourceBase = basename(originalFilename);
   const ext = extname(sourceBase);
   const stem = basename(sourceBase, ext);
+  const safeArchive = sanitizePathToken(sourceArchive);
 
-  const candidates: string[] = [sourceBase, `${sourceArchive} ${stem}${ext}`];
+  const candidates: string[] = [sourceBase, `${safeArchive} ${stem}${ext}`];
   let fallback = 2;
-  while (candidates.length < 200) {
-    candidates.push(`${sourceArchive} ${stem} (${fallback})${ext}`);
+  while (candidates.length < MAX_DESTINATION_CANDIDATES) {
+    candidates.push(`${safeArchive} ${stem} (${fallback})${ext}`);
     fallback++;
   }
 
@@ -204,7 +372,7 @@ function chooseDestination(
 
   for (const candidate of candidates) {
     const targetPath = join(destDir, candidate);
-    if (!existsSync(targetPath) || normalize(targetPath) === normalize(srcPath)) {
+    if (!existsSync(targetPath) || normalizeComparePath(targetPath) === normalizeComparePath(srcPath)) {
       chosen = candidate;
       break;
     }
@@ -281,38 +449,20 @@ export function reorganize(productDir: string, dryRun = false): void {
 
   const productName = basename(normalize(productDir));
 
+  const { resolved, skipped } = dedupeRecords(productDir, productName, records);
+
   let moved = 0;
-  let skipped = 0;
+  let unchanged = 0;
   let conflicts = 0;
   const mergedSamples: SampleRecord[] = [];
 
-  for (const [sourceDir, sample] of records) {
+  for (const { sourceDir, sample, srcPath, channel } of resolved) {
     const filename = sample.filename ?? "";
-    if (!filename) {
-      skipped++;
-      continue;
-    }
-
-    const srcPath = join(sourceDir, ...splitPathParts(filename));
-    if (!existsSync(srcPath) || !statSync(srcPath).isFile()) {
-      skipped++;
-      continue;
-    }
-
-    let internalName = sample.internal_name ?? "";
-    if (!internalName) {
-      const source = sample.source ?? "";
-      if (source) {
-        internalName = basename(source, extname(source));
-      }
-    }
-    const category = sample.category ?? "";
-    const channel = getChannel(internalName, category, productName);
-
     const archive = sample.source_archive ?? basename(sourceDir);
     const choice = chooseDestination(productDir, channel, filename, archive, srcPath);
     const destFilename = choice.filename;
     const destPath = choice.fullPath;
+    const samePath = normalizeComparePath(srcPath) === normalizeComparePath(destPath);
     if (choice.hadConflict) conflicts++;
 
     const updatedSample: SampleRecord = { ...sample };
@@ -321,19 +471,27 @@ export function reorganize(productDir: string, dryRun = false): void {
     mergedSamples.push(updatedSample);
 
     if (dryRun) {
-      console.log(`  ${channel.padEnd(8)}  ${relative(productDir, srcPath)}  →  ${channel}/${destFilename}`);
-      moved++;
+      if (!samePath) {
+        console.log(`  ${channel.padEnd(8)}  ${relative(productDir, srcPath)}  →  ${channel}/${destFilename}`);
+        moved++;
+      } else {
+        unchanged++;
+      }
       continue;
     }
 
     mkdirSync(join(productDir, channel), { recursive: true });
-    renameSync(srcPath, destPath);
-    moved++;
+    if (!samePath) {
+      renameSync(srcPath, destPath);
+      moved++;
+    } else {
+      unchanged++;
+    }
   }
 
   console.log(
     `${dryRun ? "[DRY RUN] " : ""}${moved} samples ${dryRun ? "would be " : ""}moved, ` +
-    `${conflicts} collision(s) renamed, ${skipped} skipped (missing files)`,
+    `${unchanged} already in place, ${conflicts} collision(s) renamed, ${skipped} skipped (missing files)`,
   );
 
   if (!dryRun) {
@@ -381,7 +539,7 @@ function main(): void {
   });
 
   if (positionals.length === 0) {
-    console.error("Usage: tsx tools/reorganize.ts <product_dir> [--dry-run]");
+    console.error("Usage: tsx scripts/reorganize.ts <product_dir> [--dry-run]");
     process.exit(1);
   }
 

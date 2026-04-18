@@ -13,9 +13,9 @@
     "test:unit:coverage": "vitest run --coverage",
     "test:coverage": "tsx scripts/test-coverage.ts",
     "test:ui": "playwright test --ui",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json && tsc -p tsconfig.config.json && tsc -p tsconfig.test.json",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\"",
-    "validate": "npm run typecheck && npm run lint:md"
+    "validate": "npm run typecheck && npm run test:unit:coverage && npm run lint:md"
   },
   "repository": {
     "type": "git",

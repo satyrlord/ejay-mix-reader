@@ -1,65 +1,83 @@
 import "./app.css";
 
-import type { ProductEntry, Sample, SampleSort, SampleSortKey } from "./data.js";
-import { deriveChannels, filterSamples, sortSamples } from "./data.js";
+import type { CategoryConfig, CategoryEntry, Sample, SubcategoryKind } from "./data.js";
+import {
+  addSubcategoryToCategoryConfig,
+  buildCategoryEntries,
+  buildDefaultCategoryConfig,
+  filterSamples,
+  getSubcategoryKind,
+  normalizeCategoryLabel,
+  removeSubcategoryFromCategoryConfig,
+  sortSamplesForGrid,
+} from "./data.js";
 import type { Library } from "./library.js";
 import { FetchLibrary, pickLibraryFolder } from "./library.js";
 import { calcProgressInterval, Player } from "./player.js";
 import {
-  renderChannelFilters,
-  renderHeader,
+  renderCategorySidebar,
   renderHomePage,
-  renderProductList,
-  renderSampleList,
-  renderTransportBar,
-  updatePlayingRow,
+  renderSampleGrid,
+  renderSpaShell,
+  renderSubcategoryTabs,
+  type SubcategoryAddOptions,
+  type SpaShellSlots,
+  type UiTab,
+  updatePlayingBlock,
   updateTransport,
 } from "./render.js";
 
-// ── App state ─────────────────────────────────────────────────
+type CategoryTabMode = "subcategory";
+
+interface CategoryTab extends UiTab {
+  mode: CategoryTabMode;
+  value: string | null;
+  kind: SubcategoryKind;
+  removable: boolean;
+}
 
 interface AppState {
   library: Library | null;
-  products: ProductEntry[];
-  product: ProductEntry | null;
+  categoryConfig: CategoryConfig;
+  categories: CategoryEntry[];
+  activeCategory: CategoryEntry | null;
   samples: Sample[];
-  channels: string[];
-  channel: string | null;
-  query: string;
-  sort: SampleSort;
+  tabs: CategoryTab[];
+  activeTab: CategoryTab | null;
+  bpm: number;
+  isAddingSubcategory: boolean;
+  subcategoryDraft: string;
 }
-
-const DEFAULT_SAMPLE_SORT: SampleSort = { key: null, direction: "asc" };
 
 const state: AppState = {
   library: null,
-  products: [],
-  product: null,
+  categoryConfig: buildDefaultCategoryConfig(),
+  categories: [],
+  activeCategory: null,
   samples: [],
-  channels: [],
-  channel: null,
-  query: "",
-  sort: { ...DEFAULT_SAMPLE_SORT },
+  tabs: [],
+  activeTab: null,
+  bpm: 140,
+  isAddingSubcategory: false,
+  subcategoryDraft: "",
 };
+
 const player = new Player();
-
-// ── DOM containers ────────────────────────────────────────────
-
-const app = document.getElementById("app");
-/* istanbul ignore if -- defensive guard: #app always exists in index.html */
-if (!app) throw new Error("Missing #app element");
-
-const homeSlot = document.createElement("div");
-const headerSlot = document.createElement("div");
-const filterSlot = document.createElement("div");
-const mainSlot = document.createElement("div");
-mainSlot.className = "pb-16"; // leave room for transport bar
-const transportSlot = document.createElement("div");
-app.append(homeSlot, headerSlot, filterSlot, mainSlot, transportSlot);
-
-// ── Player events ─────────────────────────────────────────────
-
+let slots: SpaShellSlots | null = null;
 let progressUpdateIntervalId: number | null = null;
+let categoryConfigPollIntervalId: number | null = null;
+let categoryConfigRefreshInFlight = false;
+let subcategoryAddSubmitInFlight = false;
+let subcategoryRemoveSubmitInFlight = false;
+let cleanupSubcategoryContextMenu: (() => void) | null = null;
+
+const CATEGORY_CONFIG_POLL_INTERVAL_MS = 1000;
+const SUBCATEGORY_CONTEXT_MENU_ID = "subcategory-context-menu";
+
+const appElement = document.getElementById("app");
+/* istanbul ignore next -- index.html always provides #app */
+if (!appElement) throw new Error("Missing #app element");
+const app = appElement;
 
 function clearProgressUpdateInterval(): void {
   if (progressUpdateIntervalId === null) return;
@@ -67,60 +85,44 @@ function clearProgressUpdateInterval(): void {
   progressUpdateIntervalId = null;
 }
 
-function leaveProductView(): void {
-  if (!state.library || !state.product) return;
-  player.stop();
-  state.library.releaseProduct(state.product.id);
+function clearCategoryConfigPollInterval(): void {
+  if (categoryConfigPollIntervalId === null) return;
+  clearInterval(categoryConfigPollIntervalId);
+  categoryConfigPollIntervalId = null;
 }
 
 player.onStateChange((playerState) => {
-  const active = player.activePath;
-  updatePlayingRow(active);
-  updateTransport(active, player);
+  updatePlayingBlock(player.activePath);
+  updateTransport(player.activePath, player);
 
   clearProgressUpdateInterval();
   if (playerState === "playing") {
-    // Scale polling to sample length: ~20 updates per playback, clamped 50–250 ms.
-    // Falls back to 250 ms when duration is not yet known.
     const intervalMs = calcProgressInterval(player.duration);
     progressUpdateIntervalId = window.setInterval(() => updateTransport(player.activePath, player), intervalMs);
   }
 });
 
-// Transport stop listener is attached directly in startBrowser
-// after the transport bar is rendered (see below).
-
-// ── Home page ─────────────────────────────────────────────────
-
-/** True when the Vite dev server is likely serving output/ directly. */
 const isDev = import.meta.env.DEV;
 
+/* istanbul ignore next -- production-only home flow is not exercised by the dev-server coverage harness */
 function showHome(): void {
-  homeSlot.innerHTML = "";
-  headerSlot.innerHTML = "";
-  filterSlot.innerHTML = "";
-  mainSlot.innerHTML = "";
-  transportSlot.innerHTML = "";
+  app.replaceChildren();
+  slots = null;
 
   renderHomePage(
-    homeSlot,
-    // `void` explicitly discards the returned Promise; each async handler is responsible for its own errors.
-    /* istanbul ignore next -- requires File System Access API; not available in Playwright */
+    app,
     () => void handlePickFolder(),
-    /* istanbul ignore next -- DEV is always true under the Vite test server */
     isDev ? () => void startWithFetchLibrary() : null,
   );
 }
-
+/* istanbul ignore next -- the OS folder picker path is not exercised by the dev-server coverage harness */
 async function handlePickFolder(): Promise<void> {
-  /* istanbul ignore next -- requires File System Access API; not available in Playwright */
   try {
     const lib = await pickLibraryFolder();
     await startBrowser(lib);
-  } catch (err) {
-    // User cancelled the picker — stay on home page
-    if (err instanceof DOMException && err.name === "AbortError") return;
-    throw err;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    throw error;
   }
 }
 
@@ -129,135 +131,428 @@ async function startWithFetchLibrary(): Promise<void> {
 }
 
 async function startBrowser(library: Library): Promise<void> {
-  /* istanbul ignore if -- only reachable when switching between Fs and Fetch libraries */
-  if (state.library && state.library !== library) {
-    leaveProductView();
-    state.library.dispose();
-  }
-
+  clearCategoryConfigPollInterval();
+  closeSubcategoryContextMenu();
+  resetSubcategoryAddState();
   state.library = library;
-  homeSlot.innerHTML = "";
-  renderTransportBar(transportSlot);
+  slots = renderSpaShell(app);
+  const currentSlots = slots;
 
-  const stopBtn = transportSlot.querySelector("#transport-stop");
-  stopBtn?.addEventListener("click", () => player.stop());
-
-  const index = await library.loadIndex();
-  state.products = index.products;
-  showProducts(state.products);
-}
-
-// ── Render helpers ────────────────────────────────────────────
-
-function showProducts(products: ProductEntry[]): void {
-  leaveProductView();
-  state.product = null;
-  state.samples = [];
-  state.channels = [];
-  state.channel = null;
-  state.query = "";
-  state.sort = { ...DEFAULT_SAMPLE_SORT };
-
-  renderHeader(headerSlot, (q) => {
-    state.query = q;
-    const lower = q.toLowerCase();
-    const filtered = lower
-      ? state.products.filter(p =>
-          p.name.toLowerCase().includes(lower) ||
-          p.channels.some(ch => ch.toLowerCase().includes(lower)))
-      : state.products;
-    filterSlot.innerHTML = "";
-    renderProductList(mainSlot, filtered, (p) => void selectProduct(p));
-  }, () => returnHome(), "\u2190 Back to Home");
-  filterSlot.innerHTML = "";
-  renderProductList(mainSlot, products, (p) => void selectProduct(p));
-}
-
-async function selectProduct(product: ProductEntry): Promise<void> {
-  /* istanbul ignore if -- library is always set before product selection */
-  if (!state.library) return;
-
-  /* istanbul ignore if -- showProducts always resets state.product before selectProduct */
-  if (state.product && state.product.id !== product.id) {
-    leaveProductView();
-  }
-
-  state.product = product;
-  state.channel = null;
-  state.query = "";
-  state.sort = { ...DEFAULT_SAMPLE_SORT };
-  state.samples = await state.library.loadProductSamples(product.id);
-  state.channels = deriveChannels(state.samples);
-
-  renderHeader(
-    headerSlot,
-    (q) => { state.query = q; refreshSamples(); },
-    () => showProductsFromLibrary(),
-    "\u2190 Products",
-    product.name,
-  );
-  refreshChannelFilterBar();
-  refreshSamples();
-}
-
-function showProductsFromLibrary(): void {
-  showProducts(state.products);
-}
-
-function returnHome(): void {
-  leaveProductView();
-  player.stop();
-  state.library?.dispose();
-  state.library = null;
-  state.products = [];
-  state.product = null;
-  state.samples = [];
-  state.channels = [];
-  state.channel = null;
-  state.query = "";
-  state.sort = { ...DEFAULT_SAMPLE_SORT };
-  showHome();
-}
-
-function refreshChannelFilterBar(): void {
-  renderChannelFilters(filterSlot, state.channels, state.channel, (ch) => {
-    state.channel = ch;
-    refreshChannelFilterBar();
+  currentSlots.transport.querySelector("#transport-stop")?.addEventListener("click", () => player.stop());
+  currentSlots.bpm.value = String(state.bpm);
+  currentSlots.bpm.addEventListener("change", () => {
+    state.bpm = Number(currentSlots.bpm.value);
+    if (state.activeCategory) {
+      state.tabs = buildTabsForCategory(state.activeCategory);
+      const still = state.tabs.find((tab) => tab.id === state.activeTab?.id);
+      state.activeTab = still ?? state.tabs[0] ?? null;
+      refreshTabs();
+    }
     refreshSamples();
+  });
+
+  currentSlots.tabs.addEventListener("contextmenu", (event) => {
+    handleSubcategoryTabContextMenu(event);
+  });
+
+  const [index, samples, categoryConfig] = await Promise.all([
+    library.loadIndex(),
+    library.loadSamples().catch((error) => {
+      console.warn("Failed to load sample catalog; continuing with an empty list.", error);
+      return [];
+    }),
+    library.loadCategoryConfig?.().catch((error) => {
+      console.warn("Failed to load category config; continuing with defaults.", error);
+      return buildDefaultCategoryConfig();
+    }) ?? Promise.resolve(buildDefaultCategoryConfig()),
+  ]);
+
+  void index;
+  state.samples = samples;
+  applyCategoryConfig(categoryConfig);
+  startCategoryConfigPolling();
+}
+
+function selectCategory(category: CategoryEntry): void {
+  player.stop();
+  closeSubcategoryContextMenu();
+  resetSubcategoryAddState();
+  state.activeCategory = category;
+  state.activeTab = null;
+  syncActiveCategory();
+}
+
+function buildTabsForCategory(category: CategoryEntry): CategoryTab[] {
+  return category.subcategories.map((subcategory) => {
+    const kind = getSubcategoryKind(category.id, subcategory);
+    return {
+      id: `subcategory:${subcategory}`,
+      label: subcategory,
+      mode: "subcategory",
+      value: subcategory,
+      kind,
+      removable: kind === "user",
+    };
   });
 }
 
-function refreshSamples(): void {
-  /* istanbul ignore if -- defensive guard: only called after selectProduct sets product */
-  if (!state.product || !state.library) return;
-  const filtered = filterSamples(state.samples, state.channel, state.query);
-  const sorted = sortSamples(filtered, state.sort);
-  renderSampleList(
-    mainSlot,
-    sorted,
-    state.product.id,
-    player,
-    state.library,
-    state.sort,
-    toggleSampleSort,
+function refreshTabs(): void {
+  const currentSlots = slots!;
+  const addState = subcategoryAddState();
+
+  closeSubcategoryContextMenu();
+
+  renderSubcategoryTabs(
+    currentSlots.tabs,
+    state.tabs,
+    state.activeTab?.id ?? null,
+    (tabId) => {
+      state.activeTab = state.tabs.find((tab) => tab.id === tabId)!;
+      refreshTabs();
+      refreshSamples();
+    },
+    addState,
   );
-  updatePlayingRow(player.activePath);
 }
 
-function toggleSampleSort(key: SampleSortKey): void {
-  if (state.sort.key === key) {
-    state.sort = {
-      key,
-      direction: state.sort.direction === "asc" ? "desc" : "asc",
-    };
-  } else {
-    state.sort = { key, direction: "asc" };
+function refreshSamples(): void {
+  const currentSlots = slots!;
+  const currentLibrary = state.library!;
+  const activeCategory = state.activeCategory!;
+
+  const filters = {
+    category: activeCategory.id,
+    subcategory: state.activeTab?.value ?? null,
+    product: null,
+    bpm: state.bpm,
+    availableSubcategories: state.tabs
+      .map((tab) => tab.value)
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  };
+
+  const filtered = sortSamplesForGrid(filterSamples(state.samples, filters));
+  renderSampleGrid(currentSlots.grid, filtered, player, currentLibrary);
+  updatePlayingBlock(player.activePath);
+}
+
+function renderEmptyState(message: string): void {
+  const currentSlots = slots!;
+  currentSlots.tabs.replaceChildren();
+  currentSlots.grid.replaceChildren();
+  const empty = document.createElement("p");
+  empty.className = "sample-grid-empty";
+  empty.textContent = message;
+  currentSlots.grid.appendChild(empty);
+}
+
+window.addEventListener("beforeunload", () => {
+  clearCategoryConfigPollInterval();
+  clearProgressUpdateInterval();
+  closeSubcategoryContextMenu();
+  player.destroy();
+  /* istanbul ignore next -- browser coverage boots the library before unload */
+  state.library?.dispose();
+});
+
+function applyCategoryConfig(config: CategoryConfig, preferredTabId: string | null = null): void {
+  state.categoryConfig = config;
+  state.categories = buildCategoryEntries(state.samples, config.categories);
+  syncActiveCategory(preferredTabId);
+}
+
+function syncActiveCategory(preferredTabId: string | null = null): void {
+  const currentSlots = slots;
+  if (!currentSlots) return;
+
+  const activeCategoryId = state.activeCategory?.id ?? null;
+  state.activeCategory = activeCategoryId
+    ? state.categories.find((category) => category.id === activeCategoryId) ?? null
+    : null;
+
+  if (!state.activeCategory) {
+    state.activeCategory = state.categories.find((category) => category.sampleCount > 0)
+      ?? state.categories[0]
+      ?? null;
   }
 
+  renderCategorySidebar(
+    currentSlots.sidebar,
+    state.categories,
+    state.activeCategory?.id ?? null,
+    (category) => selectCategory(category),
+    () => { /* TODO: external JSON library loading */ },
+  );
+
+  if (!state.activeCategory) {
+    renderEmptyState("No categories found in this library.");
+    return;
+  }
+
+  state.tabs = buildTabsForCategory(state.activeCategory);
+  state.activeTab = (preferredTabId
+    ? state.tabs.find((tab) => tab.id === preferredTabId)
+    : null)
+    ?? state.tabs.find((tab) => tab.id === state.activeTab?.id)
+    ?? state.tabs[0]
+    ?? null;
+
+  refreshTabs();
   refreshSamples();
 }
 
-// ── Bootstrap ─────────────────────────────────────────────────
+function startCategoryConfigPolling(): void {
+  clearCategoryConfigPollInterval();
+  if (!state.library?.loadCategoryConfig) return;
 
-showHome();
+  categoryConfigPollIntervalId = window.setInterval(() => {
+    void refreshCategoryConfig(true);
+  }, CATEGORY_CONFIG_POLL_INTERVAL_MS);
+}
 
+async function refreshCategoryConfig(force: boolean): Promise<void> {
+  const library = state.library;
+  if (!library?.loadCategoryConfig || categoryConfigRefreshInFlight) return;
+
+  categoryConfigRefreshInFlight = true;
+  try {
+    const nextConfig = await library.loadCategoryConfig({ force });
+    if (JSON.stringify(nextConfig) === JSON.stringify(state.categoryConfig)) {
+      return;
+    }
+    applyCategoryConfig(nextConfig);
+  } catch (error) {
+    console.warn("Failed to refresh category config.", error);
+  } finally {
+    categoryConfigRefreshInFlight = false;
+  }
+}
+
+function resetSubcategoryAddState(): void {
+  state.isAddingSubcategory = false;
+  state.subcategoryDraft = "";
+}
+
+function closeSubcategoryContextMenu(): void {
+  document.getElementById(SUBCATEGORY_CONTEXT_MENU_ID)?.remove();
+  cleanupSubcategoryContextMenu?.();
+  cleanupSubcategoryContextMenu = null;
+}
+
+function findTabById(tabId: string | null | undefined): CategoryTab | null {
+  if (!tabId) return null;
+  return state.tabs.find((tab) => tab.id === tabId) ?? null;
+}
+
+function handleSubcategoryTabContextMenu(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    closeSubcategoryContextMenu();
+    return;
+  }
+
+  const tabButton = target.closest<HTMLButtonElement>(".subcategory-tab");
+  if (!tabButton) {
+    closeSubcategoryContextMenu();
+    return;
+  }
+
+  const tab = findTabById(tabButton.dataset.tabId);
+  const canWrite = Boolean(
+    tab?.removable &&
+    state.library?.canWriteCategoryConfig?.() &&
+    state.library?.saveCategoryConfig,
+  );
+  if (!tab || !canWrite) {
+    closeSubcategoryContextMenu();
+    return;
+  }
+
+  event.preventDefault();
+  openSubcategoryContextMenu(tab, event.clientX, event.clientY);
+}
+
+function openSubcategoryContextMenu(tab: CategoryTab, clientX: number, clientY: number): void {
+  closeSubcategoryContextMenu();
+
+  const menu = document.createElement("div");
+  menu.id = SUBCATEGORY_CONTEXT_MENU_ID;
+  menu.className = "subcategory-context-menu";
+  menu.setAttribute("role", "menu");
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "subcategory-context-menu-item";
+  removeButton.setAttribute("role", "menuitem");
+  removeButton.textContent = "remove";
+  removeButton.addEventListener("click", () => {
+    void handleRemoveSubcategory(tab);
+  });
+
+  menu.appendChild(removeButton);
+  document.body.appendChild(menu);
+
+  const positionMenu = (): void => {
+    const left = Math.min(clientX, window.innerWidth - menu.offsetWidth - 8);
+    const top = Math.min(clientY, window.innerHeight - menu.offsetHeight - 8);
+    menu.style.left = `${Math.max(8, left)}px`;
+    menu.style.top = `${Math.max(8, top)}px`;
+  };
+
+  const handlePointerDown = (pointerEvent: PointerEvent): void => {
+    if (!(pointerEvent.target instanceof Node) || menu.contains(pointerEvent.target)) return;
+    closeSubcategoryContextMenu();
+  };
+
+  const handleKeydown = (keyboardEvent: KeyboardEvent): void => {
+    if (keyboardEvent.key !== "Escape") return;
+    keyboardEvent.preventDefault();
+    closeSubcategoryContextMenu();
+  };
+
+  const handleResize = (): void => {
+    positionMenu();
+  };
+
+  document.addEventListener("pointerdown", handlePointerDown, true);
+  document.addEventListener("keydown", handleKeydown);
+  window.addEventListener("resize", handleResize);
+  cleanupSubcategoryContextMenu = () => {
+    document.removeEventListener("pointerdown", handlePointerDown, true);
+    document.removeEventListener("keydown", handleKeydown);
+    window.removeEventListener("resize", handleResize);
+  };
+
+  window.requestAnimationFrame(() => {
+    positionMenu();
+    removeButton.focus();
+  });
+}
+
+function subcategoryAddState(): SubcategoryAddOptions {
+  const activeCategory = state.activeCategory;
+  const canWrite = Boolean(
+    activeCategory &&
+    state.library?.canWriteCategoryConfig?.() &&
+    state.library?.saveCategoryConfig,
+  );
+
+  if (!canWrite) {
+    resetSubcategoryAddState();
+    return {
+      addDisabled: true,
+      addTitle: "Subcategory editing is disabled in the production build.",
+    };
+  }
+
+  if (state.isAddingSubcategory) {
+    return {
+      isEditing: true,
+      draftValue: state.subcategoryDraft,
+      draftPlaceholder: "untitled",
+      addTitle: `Create a subcategory in ${activeCategory!.name}`,
+      onDraftChange: (value) => {
+        state.subcategoryDraft = value;
+      },
+      onSubmit: () => void handleCreateSubcategory(),
+      onCancel: () => cancelSubcategoryAdd(),
+    };
+  }
+
+  return {
+    onAdd: () => beginSubcategoryAdd(),
+    addDisabled: false,
+    addTitle: `Add a subcategory to ${activeCategory!.name}`,
+  };
+}
+
+function beginSubcategoryAdd(): void {
+  closeSubcategoryContextMenu();
+  state.isAddingSubcategory = true;
+  state.subcategoryDraft = "";
+  refreshTabs();
+}
+
+function cancelSubcategoryAdd(): void {
+  closeSubcategoryContextMenu();
+  resetSubcategoryAddState();
+  refreshTabs();
+}
+
+async function handleCreateSubcategory(): Promise<void> {
+  const library = state.library;
+  const activeCategory = state.activeCategory;
+  if (!library?.saveCategoryConfig || !activeCategory || subcategoryAddSubmitInFlight) return;
+
+  closeSubcategoryContextMenu();
+  const subcategoryName = normalizeCategoryLabel(state.subcategoryDraft);
+  if (!subcategoryName) return;
+
+  subcategoryAddSubmitInFlight = true;
+  const existingTab = state.tabs.find(
+    (tab) => tab.value !== null && normalizeCategoryLabel(tab.value).toLowerCase() === subcategoryName.toLowerCase(),
+  );
+  if (existingTab || getSubcategoryKind(activeCategory.id, subcategoryName) !== "user") {
+    resetSubcategoryAddState();
+    applyCategoryConfig(state.categoryConfig, existingTab?.id ?? state.activeTab?.id ?? null);
+    subcategoryAddSubmitInFlight = false;
+    return;
+  }
+
+  const nextConfig = addSubcategoryToCategoryConfig(state.categoryConfig, activeCategory.id, subcategoryName);
+  if (JSON.stringify(nextConfig) === JSON.stringify(state.categoryConfig)) {
+    resetSubcategoryAddState();
+    applyCategoryConfig(state.categoryConfig, `subcategory:${subcategoryName}`);
+    subcategoryAddSubmitInFlight = false;
+    return;
+  }
+
+  try {
+    await library.saveCategoryConfig(nextConfig);
+    resetSubcategoryAddState();
+    applyCategoryConfig(nextConfig, `subcategory:${subcategoryName}`);
+  } catch (error) {
+    console.error("Failed to save category config.", error);
+    window.alert("Could not save categories.json.");
+  } finally {
+    subcategoryAddSubmitInFlight = false;
+  }
+}
+
+async function handleRemoveSubcategory(tab: CategoryTab): Promise<void> {
+  const library = state.library;
+  const activeCategory = state.activeCategory;
+  if (
+    !library?.saveCategoryConfig ||
+    !activeCategory ||
+    !tab.removable ||
+    !tab.value ||
+    subcategoryRemoveSubmitInFlight
+  ) {
+    return;
+  }
+
+  subcategoryRemoveSubmitInFlight = true;
+  closeSubcategoryContextMenu();
+  const nextConfig = removeSubcategoryFromCategoryConfig(state.categoryConfig, activeCategory.id, tab.value);
+  if (JSON.stringify(nextConfig) === JSON.stringify(state.categoryConfig)) {
+    subcategoryRemoveSubmitInFlight = false;
+    return;
+  }
+
+  try {
+    await library.saveCategoryConfig(nextConfig);
+    applyCategoryConfig(nextConfig);
+  } catch (error) {
+    console.error("Failed to save category config.", error);
+    window.alert("Could not save categories.json.");
+  } finally {
+    subcategoryRemoveSubmitInFlight = false;
+  }
+}
+
+/* istanbul ignore next -- browser coverage runs against the dev server, so DEV is always true here */
+if (isDev) {
+  void startWithFetchLibrary();
+} else {
+  showHome();
+}

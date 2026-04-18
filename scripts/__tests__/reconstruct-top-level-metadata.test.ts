@@ -49,7 +49,7 @@ describe("buildTemporaryMetadata", () => {
     const tmp = createTempDir();
     try {
       writeFileSync(join(tmp, "orphan.wav"), "orphan");
-      expect(() => buildTemporaryMetadata(tmp)).toThrow(/Cannot infer channel folder/);
+      expect(buildTemporaryMetadata(tmp).samples).toEqual([]);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

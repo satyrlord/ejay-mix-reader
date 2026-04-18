@@ -1,0 +1,430 @@
+{
+  "format": "C",
+  "product": "Dance_eJay4",
+  "appId": 11585,
+  "bpm": 140,
+  "bpmAdjusted": 130,
+  "author": "christoph",
+  "title": "5 days to go",
+  "registration": "0000000",
+  "tracks": [
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": -4,
+        "internalName": null,
+        "displayName": "kick09",
+        "resolvedPath": null,
+        "dataLength": 1802239
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 12,
+        "internalName": null,
+        "displayName": "kick04",
+        "resolvedPath": null,
+        "dataLength": 1788254
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 8,
+        "internalName": null,
+        "displayName": "hihat06",
+        "resolvedPath": null,
+        "dataLength": 1798962
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": -5,
+        "internalName": null,
+        "displayName": "drumfx77",
+        "resolvedPath": null,
+        "dataLength": 1793254
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": -4,
+        "internalName": null,
+        "displayName": "drumfx43",
+        "resolvedPath": null,
+        "dataLength": 1794047
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": -4,
+        "internalName": null,
+        "displayName": "drumfx51",
+        "resolvedPath": null,
+        "dataLength": 1791669
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 4,
+        "internalName": null,
+        "displayName": "drumfx48",
+        "resolvedPath": null,
+        "dataLength": 1793254
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 6,
+        "internalName": null,
+        "displayName": "snare35",
+        "resolvedPath": null,
+        "dataLength": 1794047
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 0,
+        "internalName": null,
+        "displayName": "snare48",
+        "resolvedPath": null,
+        "dataLength": 1793254
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 0,
+        "internalName": null,
+        "displayName": "snare46",
+        "resolvedPath": null,
+        "dataLength": 1791669
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 0,
+        "internalName": null,
+        "displayName": "snare70",
+        "resolvedPath": null,
+        "dataLength": 1795633
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 0,
+        "internalName": null,
+        "displayName": "drumfx42",
+        "resolvedPath": null,
+        "dataLength": 1791669
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 0,
+        "internalName": null,
+        "displayName": "snare06",
+        "resolvedPath": null,
+        "dataLength": 1794047
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 0,
+        "internalName": null,
+        "displayName": "snare75",
+        "resolvedPath": null,
+        "dataLength": 1793254
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 0,
+        "internalName": null,
+        "displayName": "snare69",
+        "resolvedPath": null,
+        "dataLength": 1794047
+      }
+    },
+    {
+      "beat": null,
+      "channel": null,
+      "sampleRef": {
+        "rawId": 0,
+        "internalName": null,
+        "displayName": "snare63",
+        "resolvedPath": null,
+        "dataLength": 1794047
+      }
+    }
+  ],
+  "mixer": {
+    "channels": [
+      {
+        "index": 0,
+        "volume1": 78,
+        "volume2": 50,
+        "pan": null,
+        "eq": 35,
+        "muted": false,
+        "solo": false
+      },
+      {
+        "index": 1,
+        "volume1": 46,
+        "volume2": 50,
+        "pan": null,
+        "eq": 41,
+        "muted": false,
+        "solo": false
+      },
+      {
+        "index": 2,
+        "volume1": 55,
+        "volume2": 50,
+        "pan": null,
+        "eq": 46,
+        "muted": false,
+        "solo": false
+      },
+      {
+        "index": 3,
+        "volume1": 66,
+        "volume2": 50,
+        "pan": null,
+        "eq": 52,
+        "muted": false,
+        "solo": false
+      },
+      {
+        "index": 4,
+        "volume1": 76,
+        "volume2": 50,
+        "pan": null,
+        "eq": 58,
+        "muted": false,
+        "solo": false
+      },
+      {
+        "index": 5,
+        "volume1": 85,
+        "volume2": 50,
+        "pan": null,
+        "eq": 65,
+        "muted": false,
+        "solo": false
+      },
+      {
+        "index": 6,
+        "volume1": 78,
+        "volume2": 50,
+        "pan": null,
+        "eq": 65,
+        "muted": false,
+        "solo": false
+      },
+      {
+        "index": 7,
+        "volume1": 50,
+        "volume2": 50,
+        "pan": null,
+        "eq": 66,
+        "muted": false,
+        "solo": false
+      },
+      {
+        "index": 8,
+        "volume1": 56,
+        "volume2": 50,
+        "pan": null,
+        "eq": 67,
+        "muted": false,
+        "solo": false
+      },
+      {
+        "index": 9,
+        "volume1": 0,
+        "volume2": 50,
+        "pan": null,
+        "eq": 78,
+        "muted": false,
+        "solo": false
+      }
+    ],
+    "eq": [
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50
+    ],
+    "compressor": {
+      "drive": 13405,
+      "gain": 10756,
+      "speed": 20024,
+      "enabled": true
+    },
+    "stereoWide": 15059,
+    "raw": {
+      "BOOU2_0": "50",
+      "BOOU2_1": "50",
+      "BOOU2_2": "50",
+      "BOOU2_3": "50",
+      "BOOU2_4": "50",
+      "BOOU2_5": "50",
+      "BOOU2_6": "50",
+      "BOOU2_7": "50",
+      "BOOU2_8": "50",
+      "BOOU2_9": "50",
+      "FX_3": "0",
+      "FX_4": "0",
+      "FX_7": "0",
+      "FX_10": "0",
+      "FX_13": "0",
+      "DrumK_SFX_REVERBVOLUME": "27173",
+      "DrumK_SFX_REVERBTIME": "11988",
+      "DrumK_SFX_REVERBPRE": "11189",
+      "DrumHall": "0",
+      "DrumK_MIDSWEEPSPEED": "23976",
+      "DrumK_MIDSWEEPGAIN": "27972",
+      "DrumK_MIDSWEEPRANGE": "12787",
+      "DrumK_CHORUSVOLUME": "22377",
+      "DrumK_CHORUSCOLOR": "15984",
+      "DrumK_SFX_ECHOVOLUME": "25574",
+      "DrumK_SFX_ECHOFEEDBACK": "20779",
+      "DrumEchoType": "2",
+      "DrumK_SFX_OVERDRIVE": "23976",
+      "DrumK_SFX_OVERFILTER": "16783",
+      "DrumOver": "0",
+      "DrumU1_0": "35",
+      "DrumEQ0": "35",
+      "DrumU1_1": "41",
+      "DrumEQ1": "41",
+      "DrumU1_2": "46",
+      "DrumEQ2": "46",
+      "DrumU1_3": "52",
+      "DrumEQ3": "52",
+      "DrumU1_4": "58",
+      "DrumEQ4": "58",
+      "DrumU1_5": "65",
+      "DrumEQ5": "65",
+      "DrumU1_6": "65",
+      "DrumEQ6": "65",
+      "DrumU1_7": "66",
+      "DrumEQ7": "66",
+      "DrumU1_8": "67",
+      "DrumEQ8": "67",
+      "DrumU1_9": "78",
+      "DrumEQ9": "78",
+      "DrumEQ": "0",
+      "DrumMidsweep": "0",
+      "BoostStereoWide": "15059",
+      "BoostStereoLED": "0",
+      "BoostEQ": "1",
+      "BOOU1_9": "0",
+      "BOOU1_8": "56",
+      "BOOU1_7": "50",
+      "BoostEQ_7": "50",
+      "BOOU1_0": "78",
+      "BOOU1_1": "46",
+      "BOOU1_2": "55",
+      "BOOU1_3": "66",
+      "BOOU1_6": "78",
+      "BOOU1_5": "85",
+      "BOOU1_4": "76",
+      "BOOU": "2",
+      "BoostEQ_0": "50",
+      "BoostEQ_1": "50",
+      "BoostEQ_2": "50",
+      "BoostEQ_3": "50",
+      "BoostEQ_4": "50",
+      "BoostEQ_5": "50",
+      "BoostEQ_6": "50",
+      "BoostEQ_8": "50",
+      "BoostEQ_9": "50",
+      "BoostCompressorSpeed": "20024",
+      "BoostCompressorDrive": "13405",
+      "BoostCompressorGain": "10756",
+      "BoostCompressorLED": "1",
+      "DrumK_SFX_ECHOTIME": "11783",
+      "DrumEcho": "1",
+      "DrumChorus": "1"
+    }
+  },
+  "drumMachine": null,
+  "tickerText": [],
+  "catalogs": [
+    {
+      "name": "Dance eJay 4",
+      "idRangeStart": 2000,
+      "idRangeEnd": 3399
+    },
+    {
+      "name": "Dance eJay",
+      "idRangeStart": 3400,
+      "idRangeEnd": 3899
+    },
+    {
+      "name": "Dance eJay SK1",
+      "idRangeStart": 3900,
+      "idRangeEnd": 4499
+    },
+    {
+      "name": "Dance eJay SK2",
+      "idRangeStart": 4500,
+      "idRangeEnd": 5099
+    },
+    {
+      "name": "Dance eJay SK3",
+      "idRangeStart": 5100,
+      "idRangeEnd": 5699
+    },
+    {
+      "name": "Dance eJay SK4",
+      "idRangeStart": 5800,
+      "idRangeEnd": 6499
+    },
+    {
+      "name": "Dance eJay SK5",
+      "idRangeStart": 6500,
+      "idRangeEnd": 7199
+    },
+    {
+      "name": "Dance eJay SK6",
+      "idRangeStart": 0,
+      "idRangeEnd": 0
+    }
+  ]
+}

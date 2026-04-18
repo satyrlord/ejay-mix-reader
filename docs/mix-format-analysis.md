@@ -2,11 +2,12 @@
 
 Comprehensive reverse-engineering analysis of the `.MIX` project file format used
 by eJay music software (1997–2003). Covers all 14 products across 4 format
-generations, with a proposed abstraction layer for browser-based playback.
+generations, plus the compatibility notes needed by the current parser,
+resolver, and browser MIX-loading workflow.
 
-> **Scope**: this document is the **format reference**. For the ordered
-> implementation roadmap (parser, resolver, player, UI, tests) see
-> [mix-player-prerequisites.md](mix-player-prerequisites.md).
+> **Scope**: this document is the MIX format reference and compatibility note.
+> It tracks on-disk structures, parser expectations, and unresolved findings
+> rather than implementation sequencing.
 
 ## File Inventory
 
@@ -95,9 +96,9 @@ playback.
 
 Used by: Dance eJay 1, Rave eJay, Dance SuperPack, Generation Pack 1
 
-Prerequisite 2 of the implementation roadmap verifies the grid layout and
-cell width empirically via [`tools/mix-grid-analyzer.ts`](../tools/mix-grid-analyzer.ts).
-Run `npx tsx tools/mix-grid-analyzer.ts --all --out output/mix-grid-summary.json`
+The grid layout and cell width are verified empirically via
+[`scripts/mix-grid-analyzer.ts`](../scripts/mix-grid-analyzer.ts). Run
+`npx tsx scripts/mix-grid-analyzer.ts --all --out output/mix-grid-summary.json`
 to regenerate the per-file report under `output/mix-grid-summary.json` (83
 Gen 1 `.mix` files across all six products).
 
@@ -124,8 +125,8 @@ Offset  Size  Field
   `0xCF04` / `0x04CF` spacing analysis and the analyzer's column-index
   histograms across all six products.
 - **Cell values**: uint16 LE sample IDs. `0x0000` = empty cell. Non-zero
-  values are the direct MAX/PXD.TXT catalog indices produced by
-  Prerequisite 1 (see [Gen 1 Sample-ID Catalogs](file-formats.md#gen-1-sample-id-catalogs-max-pxddance-pxdtxt)).
+  values are the direct MAX/PXD.TXT catalog indices documented in
+  [Gen 1 Sample-ID Catalogs](file-formats.md#gen-1-sample-id-catalogs-max-pxddance-pxdtxt).
 - **Cell width is uint16 LE for every Gen 1 product.** The earlier
   hypothesis that Rave and HipHop 1 used a byte-wide grid has been
   refuted: the suspicious "large" u16 values seen in those products
@@ -180,7 +181,7 @@ the `trailer` field.
 #### Common uint16 Value Histogram (Dance 1 START.MIX)
 
 ```text
-0x04CF (1231): 33 occurrences — "ai/bvjp.pxd" (verified via Prereq 1)
+0x04CF (1231): 33 occurrences — "ai/bvjp.pxd" (verified via the Gen 1 MAX catalog)
 0x077F (1919): 15 occurrences
 0x02EA ( 746): 13 occurrences
 0x034B ( 843): 12 occurrences
@@ -190,43 +191,123 @@ the `trailer` field.
 
 #### Sample ID Mapping
 
-Resolved in Prerequisite 1 — sample IDs are a plain lookup into the
-per-product `MAX` / `MAX.TXT` catalog (`line N = ID N`). See the
+Sample IDs are a plain lookup into the per-product `MAX` / `MAX.TXT`
+catalog (`line N = ID N`). See the
 [Gen 1 Sample-ID Catalogs](file-formats.md#gen-1-sample-id-catalogs-max-pxddance-pxdtxt)
 section of `file-formats.md` and the generated
 `output/<product>/gen1-catalog.json` files.
 
-#### Prereq 2 open follow-ups
+#### Remaining Follow-ups
 
-- **Column-to-channel assignment** (loop / drum / bass / …) cannot be
-  derived from the binary alone; it requires either running a known mix
-  through the original engine and observing channel routing, or cross-
-  referencing the column index of each cell against the PXD.TXT /
-  Pxddance channel category of its sample. Deferred to the player
-  prototype (Prerequisite 8) and the resolver (Prerequisite 5).
-- **ID overflow**: GP1-HipHop mixes reference IDs up to 2071 (MAX
-  catalog size 1381); SuperPack `softvox.mix` / `space.mix` reference
-  IDs up to 4727 (MAX catalog size 2845). The overflow IDs correspond
-  to expansion kits that append their samples after the base MAX:
-  - `DMKIT1` — DanceMachine Sample-Kit Vol. 1 (= gung SAMPLE BOX 1):
-    source installer content → `archive/Dance_SuperPack/eJay SampleKit/DMKIT1/`;
-    extracted output → `output/SampleKit_DMKIT1/`.
-  - `DMKIT2` — DanceMachine Sample-Kit Vol. 2 (= gung SAMPLE BOX 2):
-    source installer content → `archive/Dance_SuperPack/eJay SampleKit/DMKIT2/`;
-    extracted output → `output/SampleKit_DMKIT2/`.
-  - `SpaceSounds` — gung SAMPLE BOX Space Sounds: 417 pre-decoded
-    WAVs staged for playback under `output/SampleKit_DMKIT3/`.
-  The resolver must build a combined catalog by appending each kit in
-  install order after the base product MAX. The trailer’s sample-pack
-  label identifies which kits are active for a given mix file.
-- **`headerAux` semantics** (uint16 at 0x02): zero in most files,
-  non-zero and file-specific otherwise. Candidates: CRC/checksum of
-  the grid region; user registration / sub-variant id; implicit BPM
-  override. Left open for Prereq 3 (binary parser) to revisit.
-- **Extended trailer vocabulary**: the Rave NODRUGS.MIX path reference
-  (`c:\raveejay\hypersav\scool004.wav`) is the only observed external
-  sample import. If other mixes use the same mechanism the resolver
-  will need to honour per-MIX user samples.
+The four open questions previously listed here have been investigated against
+the full 83-file Gen 1 `.mix` corpus via
+[`scripts/investigate-mix-followups.ts`](../scripts/investigate-mix-followups.ts)
+and [`scripts/probe-header-aux.ts`](../scripts/probe-header-aux.ts). The
+findings are summarised below; only the column-to-channel mapping remains
+genuinely undetermined (requires UI inspection of the original engine).
+
+##### 1. Column-to-channel assignment — partially resolved
+
+Joining each grid cell against the per-product Gen 1 catalog
+(`MAX` + `Pxddance`/`PXD.TXT`) yields per-column category histograms.
+Dance eJay 1 (the only product with PXD.TXT channel ranges) shows a
+weak but real bias per column:
+
+| Col | Dominant categories (Dance eJay 1) |
+|-----|-------------------------------------|
+| 0 | rap (51 %), voice (8 %) |
+| 1 | xtra (40 %), effect (29 %), rap (17 %) |
+| 2 | rap (17 %), effect (12 %), xtra (10 %) |
+| 3 | xtra (74 %) |
+| 4 | rap (28 %), xtra (21 %), effect (21 %) |
+| 5 | rap (79 %) |
+| 6 | rap (84 %) |
+| 7 | voice (58 %), rap (17 %) |
+
+Dance SuperPack / GP1-Dance (Pxddance categories — `bass`, `drum`,
+`layer`, `loop`, `sequence`, `voice`, etc.) show a much flatter
+distribution: every column accepts every category, with no column
+dominated by a single label. Rave / GP1-Rave / GP1-HipHop have no
+catalog category data and are 100 % `<unknown>`.
+
+**Conclusion**: columns are timeline tracks that *accept* any sample
+type. There is no enforceable column → channel-category mapping derivable
+from the binaries alone, though Dance eJay 1's bias suggests the UI
+labels track 5/6 as voice-style tracks and track 3 as an "extras"
+track. A definitive per-column UI label still requires running a known
+mix through the original engine and observing routing — the parser will
+continue to preserve the numeric column index only.
+
+##### 2. ID overflow — resolved
+
+GP1-HipHop mixes reference IDs up to 2071 (MAX catalog size 1381);
+SuperPack `softvox.mix` / `space.mix` reference IDs up to 4727 (MAX
+catalog size 2845). The overflow IDs correspond to expansion kits that
+append their samples after the base MAX:
+
+- `DMKIT1` — DanceMachine Sample-Kit Vol. 1 (= gung SAMPLE BOX 1):
+  source installer content → `archive/Dance_SuperPack/eJay SampleKit/DMKIT1/`;
+  extracted output → `output/SampleKit_DMKIT1/`.
+- `DMKIT2` — DanceMachine Sample-Kit Vol. 2 (= gung SAMPLE BOX 2):
+  source installer content → `archive/Dance_SuperPack/eJay SampleKit/DMKIT2/`;
+  extracted output → `output/SampleKit_DMKIT2/`.
+- `SpaceSounds` — gung SAMPLE BOX Space Sounds: 417 pre-decoded
+  WAVs staged for playback under `output/SampleKit_DMKIT3/`.
+
+Resolution must build a combined catalog by appending each kit in
+install order after the base product MAX. The trailer's sample-pack
+label identifies which kits are active for a given mix file.
+
+##### 3. `headerAux` (uint16 @ 0x02) — partially resolved
+
+24/83 Gen 1 mixes carry a non-zero `headerAux`. None of the obvious
+checksum/aggregate hypotheses hold across the corpus
+(`scripts/probe-header-aux.ts`):
+
+- `aux !== cellCount`, `aux !== gridEnd` (0/24 matches)
+- `aux !== sumIds & 0xffff`, `aux !== xorIds`, `aux !== trailerLen`,
+  `aux !== Σ trailerBytes & 0xffff`, `aux !== trailerStart` (0/24 each)
+
+What *does* hold:
+
+- **Identical files share identical aux** (e.g. `FREAK.MIX` aux=758
+  appears in Dance eJay 1, SuperPack, and GP1-Dance; PSYCOA, SCOOL,
+  TRANCE, XWING share aux across Rave / GP1-Rave).
+- The aux value frequently re-appears as a uint16 inside the file at
+  16-byte (one-row) intervals — for example
+  `Rave/SCOOL.MIX` aux=865 appears at offsets 34, 66, 98, 130, 162;
+  `HipHop/SWEET.MIX` aux=1901 appears at offsets 36, 70, 104, 138.
+  This pattern is consistent with the aux being a sample id that
+  occupies a fixed column on consecutive rows (i.e. a default
+  loop-track id or "currently selected cell" UI state), rather than
+  any kind of checksum.
+- `aux === firstNonZeroId` for 6/24 files (FREAK across all three
+  Dance variants, SCOOL across both Rave variants, MYSELF.MIX) — close
+  but not universal.
+
+**Working conclusion**: `headerAux` is best treated as an **opaque,
+file-deterministic sample-id field** — likely a snapshot of the eJay 1
+UI's currently selected / default loop sample. It is not required for
+playback; the parser preserves it for completeness only.
+
+##### 4. Extended trailer vocabulary — resolved
+
+A full sweep of every Gen 1 trailer for path-like strings (containing
+`\`, `/`, drive letters, or `.wav` suffixes) finds **exactly one**
+external sample reference across all 83 files:
+
+```text
+archive/Rave/MIX/NODRUGS.MIX  → "c:\\raveejay\\hypersav\\scool004.wav"
+archive/GenerationPack1/Rave/MIX/NODRUGS.MIX  → "c:\\raveejay\\hypersav\\scool004.wav"
+```
+
+(The two hits are the same file shipped under both Rave and GP1-Rave.)
+The external import mechanism is therefore real but vanishingly rare
+in the shipped library. Per `project-state.md`, the
+`c:\raveejay\hypersav\` directory is the Rave HyperKit user-recording
+folder; the resolver should skip / ignore these references rather than
+attempt a library lookup. No other mix in the corpus uses this
+mechanism.
 
 ---
 
@@ -827,115 +908,25 @@ interface DrumEffectsChain {
 }
 ```
 
-### Implementation Plan — 3 Phases
+### Current Implementation Touchpoints
 
-> The ordered, dependency-aware roadmap for implementing parser → resolver →
-> player lives in [mix-player-prerequisites.md](mix-player-prerequisites.md).
-> The subsections below are a higher-level summary kept here for context; if
-> the two documents disagree, the prerequisites doc wins.
+The current codebase splits MIX support across a focused set of tooling,
+browser runtime, and test files:
 
-#### Phase 1: Format Parsers (`tools/mix-parser.ts`)
+| File | Role |
+|------|------|
+| `scripts/mix-parser.ts` | Node-side Format A/B/C/D parser emitting `MixIR` for offline analysis and golden tests. |
+| `scripts/mix-resolver.ts` | Resolves parsed `SampleRef` values against normalized output metadata and Gen 1 catalogs. |
+| `src/mix-buffer.ts` / `src/mix-parser.ts` | Browser-safe parsing path used after fetching `.mix` bytes from the UI. |
+| `src/mix-player.ts` | `/mix/` fetch helper plus Web Audio host/effect primitives used by the MIX picker. |
+| `src/data.ts`, `src/main.ts`, `src/render.ts` | `mixLibrary` data model and product-page MIX picker UI. |
+| `scripts/build-index.ts` | Scans archive MIX folders and emits `mixLibrary` entries into `data/index.json`. |
+| `vite.config.ts` | Serves `/mix/<product>/<filename>` in dev and copies MIX files into `dist/mix/` for builds. |
+| `tests/mix-playback.spec.ts` and `scripts/__tests__/mix-golden.test.ts` | End-to-end and golden-file regression coverage for MIX loading and parsing. |
 
-One parser function per format family, all emitting `MixIR`:
-
-| Parser | Input | Key Challenge | Approach |
-|--------|-------|---------------|----------|
-| `parseFormatA(buf, productHint)` | Gen 1 binary grid | Grid dimensions unknown, sample ID mapping undocumented | Determine grid width empirically (8 uint16/row = 16 bytes). Build ID→WAV lookup from Gen 1 PXD bank directory listing. Product hint needed for implicit BPM. |
-| `parseFormatB(buf)` | Gen 2 header + text + grid | Variable-length records with embedded PXD filenames | Parse header, iterate catalog by `0x01` tags, parse track records using known string-length patterns. |
-| `parseFormatC(buf)` | Gen 3 early: header + mixer + tracks | BOOU/DrumEQ mixer state text encoding | Parse `#°_#...%°_%` key-value pairs. Track entries follow same pattern as B but with display names + temp paths. |
-| `parseFormatD(buf)` | Gen 3 late: header + mixer + drum + tracks | Complex drum machine state, 49-track mixer | Same key-value parser as C, extended with DrumName/DrumPitch/MixVolume/MixPan/MixMute/MixSolo arrays. |
-
-#### Phase 2: Sample Resolution Layer (`tools/mix-resolver.ts` / `src/mix-resolver.ts`)
-
-Maps `SampleRef` fields to actual output WAV files:
-
-1. **Gen 1 ID→WAV mapping**: Build a lookup table from PXD bank directories.
-   Each bank directory (AA, AB, ..., BW) contains numbered PXD files. The
-   uint16 sample ID encodes `(bank_index × bank_size + file_index)`. Validate
-   against the Pxddance catalog and known demo mix content.
-
-2. **Gen 2 name→WAV mapping**: Each track entry contains a PXD filename (e.g.,
-   `humn.9`) or display name. Match against `metadata.json[].id` field.
-
-3. **Gen 3 name→WAV mapping**: Track entries contain display names (e.g.,
-   `kick28`) that match INF `display_alias`. Resolve via each product's
-   `metadata.json[].alias`.
-
-4. **Cross-product resolution**: Catalog sections enumerate required products.
-   Search across all `output/*/metadata.json` using the existing
-   `data/index.json` as a unified index.
-
-#### Phase 3: Browser Playback Engine (`src/mix-player.ts`)
-
-Uses the Web Audio API for real-time mix playback:
-
-1. **Sample loading**: Preload all referenced WAVs from `output/` as
-   `AudioBuffer`s using `fetch()` + `AudioContext.decodeAudioData()`. Only
-   load samples listed in `MixIR.tracks` and `MixIR.drumMachine.pads`.
-
-2. **Timeline scheduling**: Use `AudioContext.currentTime` with
-   `AudioBufferSourceNode.start(when)` for sample-accurate beat scheduling.
-   Beat timing: `beatDuration = 60 / MixIR.bpm` seconds.
-
-3. **Mixer routing**: Per-channel audio graph:
-
-   ```text
-   AudioBufferSourceNode
-     → GainNode (volume)
-     → StereoPannerNode (pan)
-     → masterGain
-     → AudioContext.destination
-   ```
-
-   Apply mute via gain=0, solo by muting all non-solo tracks.
-
-4. **Drum machine** (Format D only): Trigger drum pad samples at scheduled
-   beats with per-pad pitch shift (via `playbackRate`), reverse (pre-reversed
-   `AudioBuffer`), and FX routing.
-
-5. **Effects chain** (progressive enhancement):
-
-   | Effect | Web Audio Node | Complexity |
-   |--------|---------------|------------|
-   | EQ | `BiquadFilterNode` bank (10 bands) | Medium |
-   | Compressor | `DynamicsCompressorNode` | Low |
-   | Echo/Delay | `DelayNode` + `GainNode` feedback | Medium |
-   | Reverb | `ConvolverNode` with synthetic IR | Medium |
-   | Chorus | `OscillatorNode` → `DelayNode` modulation | High |
-   | Overdrive | `WaveShaperNode` + `BiquadFilterNode` | Medium |
-   | Harmonizer | Pitch-shifted parallel `AudioBufferSourceNode`s | High |
-   | Vocoder | `AnalyserNode` + filter bank | Very High |
-
-### Feature Priority Matrix
-
-| Feature | Priority | Complexity | Impact | Formats |
-|---------|----------|------------|--------|---------|
-| Sample placement on timeline | **P0** | Medium | Core playback | All |
-| BPM-accurate timing | **P0** | Low | Core playback | All |
-| Format auto-detection | **P0** | Low | Required for parsing | All |
-| Per-channel volume | **P1** | Low | Mix balance | B/C/D |
-| Per-channel pan | **P1** | Low | Stereo image | C/D |
-| Mute/Solo | **P2** | Low | Interactive control | D |
-| Play/Pause/Seek transport | **P2** | Medium | UX essential | All |
-| Waveform visualization | **P2** | Medium | Visual feedback | All |
-| Master EQ | **P3** | Medium | Tonal color | C/D |
-| Drum machine pads | **P3** | Medium | HipHop4/House only | D |
-| Echo/Delay | **P4** | Medium | Optional effect | C/D |
-| Compressor | **P4** | Low | Web Audio built-in | C/D |
-| Reverb | **P4** | Medium | Spatial effect | D |
-| Chorus | **P5** | High | Rare effect | D |
-| Overdrive | **P5** | Medium | Distortion effect | C/D |
-| Mid-sweep filter | **P5** | High | Modulation effect | D |
-| Harmonizer/Vocoder | **P6** | Very High | Exotic, rare | D |
-
-### Degradation Strategy
-
-When effects or mixer parameters cannot be reproduced:
-
-1. **Ignore gracefully** — omit the effect, play samples dry
-2. **Log a warning** — note which controls were skipped for diagnostics
-3. **Approximate** — use the closest available Web Audio node
-4. **Never crash** — unknown control names are ignored, not errors
+When mixer parameters or legacy effects cannot be reproduced exactly, the
+runtime should degrade gracefully: ignore unsupported controls, keep parsing
+or loading alive, and surface the gap in diagnostics rather than failing hard.
 
 ---
 
@@ -943,9 +934,9 @@ When effects or mixer parameters cannot be reproduced:
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Gen 1 sample ID→WAV mapping is unverified | ~~**High**~~ **Resolved** | Every Gen 1 product ships a plain-text `MAX` catalog where line N = sample ID N. Parsed by `tools/gen1-catalog.ts`; see [file-formats.md](file-formats.md#gen-1-sample-id-catalogs-max-pxddance-pxdtxt). |
-| Grid dimensions for Format A are empirical | ~~**Medium**~~ **Resolved** | Confirmed via `tools/mix-grid-analyzer.ts` across 83 Gen 1 `.mix` files: 4-byte header (uint16 app sig + uint16 aux), 8 columns × uint16 LE cells, variable row count (20–227), optional trailer after a ≥ 32-byte zero gap. Regenerate `output/mix-grid-summary.json` with `tsx tools/mix-grid-analyzer.ts --all --out ...`. |
-| Format A HipHop/SuperPack ID overflow (max id exceeds MAX catalog size) | **Medium** | GP1-HipHop mixes use ids ≤ 2071 (catalog 1381); SuperPack `softvox.mix` uses ids ≤ 4727 (catalog 2845). Overflow concentrated in late rows — likely a second catalog (Pxddance or an extended bank). Investigate in Prereq 5 (resolver). |
+| Gen 1 sample ID→WAV mapping is unverified | ~~**High**~~ **Resolved** | Every Gen 1 product ships a plain-text `MAX` catalog where line N = sample ID N. Parsed by `scripts/gen1-catalog.ts`; see [file-formats.md](file-formats.md#gen-1-sample-id-catalogs-max-pxddance-pxdtxt). |
+| Grid dimensions for Format A are empirical | ~~**Medium**~~ **Resolved** | Confirmed via `scripts/mix-grid-analyzer.ts` across 83 Gen 1 `.mix` files: 4-byte header (uint16 app sig + uint16 aux), 8 columns × uint16 LE cells, variable row count (20–227), optional trailer after a ≥ 32-byte zero gap. Regenerate `output/mix-grid-summary.json` with `tsx scripts/mix-grid-analyzer.ts --all --out ...`. |
+| Format A HipHop/SuperPack ID overflow (max id exceeds MAX catalog size) | **Medium** | GP1-HipHop mixes use ids ≤ 2071 (catalog 1381); SuperPack `softvox.mix` uses ids ≤ 4727 (catalog 2845). Overflow concentrated in late rows and must be resolved through the expansion-kit catalogs and trailer labels before treating the IDs as missing. |
 | Format A `headerAux` (uint16 @ 0x02) semantics unresolved | **Low** | Zero in most files; non-zero in FREAK, X_Perm, TRANCE, PSYCOA, SCOOL and GP1-HipHop variants. Likely checksum or sub-variant marker. Surfaced via analyzer `headerAux` for later correlation with file modification/BPM. |
 | External WAV reference in Rave/NODRUGS.MIX trailer | ~~**Low**~~ **Resolved** | Contains literal `c:\raveejay\hypersav\scool004.wav`. This is a user-recorded sound (Rave HyperKit = user save directory), not a commercial sample kit. The `.mix` player should silently skip `hypersav` path references and play silence for that cell. |
 | Gen 2 track record format has variable-length fields | **Medium** | Parse opportunistically using `0x01` tags and string length prefixes. Use STEP.MIX (1,553 bytes, smallest file) as the reference implementation. |
@@ -954,25 +945,6 @@ When effects or mixer parameters cannot be reproduced:
 | Ticker text (Format B) has no audio equivalent | **Low** | Preserve in MixIR for display purposes. Render as subtitle overlay in the UI. |
 | SuperPack Gen 1+ files may have extended grid | ~~**Low**~~ **Resolved** | SuperPack `dream.mix` (11,413 B), `Mcxtreme.mix` (11,277 B) and peers carry a structured trailer, not an extended grid. The grid ends at the first ≥ 32-byte zero run; everything after is trailer metadata (product signature, `"DanceMachine Sample-Kit Vol. N"`, etc.). See the Format A [Trailer Block](#trailer-block) section. |
 | Empty .mix file in Dance 4 | **None** | Skip 2-byte files during parsing. |
-
----
-
-## File Touchpoints for Implementation
-
-| File | Action | Purpose |
-|------|--------|---------|
-| `tools/mix-parser.ts` | **New** | Format A/B/C/D binary parsers → MixIR |
-| `tools/mix-resolver.ts` | **New** | Sample ID/name → output WAV resolution |
-| `src/mix-player.ts` | **New** | Web Audio API playback engine |
-| `src/data.ts` | **Extend** | Add MIX file listing to data loading |
-| `data/index.json` | **Extend** | Include mix file inventory per product |
-| `scripts/build-index.ts` | **Extend** | Scan archive MIX folders during build |
-| `docs/file-formats.md` | **Extend** | Add MIX format section to existing doc |
-| `vite.config.ts` | **Extend** | Include mix-player.ts in browser build |
-| `.nycrc.json` | **Extend** | Add mix-player.ts to coverage includes |
-| `tsconfig.browser.json` | **Extend** | Add mix-player.ts to browser type-checking |
-| `tools/__tests__/mix-parser.test.ts` | **New** | Unit tests for each format parser |
-| `tests/mix-playback.spec.ts` | **New** | Playwright tests for browser playback |
 
 ---
 

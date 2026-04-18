@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_CSV_PATH,
   pcmDataOffset,
   hashPcm,
   scanOutput,
   filterSameProduct,
   filterCrossProduct,
   printReport,
+  resolveCsvOutputPath,
   writeCsv,
 } from "../find-duplicates.js";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
@@ -43,13 +45,13 @@ describe("pcmDataOffset", () => {
   it("returns data chunk offset for valid WAV", () => {
     const pcm = Buffer.from([0x80, 0x80, 0x80]);
     const wav = makeWav(pcm);
-    const offset = pcmDataOffset(wav);
-    expect(offset).toBe(44);
+    const located = pcmDataOffset(wav);
+    expect(located).toEqual({ offset: 44, length: pcm.length });
   });
 
   it("returns 44 for non-RIFF data", () => {
     const data = Buffer.from("NOT_A_WAV_FILE_AT_ALL_BUT_LONG_ENOUGH_DATA_HERE");
-    expect(pcmDataOffset(data)).toBe(44);
+    expect(pcmDataOffset(data)).toEqual({ offset: 44, length: null });
   });
 
   it("returns null for RIFF file without data chunk", () => {
@@ -86,9 +88,9 @@ describe("pcmDataOffset", () => {
     riffHeader.write("WAVE", 8, "ascii");
 
     const full = Buffer.concat([riffHeader, fmtChunk, factChunk, dataHeader, pcmData]);
-    const offset = pcmDataOffset(full);
-    expect(offset).toBe(12 + 24 + 12 + 8); // riff(12) + fmt(24) + fact(12) + data_header(8)
-    expect(full.subarray(offset!)).toEqual(pcmData);
+    const located = pcmDataOffset(full);
+    expect(located).toEqual({ offset: 12 + 24 + 12 + 8, length: pcmData.length });
+    expect(full.subarray(located!.offset)).toEqual(pcmData);
   });
 
   it("handles odd-sized chunks with word alignment padding", () => {
@@ -113,9 +115,9 @@ describe("pcmDataOffset", () => {
     riffHeader.writeUInt32LE(totalSize, 4);
 
     const full = Buffer.concat([riffHeader, oddChunk, padByte, dataHeader, pcm]);
-    const offset = pcmDataOffset(full);
+    const located = pcmDataOffset(full);
     // 12 (riff) + 11 (odd chunk) + 1 (pad) + 8 (data header) = 32
-    expect(offset).toBe(32);
+    expect(located).toEqual({ offset: 32, length: pcm.length });
   });
 
   it("returns null for malformed chunk size exceeding buffer", () => {
@@ -203,6 +205,28 @@ describe("hashPcm", () => {
       // Non-RIFF file shorter than 44 bytes — pcmDataOffset returns 44 but file is only 20 bytes
       writeFileSync(join(tmp, "tiny.wav"), Buffer.from("not riff short data"));
       expect(hashPcm(join(tmp, "tiny.wav"))).toBeNull();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("hashes only the data chunk, ignoring trailing chunks", () => {
+    const tmp = createTempDir();
+    try {
+      const pcm = Buffer.from([0x10, 0x20, 0x30, 0x40]);
+      const baseline = makeWav(pcm);
+
+      // Same PCM but with a trailing LIST/INFO chunk appended after data.
+      const trailer = Buffer.alloc(16);
+      trailer.write("LIST", 0, "ascii");
+      trailer.writeUInt32LE(8, 4);
+      trailer.write("INFO", 8, "ascii");
+      trailer.write("XXXX", 12, "ascii");
+      const withTrailer = Buffer.concat([baseline, trailer]);
+
+      writeFileSync(join(tmp, "a.wav"), baseline);
+      writeFileSync(join(tmp, "b.wav"), withTrailer);
+      expect(hashPcm(join(tmp, "a.wav"))).toBe(hashPcm(join(tmp, "b.wav")));
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -357,7 +381,7 @@ describe("printReport", () => {
 // ── writeCsv ─────────────────────────────────────────────────
 
 describe("writeCsv", () => {
-  it("writes a CSV file with correct headers and rows", async () => {
+  it("writes a CSV file with correct headers and rows", () => {
     const tmp = createTempDir();
     try {
       const product = join(tmp, "ProdA", "Bass");
@@ -374,8 +398,6 @@ describe("writeCsv", () => {
       const csvPath = join(tmp, "dupes.csv");
       writeCsv(groups, tmp, csvPath);
 
-      // Wait for stream to flush
-      await new Promise((r) => setTimeout(r, 100));
       const csv = readFileSync(csvPath, "utf-8");
       const lines = csv.trim().split("\n");
       expect(lines[0]).toBe("hash_prefix,group,product,channel,filename,size_bytes");
@@ -386,5 +408,43 @@ describe("writeCsv", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("creates parent directories for nested CSV paths", () => {
+    const tmp = createTempDir();
+    try {
+      const product = join(tmp, "ProdA", "Bass");
+      mkdirSync(product, { recursive: true });
+      writeFileSync(join(product, "s1.wav"), makeWav(Buffer.from([0x10])));
+      writeFileSync(join(product, "s2.wav"), makeWav(Buffer.from([0x10])));
+
+      const groups = new Map<string, string[]>();
+      groups.set("abc123def456789a", [
+        join(product, "s1.wav"),
+        join(product, "s2.wav"),
+      ]);
+
+      const csvPath = join(tmp, "logs", "duplicates.csv");
+      writeCsv(groups, tmp, csvPath);
+
+      expect(readFileSync(csvPath, "utf-8")).toContain("hash_prefix,group,product,channel,filename,size_bytes");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("resolveCsvOutputPath", () => {
+  it("defaults to the logs folder", () => {
+    expect(DEFAULT_CSV_PATH.replace(/\\/g, "/")).toBe("logs/duplicates.csv");
+    expect(resolveCsvOutputPath()?.replace(/\\/g, "/")).toBe("logs/duplicates.csv");
+  });
+
+  it("preserves an explicit CSV path", () => {
+    expect(resolveCsvOutputPath("custom/report.csv")).toBe("custom/report.csv");
+  });
+
+  it("disables CSV output when requested", () => {
+    expect(resolveCsvOutputPath(undefined, true)).toBeNull();
   });
 });

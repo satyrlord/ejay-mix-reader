@@ -10,9 +10,9 @@
  * 3. Metadata: update filename, alias, category, detail.
  *
  * Usage:
- *   tsx tools/rename-samples.ts --output-dir output
- *   tsx tools/rename-samples.ts --output-dir output --apply
- *   tsx tools/rename-samples.ts --output-dir output --product Dance_eJay1 --apply
+ *   tsx scripts/rename-samples.ts --output-dir output
+ *   tsx scripts/rename-samples.ts --output-dir output --apply
+ *   tsx scripts/rename-samples.ts --output-dir output --product Dance_eJay1 --apply
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
@@ -67,8 +67,8 @@ export function cleanName(name: string): string {
 /** Return the absolute path to a sample's WAV file on disk. */
 function physicalPath(productDir: string, sample: SampleEntry): string {
   const fn = sample.filename;
-  if (fn.includes("/")) {
-    return join(productDir, ...fn.split("/"));
+  if (/[\\/]/.test(fn)) {
+    return join(productDir, ...fn.split(/[\\/]+/));
   }
   const channel = String(sample.channel ?? sample.category ?? "unknown");
   return join(productDir, channel, fn);
@@ -252,7 +252,7 @@ export function planRenames(productDir: string, meta: ProductMetadata): RenameEn
  * Uses temporary file names to avoid conflicts when two files swap names.
  * Returns the number of files renamed on disk.
  */
-export function applyRenames(productDir: string, meta: ProductMetadata, plan: RenameEntry[]): number {
+export function applyRenames(_productDir: string, meta: ProductMetadata, plan: RenameEntry[]): number {
   const samples = meta.samples;
 
   // Phase 1 — rename files to temp names
@@ -264,12 +264,11 @@ export function applyRenames(productDir: string, meta: ProductMetadata, plan: Re
     const newPath = entry.new_path;
 
     if (oldPath !== newPath && existsSync(oldPath)) {
-      let tempName = `.tmp_${randomUUID().replace(/-/g, "").slice(0, 12)}.wav`;
-      let tempPath = join(dirname(oldPath), tempName);
-      // Retry once on the astronomically unlikely chance of a UUID collision.
-      if (existsSync(tempPath)) {
-        tempName = `.tmp_${randomUUID().replace(/-/g, "").slice(0, 12)}.wav`;
+      let tempPath: string;
+      for (;;) {
+        const tempName = `.tmp_${randomUUID().replace(/-/g, "").slice(0, 12)}.wav`;
         tempPath = join(dirname(oldPath), tempName);
+        if (!existsSync(tempPath)) break;
       }
       renameSync(oldPath, tempPath);
       tempMap.set(entry.index, { originalPath: oldPath, tempPath, finalPath: newPath });
@@ -366,7 +365,15 @@ function main(): void {
 
   for (const productDir of products) {
     const metaPath = join(productDir, "metadata.json");
-    const meta: ProductMetadata = JSON.parse(readFileSync(metaPath, "utf-8"));
+    let meta: ProductMetadata;
+    try {
+      meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+    } catch (err) {
+      console.warn(
+        `\n${basename(productDir)}: cannot parse metadata.json — skipping (${(err as Error).message})`,
+      );
+      continue;
+    }
 
     const plan = planRenames(productDir, meta);
     if (!plan.length) continue;

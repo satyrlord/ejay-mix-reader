@@ -4,10 +4,9 @@ Detailed technical documentation for the proprietary audio formats used by
 eJay music software. See [copilot-instructions.md](../.github/copilot-instructions.md)
 for build instructions and project conventions.
 
-Detailed `.mix` reverse-engineering, format-family layouts, and playback
-planning live in [mix-format-analysis.md](mix-format-analysis.md) and
-[mix-player-prerequisites.md](mix-player-prerequisites.md). This document is
-limited to the sample/archive formats and supporting catalogs they depend on.
+Detailed `.mix` reverse-engineering, format-family layouts, and compatibility
+notes live in [mix-format-analysis.md](mix-format-analysis.md). This document
+is limited to the sample/archive formats and supporting catalogs they depend on.
 
 ## Products (14 titles)
 
@@ -45,18 +44,18 @@ material that is not itself a shipped eJay title.
 
 ```bash
 # Extract individual PXD files from a directory tree
-tsx tools/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1
+tsx scripts/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1
 
 # Extract and organize into category folders with human-readable names
-tsx tools/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1 \
+tsx scripts/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1 \
     --catalog archive/Dance_SuperPack/dance/EJAY/Pxddance \
     --format "{category}/{alias} - {detail}"
 
 # Extract from a packed archive (auto-detects .INF companion)
-tsx tools/pxd-parser.ts archive/Dance_eJay2/D_ejay2/PXD/DANCE20 --output output/Dance_eJay2
+tsx scripts/pxd-parser.ts archive/Dance_eJay2/D_ejay2/PXD/DANCE20 --output output/Dance_eJay2
 
 # Extract a single PXD file
-tsx tools/pxd-parser.ts path/to/file.pxd --output output/test
+tsx scripts/pxd-parser.ts path/to/file.pxd --output output/test
 ```
 
 ### pxd-parser.ts Flags
@@ -260,7 +259,7 @@ as a 2–3 letter sub-code:
 | `SY`/`PN`/`ON` | Keys | `VC`/`VA`/`VB` | Voice | `EX`/`SX` | Xtra |
 
 Product-specific codes are handled by dedicated regex+map in
-`tools/reorganize.ts`.
+`scripts/reorganize.ts`.
 
 ## Gen 1 Sample-ID Catalogs (`MAX`, `Pxddance`, `PXD.TXT`)
 
@@ -271,10 +270,8 @@ mapping used by `.mix` files in a plain-text catalog called **`MAX`**
 `bank_index × bank_size + file_index` formula; the table is a direct lookup.
 
 This section documents the catalog files themselves. For the verified Gen 1
-`.mix` grid layout, trailer structure, overflow handling, and resolver
-follow-ups, use [mix-format-analysis.md](mix-format-analysis.md) and
-[mix-player-prerequisites.md](mix-player-prerequisites.md) as the source of
-truth.
+`.mix` grid layout, trailer structure, overflow handling, and resolver notes,
+use [mix-format-analysis.md](mix-format-analysis.md) as the source of truth.
 
 ### MAX / MAX.TXT Layout
 
@@ -352,7 +349,7 @@ The remaining lines of PXD.TXT hold 4-field per-sample records (decoded
 size, channel count, group, version/alias) and are not currently used by the
 extractor.
 
-### Parser: `tools/gen1-catalog.ts`
+### Parser: `scripts/gen1-catalog.ts`
 
 Parses `MAX` / `MAX.TXT` (either dialect), optionally enriches with
 `Pxddance` (preferred) or `PXD.TXT` channel ranges, and emits one JSON
@@ -360,15 +357,15 @@ catalog per product at `output/<product>/gen1-catalog.json`:
 
 ```bash
 # Build every known Gen 1 product catalog.
-tsx tools/gen1-catalog.ts
+tsx scripts/gen1-catalog.ts
 
 # Or a single product.
-tsx tools/gen1-catalog.ts --product Dance_SuperPack
-tsx tools/gen1-catalog.ts --product Dance_eJay1 \
+tsx scripts/gen1-catalog.ts --product Dance_SuperPack
+tsx scripts/gen1-catalog.ts --product Dance_eJay1 \
   --out output/Dance_eJay1/gen1-catalog.json
 
 # Or ad-hoc against a specific MAX file.
-tsx tools/gen1-catalog.ts --max path/to/MAX --pxddance path/to/Pxddance
+tsx scripts/gen1-catalog.ts --max path/to/MAX --pxddance path/to/Pxddance
 ```
 
 Output schema (per entry):
@@ -388,9 +385,8 @@ Output schema (per entry):
 ### MIX Integration Note
 
 These catalogs are consumed by the MIX parser and resolver, but the `.mix`
-format rules are documented only in
-[mix-format-analysis.md](mix-format-analysis.md) and
-[mix-player-prerequisites.md](mix-player-prerequisites.md).
+format rules are documented in
+[mix-format-analysis.md](mix-format-analysis.md).
 
 ## Channel Mapping (per product)
 
@@ -399,7 +395,7 @@ archive's `Soundgruppe` tab definitions. For Gen 1 products and later products
 without `seiten`, the names below reflect the verified project channel groups
 used by the catalogs and extraction tooling. Extracted `output/` folders may
 normalize some labels further (for example `sequence` → `Seq`) via
-`tools/reorganize.ts`.
+`scripts/reorganize.ts`.
 
 | Product | Channels |
 |---------|----------|
@@ -424,9 +420,9 @@ normalize some labels further (for example `sequence` → `Seq`) via
   than a `seiten` file.
 - HipHop eJay 2 and HipHop eJay 3 expose the main `Soundgruppe` tabs above in
   `seiten`, but scratch-generator controls also exist elsewhere in the UI;
-  `tools/reorganize.ts` still normalizes scratch-coded stems into `Scratch`
+  `scripts/reorganize.ts` still normalizes scratch-coded stems into `Scratch`
   folders in `output/`.
-- House eJay maps `EX` internal names to `Groove` in `tools/reorganize.ts`.
+- House eJay maps `EX` internal names to `Groove` in `scripts/reorganize.ts`.
 - HipHop eJay 4 uses `Ladies` (FEMALE) and `Fellas` (MALE) instead of a single
   generic voice channel.
 - Techno eJay 3 defines `Sphere` and `Hyper` in `seiten`; the `SRC*` bank in

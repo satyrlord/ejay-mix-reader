@@ -55,7 +55,7 @@ palette:
 | `--color-primary` | `#00ff88` | — | Primary green accents, play state, active highlights |
 | `--color-primary-content` | `#031b10` | — | Text on primary backgrounds |
 | `--color-secondary` | `#ff3366` | — | Secondary pink/red accents, stop state, warnings |
-| `--color-accent` | `#7c3aed` | — | Tertiary violet, decorative glow, alt-highlights |
+| `--color-accent` | `#6f63ff` | — | Tertiary violet, decorative glow, alt-highlights |
 | `--color-base-100` | `#0f0f1a` | eJay deep navy | Global page background |
 | `--color-base-200` | `#1a1a2e` | eJay panel navy | Card and panel surfaces |
 | `--color-base-300` | `#25253e` | eJay lighter navy | Nested surfaces, borders, hover states |
@@ -95,68 +95,84 @@ light blue (melodic/harmonic), and light green (atmospheric/textural).
 
 ## Typography
 
-Use system font stacks via Tailwind defaults. No custom web fonts are loaded.
+Two Google Fonts are loaded via `index.html`:
 
-| Utility | Use |
-|---------|-----|
-| `font-sans` | Body copy, card text, labels |
-| `font-mono` | Sample metadata, beat counts, durations, technical details |
+| Token | Family | Use |
+|-------|--------|-----|
+| `font-sans` / `--font-sans` | Josefin Sans | All UI text: body copy, labels, headings, transport bar |
+| `font-mono` / `--font-mono` | Share Tech Mono | Utility token; reserved for tabular/technical contexts |
 
-- Sample names use the default sans stack at normal weight.
-- Metadata values (BPM, beats, category) use `font-mono` for tabular alignment.
+- All custom CSS in `app.css` uses `var(--font-sans)` exclusively.
+  `var(--font-mono)` is not applied by any custom CSS rule.
+- `font-mono` should **not** be applied to transport bar items (version label, build label,
+  GitHub link) — these use the default sans stack.
 - Page headings use `font-bold` or `font-semibold` at appropriate scale.
 
 ## Component Anatomy
 
-### Product Card
+### Category Sidebar
 
-Each of the 14 products is displayed as a DaisyUI `card` on the home/browse view.
+The left sidebar displays all top-level categories (Bass, Drum, Effect,
+etc.) as a vertical two-column grid of buttons.
 
-- Card surface uses `bg-base-200` with a subtle border or shadow.
-- Product name is the card title.
-- Genre and sample count appear as DaisyUI `badge` elements.
-- Channel list is shown as small colored pills using the channel color palette.
+- Buttons use a dark navy fill (`bg-base-200` or deeper) with white text.
+- Active category uses a brighter fill or border accent from the channel
+  color palette.
+- The sidebar is fixed-height and scrolls independently when categories
+  overflow.
+- Selecting a category populates the subcategory tab bar and sample grid.
 
-### Sample Row / Tile
+### Subcategory Tab Bar
 
-Individual samples are displayed in a sortable table within a product view.
+A horizontal row of tabs sits above the sample grid, scoped to the
+active category.
 
-- Each sample row shows: play button, merged sample name, category badge,
-  beat count, and duration.
-- The merged name uses `<Category> - <Name>` when a category is present.
-- Column headers for `Name`, `Category`, `Beats`, and `Duration` are clickable
-  sort toggles.
-- The play button uses DaisyUI `btn btn-circle btn-sm` with a play/pause icon.
-- Active/playing state highlights the row with `primary` accent.
-- Channel badge color comes from the channel color palette above.
+- Tabs use a teal/primary accent background with contrasting text.
+- A `+` button at the trailing end allows adding or importing new
+  subcategory groupings.
+- Active tab is visually distinguished (filled vs. outlined).
+- Tabs scroll horizontally when they overflow.
+
+### Sample Grid
+
+The main content area displays samples as a sequencer-style grid of
+rectangular blocks, closely matching the original eJay UI.
+
+- Each row represents a channel/lane.
+- Each block represents a sample; its width may reflect beat length.
+- Blocks use a light accent fill (channel-color tinted) on a dark grid
+  background.
+- Clicking a block previews the sample; active/playing block shows a
+  `primary` highlight or glow.
+- Empty grid cells use a subtle outline to maintain the grid rhythm.
+
+### BPM Filter
+
+A dropdown control for filtering samples by tempo.
+
+- Positioned at the bottom-right of the home area and persists into the
+  main app view.
+- Uses `font-mono` for the BPM value and a DaisyUI `select` or
+  `dropdown` component.
 
 ### Transport / Playback Bar
 
-Inspired by the original eJay metallic transport strip (visible in both screenshots
-as the centered play/stop/record bar).
+Inspired by the original eJay metallic transport strip.
 
-- Fixed to the bottom of the viewport.
-- Uses `bg-base-300` with a subtle top border.
-- Contains: current sample name, play/pause, stop, progress indicator.
-- Progress uses a custom thin bar or DaisyUI `progress` component.
-
-### Sample Browser Panel
-
-Mirrors the bottom panel of the original eJay UI where category buttons filter
-the visible sample tiles.
-
-- Category filter buttons use DaisyUI `btn` with category-specific accent
-  colors.
-- Active filter state uses `btn-active` or a filled variant.
-- The browser uses `Category` as the UI term for sample-group classification.
-  This avoids overloading `channel`, which remains the audio mono/stereo field
-  in sample metadata.
-- Techno eJay 3's `sphere` category uses a dedicated cyan badge color to match
-  the original app's pad/sphere lane.
+- Fixed to the bottom of the viewport (`position: fixed; bottom: 0`).
+- Background: `#191a22` with a subtle top border.
+- Three-column grid layout (`grid-template-columns: auto 1fr auto`):
+  - **Left** (`.transport-left`): stop button, current sample name, playback progress bar.
+  - **Center** (`.transport-center`): dynamic build label —
+    `"eJay mix reader — full version"` in DEV builds;
+    `"eJay mix reader demo — clone this repo for full functionality"` in production builds.
+  - **Right** (`.transport-right`): version label (e.g. `v1.14`), GitHub repository link.
+- Progress uses a custom thin `<progress>` element (`.transport-progress`).
+- All text in the transport bar uses the default `font-sans` stack. Do not apply `font-mono` to any transport element.
 
 ### Volume Mixer
 
-Inspired by the 16-channel mixer visible in screenshot 2.
+Inspired by the 16-channel mixer visible in the original eJay UI.
 
 - Per-channel vertical sliders when applicable (future milestone).
 - Uses DaisyUI `range` inputs styled vertically.
@@ -165,23 +181,26 @@ Inspired by the 16-channel mixer visible in screenshot 2.
 ## Layout
 
 - The app is a single-page application with a single HTML entry point.
-- Top-level layout: header (product selector / search), main content area
-  (sample list/grid), and fixed bottom transport bar.
-- On product pages, the header title switches from the app name to the current
-  product name.
-- Main content scrolls independently; header and transport bar remain fixed.
-- On desktop (≥1024px): sidebar for channel filters + main sample grid.
-- On tablet/mobile (<1024px): channel filters collapse to horizontal scroll
-  pills above the sample list; transport bar remains fixed at bottom.
+- **Home page**: centered hero with folder picker, BPM filter control at
+  bottom-right.
+- **Main app view** (after loading a library): three-zone layout —
+  - **Left sidebar**: fixed-width category button grid (two columns).
+  - **Top tab bar**: horizontal subcategory tabs above the main grid.
+  - **Center**: sequencer-style sample block grid.
+- Transport bar remains fixed at the viewport bottom.
+- Main grid scrolls independently; sidebar, tab bar, and transport bar
+  remain fixed/sticky.
 
 ## Responsive Behavior
 
-- Product grid collapses from multi-column to single-column naturally via CSS
-  grid and card sizing.
-- Sample list switches from a dense grid to a vertical stack on narrow screens.
+- On desktop (≥1024px): sidebar is visible alongside the sample grid;
+  subcategory tabs span the remaining width.
+- On tablet/mobile (<1024px): category sidebar collapses to a horizontal
+  scrollable pill strip above the subcategory tabs; sample grid stacks
+  vertically.
 - Transport bar adapts: full layout on desktop, condensed on mobile with
   essential controls only.
-- Channel filter buttons wrap or scroll horizontally on small viewports.
+- Subcategory tabs scroll horizontally when they overflow on any viewport.
 
 ## Editing Guidance
 

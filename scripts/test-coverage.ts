@@ -72,22 +72,29 @@ console.log("\n── ejay-mix-reader test coverage ─────────�
 
 cleanCoverageDirs();
 
-execSync("npx playwright test", {
-  cwd: ROOT,
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    VITE_COVERAGE: "true",
-  },
-});
+try {
+  execSync("npx playwright test", {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      VITE_COVERAGE: "true",
+    },
+  });
 
-ensureCoverageFiles();
+  ensureCoverageFiles();
 
-execSync("npx nyc report --reporter=text --reporter=html --reporter=lcov --reporter=json-summary", {
-  cwd: ROOT,
-  stdio: "inherit",
-});
+  execSync("npx nyc report --reporter=text --reporter=html --reporter=lcov --reporter=json-summary", {
+    cwd: ROOT,
+    stdio: "inherit",
+  });
 
-ensureCoverageThresholds();
+  ensureCoverageThresholds();
 
-console.log("\nCoverage report written to coverage/index.html\n");
+  console.log("\nCoverage report written to coverage/index.html\n");
+} catch (error) {
+  if (!existsSync(COVERAGE_SUMMARY_FILE)) {
+    cleanCoverageDirs();
+  }
+  throw error;
+}

@@ -1,17 +1,21 @@
 # eJay Mix Reader
 
-A tool for extracting and browsing audio samples from **eJay** music software titles
-released in the late 1990s and early 2000s.
+A tool for extracting, browsing, and inspecting audio samples and archived
+`.mix` project files from **eJay** music software titles released in the late
+1990s and early 2000s.
 
 ## What it does
 
 eJay products ship hundreds of audio samples in a proprietary compressed format (`.PXD`)
 and packed archive bundles. This project reverse-engineers those formats and provides:
 
-- **`tools/pxd-parser.ts`** — Decodes PXD-compressed samples and packed archives to
+- **`scripts/pxd-parser.ts`** — Decodes PXD-compressed samples and packed archives to
   standard WAV files, and generates a JSON metadata catalog for each product.
 - **Sound Browser** — A Vite-powered web app with DaisyUI that lets you search, filter,
   sort, and play extracted samples in the browser.
+- **MIX Library** — Product pages can list archived `.mix` files, fetch the
+  original project bytes through the local dev/build server, and parse format,
+  tempo, title, and track-count metadata in the browser.
 
 ## Sound Browser Notes
 
@@ -26,6 +30,9 @@ and packed archive bundles. This project reverse-engineers those formats and pro
 - The browser UI uses the term `Category` for sample-group classification.
   This avoids confusion with audio channel count, where `channels` still means
   mono/stereo metadata.
+- Product pages with archived `.mix` files expose a `Mix Library` panel.
+  Clicking a mix loads the original bytes from the local `/mix/` endpoint and
+  parses the project metadata in-browser.
 
 ## Supported products
 
@@ -43,7 +50,7 @@ and packed archive bundles. This project reverse-engineers those formats and pro
 ## Channel Mapping (per product)
 
 Each product's UI arranges samples into named "sound group" tabs (channels). After
-extraction, `tools/reorganize.ts` sorts WAV files into channel folders using
+extraction, `scripts/reorganize.ts` sorts WAV files into channel folders using
 internal-name sub-codes.
 
 | Product | Channels |
@@ -65,11 +72,13 @@ internal-name sub-codes.
 
 ## How to Run
 
-**Clone and run locally** — this is the only supported way to use the Sound Browser.
+**Clone and run locally** — this is the only supported way to use the browser UI.
 
-The app needs to serve your extracted WAV files alongside the web assets.
+The app needs to serve your extracted WAV files and archived `.mix` files
+alongside the web assets.
 Running it from a hosted static page (e.g. GitHub Pages) is not possible because
-there is no way to expose a local sample library folder to a remote static server.
+there is no way to expose local sample-library or archive folders to a remote
+static server.
 
 ```bash
 git clone https://github.com/satyrlord/ejay-mix-reader.git
@@ -78,7 +87,9 @@ npm install
 npm run serve   # opens http://127.0.0.1:3000
 ```
 
-Then click **Choose output folder** and point the picker at your `output/` directory.
+Then click **Choose output folder** and point the picker at your `output/`
+directory. Products with archived MIX folders will expose their mix list
+automatically.
 
 ## Requirements
 
@@ -96,16 +107,16 @@ Then click **Choose output folder** and point the picker at your `output/` direc
 
 ```bash
 # Extract individual PXD files from a directory tree
-tsx tools/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1
+tsx scripts/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1
 
 # Extract from a packed archive (INF catalog auto-detected)
-tsx tools/pxd-parser.ts archive/Dance_eJay3/eJay/pxd/dance30 --output output/Dance_eJay3
+tsx scripts/pxd-parser.ts archive/Dance_eJay3/eJay/pxd/dance30 --output output/Dance_eJay3
 
 # Extract a single PXD file
-tsx tools/pxd-parser.ts path/to/sample.pxd --output output/test
+tsx scripts/pxd-parser.ts path/to/sample.pxd --output output/test
 
 # Organize output into named subfolders using metadata
-tsx tools/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1 \
+tsx scripts/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1 \
     --format "{category}/{alias}"
 ```
 

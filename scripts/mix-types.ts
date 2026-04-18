@@ -40,8 +40,8 @@ export interface CatalogEntry {
 // ── Track placements ─────────────────────────────────────────
 
 export interface TrackPlacement {
-  beat: number;                       // timeline position (0-indexed beat)
-  channel: number;                    // track/row index (0-indexed)
+  beat: number | null;                // timeline position (0-indexed beat) when recoverable
+  channel: number | null;             // track/row index (0-indexed) when recoverable
   sampleRef: SampleRef;              // resolved sample reference
 }
 

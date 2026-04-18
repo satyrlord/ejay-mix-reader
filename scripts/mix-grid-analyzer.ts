@@ -32,9 +32,9 @@
  * 14-bit ID space of the MAX catalogs.
  *
  * Usage:
- *   tsx tools/mix-grid-analyzer.ts --file PATH
- *   tsx tools/mix-grid-analyzer.ts --dir archive/Rave/MIX
- *   tsx tools/mix-grid-analyzer.ts --all [--out output/<product>/mix-grid.json]
+ *   tsx scripts/mix-grid-analyzer.ts --file PATH
+ *   tsx scripts/mix-grid-analyzer.ts --dir archive/Rave/MIX
+ *   tsx scripts/mix-grid-analyzer.ts --all [--out output/<product>/mix-grid.json]
  */
 
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "fs";
@@ -337,8 +337,12 @@ export function listMixFiles(dir: string): string[] {
   const out: string[] = [];
   for (const name of entries) {
     const p = join(dir, name);
-    const st = statSync(p);
-    if (st.isFile() && /\.mix$/i.test(name)) out.push(p);
+    try {
+      const st = statSync(p);
+      if (st.isFile() && /\.mix$/i.test(name)) out.push(p);
+    } catch {
+      continue;
+    }
   }
   return out.sort();
 }
@@ -402,7 +406,7 @@ function main(): number {
   } else if (values.all) {
     for (const d of KNOWN_GEN1_MIX_DIRS) collect(listMixFiles(d));
   } else {
-    console.error("Usage: tsx tools/mix-grid-analyzer.ts (--file PATH | --dir PATH | --all) [--json] [--out PATH]");
+    console.error("Usage: tsx scripts/mix-grid-analyzer.ts (--file PATH | --dir PATH | --all) [--json] [--out PATH]");
     return 2;
   }
 

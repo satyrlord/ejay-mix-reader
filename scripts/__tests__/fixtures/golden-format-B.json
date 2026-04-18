@@ -1,0 +1,240 @@
+{
+  "format": "B",
+  "product": "Dance_eJay2",
+  "appId": 2585,
+  "bpm": 140,
+  "bpmAdjusted": null,
+  "author": "Yo!B",
+  "title": "The Land of Camron",
+  "registration": "0000000",
+  "tracks": [
+    {
+      "beat": 0,
+      "channel": 9,
+      "sampleRef": {
+        "rawId": 1453,
+        "internalName": "808kick",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 26578
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 11,
+      "sampleRef": {
+        "rawId": 1488,
+        "internalName": "nordlead2",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 10559
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 10,
+      "sampleRef": {
+        "rawId": 1545,
+        "internalName": "linnsn 2",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 26578
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 10,
+      "sampleRef": {
+        "rawId": 1643,
+        "internalName": "elec.hat",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 26578
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 11,
+      "sampleRef": {
+        "rawId": 1647,
+        "internalName": "clsd.hat5",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 26578
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 11,
+      "sampleRef": {
+        "rawId": 1723,
+        "internalName": "badsplash",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 26578
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 10,
+      "sampleRef": {
+        "rawId": 1796,
+        "internalName": "HR16clap",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 26214
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 1780,
+        "internalName": "egg2",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 26578
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 1918,
+        "internalName": "hit5",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 26577
+      }
+    },
+    {
+      "beat": -3,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1952,
+        "internalName": "fear1",
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": 26578
+      }
+    }
+  ],
+  "mixer": {
+    "channels": [],
+    "eq": [],
+    "compressor": null,
+    "stereoWide": null,
+    "raw": {}
+  },
+  "drumMachine": null,
+  "tickerText": [
+    "808kick",
+    "nordlead2",
+    "linnsn 2",
+    "elec.hat",
+    "clsd.hat5",
+    "badsplash",
+    "HR16clap",
+    "egg2",
+    "hit5",
+    "fear1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "5",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "4",
+    "B!Yo_1",
+    "4",
+    "B!Yo_1",
+    "4",
+    "B!Yo_1",
+    "4",
+    "B!Yo_1",
+    "6",
+    "B!Yo_1",
+    "6",
+    "B!Yo_1",
+    "6",
+    "B!Yo_1",
+    "6",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1",
+    "B!Yo_1",
+    "1"
+  ],
+  "catalogs": [
+    {
+      "name": "Dance eJay 2.0",
+      "idRangeStart": 2000,
+      "idRangeEnd": 3399
+    },
+    {
+      "name": "DanceMachine Samples",
+      "idRangeStart": 3400,
+      "idRangeEnd": 3899
+    },
+    {
+      "name": "DanceMachine Samplekit Vol. 1 Raps & Voices",
+      "idRangeStart": 3900,
+      "idRangeEnd": 4499
+    },
+    {
+      "name": "DanceMachine Samplekit Vol. 2 Drums & Synthies",
+      "idRangeStart": 4500,
+      "idRangeEnd": 5099
+    },
+    {
+      "name": "DanceMachine Samplekit Vol. 3 Space Sounds",
+      "idRangeStart": 5100,
+      "idRangeEnd": 5799
+    },
+    {
+      "name": "Dance eJay Samplekit Vol. 4 House",
+      "idRangeStart": 5800,
+      "idRangeEnd": 6499
+    },
+    {
+      "name": "Dance eJay Samplekit Vol. 5 Trance",
+      "idRangeStart": 6500,
+      "idRangeEnd": 7199
+    },
+    {
+      "name": "Dance eJay Samplekit Vol. 6 Latin Dance",
+      "idRangeStart": 0,
+      "idRangeEnd": 0
+    }
+  ]
+}

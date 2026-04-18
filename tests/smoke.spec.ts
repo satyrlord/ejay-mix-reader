@@ -1,59 +1,106 @@
 import { test, expect } from "./baseFixtures.js";
 
-test("homepage loads and shows title", async ({ page }) => {
+test("page title is set", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("h1")).toHaveText("eJay Sound Browser");
+  await expect(page).toHaveTitle(/eJay/i);
 });
 
-test("homepage shows folder picker button", async ({ page }) => {
+test("SPA shell renders sidebar, tabs, and sample grid", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("#pick-folder-btn")).toBeVisible();
-  await expect(page.locator("#pick-folder-btn")).toHaveText(/Choose output folder/);
+  await expect(page.locator("#category-sidebar")).toBeVisible();
+  await expect(page.locator("#subcategory-tabs")).toBeVisible();
+  await expect(page.locator("#sample-grid")).toBeVisible();
 });
 
-test("folder picker button has tooltip describing expected folder structure", async ({ page }) => {
+test("category sidebar renders the normalized category matrix", async ({ page }) => {
   await page.goto("/");
-  const tip = await page.locator("[data-tip]").getAttribute("data-tip");
-  expect(tip).toMatch(/metadata\.json/);
-  expect(tip).toMatch(/\.wav/);
+  const buttons = page.locator(".category-btn");
+  await expect(buttons.first()).toBeVisible();
+  expect(await buttons.count()).toBeGreaterThanOrEqual(10);
 });
 
-test("homepage shows dev library shortcut in dev mode", async ({ page }) => {
+test("first category is active by default", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("#dev-library-btn")).toBeVisible();
+  await expect(page.locator(".category-btn.is-active").first()).toBeVisible();
 });
 
-test("product cards are displayed after selecting dev library", async ({ page }) => {
+test("tab bar shows at least one tab and the add button", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#dev-library-btn").click();
-  const cards = page.locator("[data-product-id]");
-  await expect(cards.first()).toBeVisible();
-  const count = await cards.count();
-  expect(count).toBeGreaterThanOrEqual(1);
+  await expect.poll(async () => page.locator("#subcategory-tabs .subcategory-tab").count()).toBeGreaterThan(0);
+  await expect(page.locator('#subcategory-tabs .subcategory-tab[data-tab-id^="product:"]')).toHaveCount(0);
+  await expect(page.locator('#subcategory-tabs .subcategory-tab[data-tab-id^="all:"]')).toHaveCount(0);
+  await expect(page.locator("#subcategory-add")).toBeVisible();
+  await expect(page.locator("#subcategory-add")).toBeEnabled();
 });
 
-test("product browser shows a back to home button", async ({ page }) => {
+test("adding a subcategory updates the ribbon immediately", async ({ page }) => {
+  let categoryConfig = {
+    categories: [
+      { id: "Loop", name: "Loop", subcategories: ["unsorted"] },
+      {
+        id: "Drum",
+        name: "Drum",
+        subcategories: ["kick", "snare", "clap", "toms", "crash", "hi-hats", "perc", "misc"],
+      },
+      { id: "Bass", name: "Bass", subcategories: ["unsorted"] },
+      { id: "Guitar", name: "Guitar", subcategories: ["unsorted"] },
+      { id: "Keys", name: "Keys", subcategories: ["unsorted"] },
+      { id: "Sequence", name: "Sequence", subcategories: ["unsorted"] },
+      {
+        id: "Voice",
+        name: "Voice",
+        subcategories: ["rap male", "rap female", "sing male", "sing female", "robot", "misc"],
+      },
+      { id: "Effect", name: "Effect", subcategories: ["unsorted"] },
+      { id: "Scratch", name: "Scratch", subcategories: ["unsorted"] },
+      { id: "Orchestral", name: "Orchestral", subcategories: ["unsorted"] },
+      { id: "Pads", name: "Pads", subcategories: ["unsorted"] },
+      { id: "Extra", name: "Extra", subcategories: ["unsorted"] },
+      { id: "Unsorted", name: "Unsorted", subcategories: ["unsorted"] },
+    ],
+  };
+
+  await page.route("**/output/categories.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(categoryConfig),
+    });
+  });
+
+  await page.route("**/__category-config", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+
+    categoryConfig = JSON.parse(route.request().postData() ?? "{}");
+    await route.fulfill({ status: 204, body: "" });
+  });
+
   await page.goto("/");
-  await page.locator("#dev-library-btn").click();
+  await page.locator('.category-btn[data-category-id="Drum"]').click();
+  await page.locator("#subcategory-add").click();
+  await page.locator("#subcategory-add-input").fill("fills");
+  await page.locator("#subcategory-add-confirm").click();
 
-  const backBtn = page.locator("#back-btn");
-  await expect(backBtn).toBeVisible();
-  await expect(backBtn).toHaveText("\u2190 Back to Home");
-
-  await backBtn.click();
-  await expect(page.locator("#home-page")).toBeVisible();
-  await expect(page.locator("#pick-folder-btn")).toBeVisible();
+  await expect(page.locator('#subcategory-tabs .subcategory-tab[data-tab-id="subcategory:fills"]')).toBeVisible();
 });
 
-test("search input is present", async ({ page }) => {
+test("default view renders sample blocks", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#dev-library-btn").click();
-  await expect(page.locator("#search-input")).toBeVisible();
+  await expect(page.locator(".sample-block").first()).toBeVisible();
 });
 
-test("transport bar is present", async ({ page }) => {
+test("BPM filter is present and defaults to 140", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#dev-library-btn").click();
+  const bpm = page.locator("#bpm-filter");
+  await expect(bpm).toBeVisible();
+  await expect(bpm).toHaveValue("140");
+});
+
+test("transport bar is present and idle", async ({ page }) => {
+  await page.goto("/");
   await expect(page.locator("#transport")).toBeVisible();
   await expect(page.locator("#transport-name")).toHaveText("No sample playing");
 });

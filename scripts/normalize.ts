@@ -3,15 +3,18 @@
 /**
  * normalize.ts — Flatten all extracted eJay samples into a single category tree.
  *
- * Reads every `output/<product>/metadata.json` and produces
+ * Reads each product's top-level `output/<product>/metadata.json` and produces
  * `output/_normalized/<Category>[/<Subcategory>]/<filename>.wav` plus a
- * consolidated metadata.json. Copies by default so the per-product tree stays
- * intact; pass `--move` to relocate files instead.
+ * consolidated metadata.json. Nested metadata manifests are intentionally
+ * ignored because reorganized products may still contain raw-extraction copies
+ * that would duplicate samples and omit enriched fields such as BPM. Copies by
+ * default so the per-product tree stays intact; pass `--move` to relocate
+ * files instead.
  *
  * Usage:
- *   tsx tools/normalize.ts
- *   tsx tools/normalize.ts --dry-run
- *   tsx tools/normalize.ts --output-root output --dest output/_normalized --move
+ *   tsx scripts/normalize.ts
+ *   tsx scripts/normalize.ts --dry-run
+ *   tsx scripts/normalize.ts --output-root output --dest output/_normalized --move
  */
 
 import {
@@ -24,10 +27,18 @@ import {
   statSync,
   writeFileSync,
 } from "fs";
-import { basename, extname, join, normalize as pathNormalize } from "path";
+import {
+  basename,
+  extname,
+  isAbsolute,
+  join,
+  normalize as pathNormalize,
+  relative as pathRelative,
+  resolve as pathResolve,
+} from "path";
 import { parseArgs } from "util";
 
-import { collectMetadata, getChannel } from "./reorganize.js";
+import { getChannel } from "./reorganize.js";
 
 // ── Final taxonomy ───────────────────────────────────────────
 
@@ -47,7 +58,7 @@ export const FINAL_CATEGORIES = [
   "Unsorted",
 ] as const;
 
-export const DRUM_SUBS = ["kick", "snare", "clap", "toms", "crash", "hi-hats", "perc"] as const;
+export const DRUM_SUBS = ["kick", "snare", "clap", "toms", "crash", "hi-hats", "perc", "misc"] as const;
 
 export const VOICE_SUBS = [
   "rap male",
@@ -151,7 +162,7 @@ export function classifyVoiceSub(
 
   let style: "rap" | "sing" | null = null;
   if (/\b(rap|mc|spit|flow|rhyme)\b/.test(text)) style = "rap";
-  else if (/\b(sing|sung|vocal|vox|melody|hook|chorus|shout|chant)/.test(text)) style = "sing";
+  else if (/\b(sing|singing|sung|vocal|vox|melody|hook|chorus|shout|chant)\b/.test(text)) style = "sing";
   if (!style && channelHint === "rap") style = "rap";
 
   if (style && gender) return `${style} ${gender}` as typeof VOICE_SUBS[number];
@@ -224,6 +235,26 @@ function splitPathParts(value: string): string[] {
   return value.split(/[\\/]+/).filter(Boolean);
 }
 
+function resolveWithinBase(baseDir: string, pathParts: string[]): string | null {
+  const candidate = pathResolve(baseDir, ...pathParts);
+  const relativePath = pathRelative(baseDir, candidate);
+  if (relativePath === "" || relativePath === ".") return null;
+  if (relativePath.startsWith("..") || isAbsolute(relativePath)) return null;
+  return candidate;
+}
+
+function comparePathKey(value: string): string {
+  return pathNormalize(value).toLowerCase();
+}
+
+function isExistingFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function chooseFlatFilename(
   destDir: string,
   originalFilename: string,
@@ -244,12 +275,13 @@ export function chooseFlatFilename(
 
   for (const candidate of candidates) {
     const full = join(destDir, candidate);
-    if (taken.has(full)) continue;
+    const fullKey = comparePathKey(full);
+    if (taken.has(fullKey)) continue;
     if (existsSync(full)) {
-      taken.add(full);
+      taken.add(fullKey);
       continue;
     }
-    taken.add(full);
+    taken.add(fullKey);
     return candidate;
   }
   throw new Error(
@@ -271,6 +303,33 @@ export interface NormalizeResult {
   skipped: number;
   perCategory: Record<string, number>;
   samples: NormalizedSample[];
+}
+
+function categoryConfigPath(dest: string): string {
+  return join(dest, "categories.json");
+}
+
+function buildCategoryConfigSeed(): {
+  categories: Array<{ id: string; name: string; subcategories: string[] }>;
+} {
+  return {
+    categories: FINAL_CATEGORIES.map((category) => ({
+      id: category,
+      name: category,
+      subcategories:
+        category === "Drum"
+          ? [...DRUM_SUBS]
+          : category === "Voice"
+            ? [...VOICE_SUBS]
+            : ["unsorted"],
+    })),
+  };
+}
+
+function ensureCategoryConfig(dest: string): void {
+  const configPath = categoryConfigPath(dest);
+  if (existsSync(configPath)) return;
+  writeFileSync(configPath, JSON.stringify(buildCategoryConfigSeed(), null, 2), "utf-8");
 }
 
 /**
@@ -307,6 +366,12 @@ export function scaffoldTree(dest: string): void {
   }
 }
 
+/**
+ * Normalize each product's top-level metadata manifest into a flattened
+ * category tree. Nested metadata manifests are skipped on purpose so products
+ * that retain raw extraction folders do not contribute duplicate, less-rich
+ * sample records.
+ */
 export function normalize(options: NormalizeOptions): NormalizeResult {
   const { outputRoot, dest, move = false, dryRun = false } = options;
 
@@ -317,11 +382,29 @@ export function normalize(options: NormalizeOptions): NormalizeResult {
   let processed = 0;
   let skipped = 0;
 
-  if (!dryRun) scaffoldTree(dest);
+  if (!dryRun) {
+    scaffoldTree(dest);
+    ensureCategoryConfig(dest);
+  }
 
   for (const productDir of productDirs) {
     const product = basename(pathNormalize(productDir));
-    const records = collectMetadata(productDir);
+
+    // Read only the top-level metadata.json — not recursive — to avoid
+    // processing nested raw-extraction copies that lack BPM and would
+    // duplicate every sample for products with both a root and a
+    // sub-folder metadata.json (e.g. Dance_eJay1/metadata.json +
+    // Dance_eJay1/dance/metadata.json).
+    const rootMetaPath = join(productDir, "metadata.json");
+    let metaData: { samples?: RawSample[] };
+    try {
+      metaData = JSON.parse(readFileSync(rootMetaPath, "utf-8")) as { samples?: RawSample[] };
+    } catch {
+      continue;
+    }
+    const records: Array<[string, RawSample]> = (metaData.samples ?? []).map(
+      (s) => [productDir, s] as [string, RawSample],
+    );
 
     for (const [sourceDir, sample] of records) {
       const filename = typeof sample.filename === "string" ? sample.filename : "";
@@ -330,8 +413,26 @@ export function normalize(options: NormalizeOptions): NormalizeResult {
         continue;
       }
 
-      const srcPath = join(sourceDir, ...splitPathParts(filename));
-      if (!existsSync(srcPath) || !statSync(srcPath).isFile()) {
+      const filenameParts = splitPathParts(filename);
+      const srcPathFromMetadata = resolveWithinBase(sourceDir, filenameParts);
+      if (!srcPathFromMetadata) {
+        skipped++;
+        continue;
+      }
+
+      // Resolve the WAV file. Some top-level metadata.json files store flat
+      // filenames (e.g. "D5MA060.wav") while the files were later reorganized
+      // into channel subdirectories (e.g. "Drum/D5MA060.wav"). Try the path
+      // as-is first; if it misses, fall back to "<channel>/<basename>" when
+      // the sample carries a `channel` field.
+      let srcPath = srcPathFromMetadata;
+      if (!isExistingFile(srcPath) && typeof sample.channel === "string") {
+        const fallback = resolveWithinBase(sourceDir, [sample.channel, basename(filename)]);
+        if (fallback && isExistingFile(fallback)) {
+          srcPath = fallback;
+        }
+      }
+      if (!isExistingFile(srcPath)) {
         skipped++;
         continue;
       }

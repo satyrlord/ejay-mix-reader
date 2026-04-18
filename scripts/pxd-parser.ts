@@ -9,12 +9,12 @@
  * organizes output into named subdirectories.
  *
  * Usage:
- *   tsx tools/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1
- *   tsx tools/pxd-parser.ts archive/Dance_eJay2/D_ejay2/PXD/DANCE20 --output output/Dance_eJay2
+ *   tsx scripts/pxd-parser.ts archive/Dance_eJay1/dance --output output/Dance_eJay1
+ *   tsx scripts/pxd-parser.ts archive/Dance_eJay2/D_ejay2/PXD/DANCE20 --output output/Dance_eJay2
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "fs";
-import { basename, dirname, extname, join, posix, relative, resolve } from "path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from "fs";
+import { basename, dirname, extname, join, relative, resolve } from "path";
 import { parseArgs } from "util";
 
 // --- PXD Format Constants ---
@@ -29,6 +29,34 @@ export const OPCODES: Record<number, number> = { 0xf4: 1, 0xf5: 2, 0xf6: 3, 0xf7
 const LITERAL_ESCAPE = 0xff;
 const SILENCE_BYTE = 0x00;
 const SILENCE_FILL = Buffer.alloc(5, 0x80);
+const INF_REQUIRED_FIELDS = 7;
+const INF_DEFAULT_RECORD_STRIDE = 12;
+
+const PRODUCT_BPM: Record<string, number> = {
+  dance_ejay1: 140,
+  dance_ejay2: 140,
+  dance_ejay3: 140,
+  dance_ejay4: 140,
+  dance_superpack: 140,
+  generationpack1_dance: 140,
+  generationpack1_rave: 140,
+  generationpack1_hiphop: 90,
+  hiphop_2: 90,
+  hiphop_3: 90,
+  hiphop_4: 90,
+  hiphop_ejay2: 90,
+  hiphop_ejay3: 90,
+  hiphop_ejay4: 90,
+  house_ejay: 125,
+  rave: 140,
+  samplekit_dmkit1: 140,
+  samplekit_dmkit2: 140,
+  samplekit_dmkit3: 140,
+  techno_3: 140,
+  techno_ejay: 140,
+  techno_ejay3: 140,
+  xtreme_ejay: 160,
+};
 
 // WAV output parameters
 export const SAMPLE_RATE = 44100;
@@ -113,12 +141,14 @@ export function decodePxdAudio(compressed: Buffer, decodedSize: number): Buffer 
 
     if (b in OPCODES) {
       const snippetLen = OPCODES[b];
+      if (pos + 2 + snippetLen > length) break;
       const key = compressed[pos + 1];
       const payload = compressed.subarray(pos + 2, pos + 2 + snippetLen);
       dictionary.set(key, Buffer.from(payload));
       for (const byte of payload) output.push(byte);
       pos += 2 + snippetLen;
     } else if (b === LITERAL_ESCAPE) {
+      if (pos + 1 >= length) break;
       output.push(compressed[pos + 1]);
       pos += 2;
     } else if (b === SILENCE_BYTE) {
@@ -315,7 +345,15 @@ export function parseInfCatalog(infPath: string): InfEntry[] {
     i++;
   }
 
-  // Parse entries (each entry is ~12 lines)
+  const looksLikeEntryStart = (index: number): boolean => {
+    if (index + INF_REQUIRED_FIELDS - 1 >= lines.length) return false;
+    const sampleId = parseInt(lines[index].trim(), 10);
+    const offset = parseInt(lines[index + 3].trim(), 10);
+    const size = parseInt(lines[index + 4].trim(), 10);
+    return !isNaN(sampleId) && !isNaN(offset) && !isNaN(size);
+  };
+
+  // Parse entries, tolerating extra tail fields between records.
   while (i < lines.length) {
     const line = lines[i].trim();
     if (line.startsWith("[")) break; // next section
@@ -325,7 +363,7 @@ export function parseInfCatalog(infPath: string): InfEntry[] {
     }
 
     try {
-      if (i + 6 >= lines.length) break; // truncated INF — stop parsing
+      if (i + INF_REQUIRED_FIELDS - 1 >= lines.length) break; // truncated INF — stop parsing
       const sampleId = parseInt(lines[i].trim(), 10);
       // _flag = lines[i + 1]
       const filename = lines[i + 2].trim().replace(/^"|"$/g, "");
@@ -337,7 +375,13 @@ export function parseInfCatalog(infPath: string): InfEntry[] {
       if (!isNaN(sampleId) && !isNaN(offset) && !isNaN(size)) {
         entries.push({ sample_id: sampleId, filename, offset, size, category, alias });
       }
-      i += 12;
+
+      let nextIndex = i + INF_DEFAULT_RECORD_STRIDE;
+      while (nextIndex < lines.length && !looksLikeEntryStart(nextIndex)) {
+        if (lines[nextIndex].trim().startsWith("[")) break;
+        nextIndex++;
+      }
+      i = nextIndex;
     } catch {
       i++;
     }
@@ -357,8 +401,9 @@ function loadArchiveParts(archivePath: string): ArchivePart[] {
   for (let suffixCode = 97; suffixCode <= 122; suffixCode++) {
     const suffix = String.fromCharCode(suffixCode);
     const candidate = `${archivePath}${suffix}`;
-    if (!existsSync(candidate)) break;
-    parts.push({ path: candidate, data: readFileSync(candidate) });
+    if (existsSync(candidate)) {
+      parts.push({ path: candidate, data: readFileSync(candidate) });
+    }
   }
 
   return parts;
@@ -513,6 +558,22 @@ export interface CatalogEntry {
   stereo_channel?: string;
 }
 
+function inferProductBpm(pathHint: string): number {
+  const normalized = pathHint.replace(/\\/g, "/").toLowerCase();
+  for (const [token, bpm] of Object.entries(PRODUCT_BPM)) {
+    if (normalized.includes(token)) return bpm;
+  }
+  return 140;
+}
+
+function beatsFromDuration(durationSec: number, bpm: number): number {
+  return Math.round((durationSec * bpm) / 60);
+}
+
+function summariseChannels(catalog: CatalogEntry[]): number {
+  return catalog.reduce((maxChannels, entry) => Math.max(maxChannels, entry.channels ?? 1), 1);
+}
+
 /** Recursively glob for files matching a pattern (case-insensitive). */
 function globFiles(dir: string, ext: string): string[] {
   const results: string[] = [];
@@ -547,6 +608,7 @@ export function extractIndividualPxds(
 ): CatalogEntry[] {
   const catalog: CatalogEntry[] = [];
   const source = resolve(sourceDir);
+  const bpm = inferProductBpm(source);
 
   const pxdFiles = globFiles(source, ".pxd");
   // Deduplicate on case-insensitive systems
@@ -619,7 +681,7 @@ export function extractIndividualPxds(
     decodedCount++;
 
     const durationSec = decodedSize / SAMPLE_RATE;
-    const beats = Math.round((durationSec * 140) / 60);
+    const beats = beatsFromDuration(durationSec, bpm);
     const bitDepth = use16bit ? 16 : 8;
 
     const entry: CatalogEntry = {
@@ -657,6 +719,7 @@ export function extractPackedArchive(
   use16bit = false,
 ): CatalogEntry[] {
   archivePath = resolve(archivePath);
+  const bpm = inferProductBpm(archivePath);
 
   // Auto-detect INF file
   if (!infPath) {
@@ -714,7 +777,7 @@ export function extractPackedArchive(
         decodedCount++;
 
         const durationSec = Math.max(leftAudio.decodedSamples, rightAudio.decodedSamples) / SAMPLE_RATE;
-        const beats = Math.round((durationSec * 140) / 60);
+        const beats = beatsFromDuration(durationSec, bpm);
         const detail = leftAudio.detail ?? rightAudio.detail;
 
         const stereoEntry: CatalogEntry = {
@@ -779,7 +842,7 @@ export function extractPackedArchive(
     decodedCount++;
 
     const durationSec = decodedSize / SAMPLE_RATE;
-    const beats = Math.round((durationSec * 140) / 60);
+    const beats = beatsFromDuration(durationSec, bpm);
     const bitDepth = use16bit ? 16 : 8;
 
     const catEntry: CatalogEntry = {
@@ -1051,10 +1114,15 @@ export function detectSourceType(path: string): SourceType | null {
     // Extension-less file with no INF — still likely a packed archive
     if (!basename(path).includes(".")) return "packed_archive";
     // Check magic bytes
-    const fd = readFileSync(path, { flag: "r" });
-    if (fd.length >= 4) {
-      const magic = fd.subarray(0, 4);
-      if (magic.equals(PXD_MAGIC) || magic.equals(WAV_MAGIC)) return "single_pxd";
+    const fd = openSync(path, "r");
+    try {
+      const header = Buffer.alloc(4);
+      const bytesRead = readSync(fd, header, 0, header.length, 0);
+      if (bytesRead >= 4 && (header.equals(PXD_MAGIC) || header.equals(WAV_MAGIC))) {
+        return "single_pxd";
+      }
+    } finally {
+      closeSync(fd);
     }
     return "single_pxd";
   }
@@ -1080,7 +1148,7 @@ function main(): void {
   });
 
   if (positionals.length === 0) {
-    console.error("Usage: tsx tools/pxd-parser.ts <source> [--output dir] [--inf path] [--catalog path] [--format template] [--8bit]");
+    console.error("Usage: tsx scripts/pxd-parser.ts <source> [--output dir] [--inf path] [--catalog path] [--format template] [--8bit]");
     process.exit(1);
   }
 
@@ -1099,6 +1167,7 @@ function main(): void {
 
   const use16bit = !values["8bit"];
   let catalog: CatalogEntry[];
+  const sourceBpm = inferProductBpm(source);
 
   if (sourceType === "directory") {
     catalog = extractIndividualPxds(source, outputDir, use16bit);
@@ -1133,6 +1202,8 @@ function main(): void {
       catalog = [{
         filename: wavName,
         alias: meta.alias ?? basename(source, extname(source)),
+        duration_sec: Math.round((result.decodedSize / SAMPLE_RATE) * 10000) / 10000,
+        beats: beatsFromDuration(result.decodedSize / SAMPLE_RATE, sourceBpm),
         decoded_size: result.decodedSize,
         sample_rate: SAMPLE_RATE,
         bit_depth: bitDepth,
@@ -1170,7 +1241,7 @@ function main(): void {
         format: {
           sample_rate: SAMPLE_RATE,
           bit_depth: use16bit ? 16 : 8,
-          channels: 1,
+          channels: summariseChannels(catalog),
           encoding: use16bit ? "signed_pcm" : "unsigned_pcm",
         },
         samples: catalog,

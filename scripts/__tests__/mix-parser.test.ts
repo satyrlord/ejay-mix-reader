@@ -110,6 +110,10 @@ describe("detectFormat", () => {
   it("returns null for non-eJay binary data", () => {
     expect(detectFormat(Buffer.from("abcdefgh", "latin1"))).toBeNull();
   });
+
+  it("returns null for truncated Gen 2/3 buffers even when text markers are present", () => {
+    expect(parseMix(Buffer.from("#SKKENNUNG#", "latin1"))).toBeNull();
+  });
 });
 
 describe("parseMixerKV", () => {
@@ -348,6 +352,8 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
     expect(mix!.tracks).toHaveLength(16);
     expect(mix!.catalogs).toHaveLength(8);
     expect(mix!.tracks[0].sampleRef.displayName).toBe("Kick90");
+    expect(mix!.tracks[0].beat).toBeNull();
+    expect(mix!.tracks[0].channel).toBeNull();
     expect(mix!.tracks.at(-1)?.sampleRef.displayName).toBe("Perc159");
   });
 
@@ -361,6 +367,8 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
     expect(mix!.catalogs).toHaveLength(7);
     expect(Object.keys(mix!.mixer.raw)).toHaveLength(502);
     expect(mix!.drumMachine?.pads).toHaveLength(16);
+    expect(mix!.tracks[0].beat).toBeNull();
+    expect(mix!.tracks[0].channel).toBeNull();
     expect(mix!.tracks[0].sampleRef.displayName).toBeNull();
   });
 

@@ -6,10 +6,10 @@
  * products that no longer have a root manifest.
  *
  * Usage:
- *   tsx tools/reconstruct-top-level-metadata.ts --output-dir output
- *   tsx tools/reconstruct-top-level-metadata.ts --output-dir output --apply
- *   tsx tools/reconstruct-top-level-metadata.ts --output-dir output --product Dance_eJay2 --apply
- *   tsx tools/reconstruct-top-level-metadata.ts --output-dir output --apply --overwrite
+ *   tsx scripts/reconstruct-top-level-metadata.ts --output-dir output
+ *   tsx scripts/reconstruct-top-level-metadata.ts --output-dir output --apply
+ *   tsx scripts/reconstruct-top-level-metadata.ts --output-dir output --product Dance_eJay2 --apply
+ *   tsx scripts/reconstruct-top-level-metadata.ts --output-dir output --apply --overwrite
  */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
@@ -22,6 +22,7 @@ export interface ReconstructionResult {
   metadataPath: string;
   sampleCount: number;
   status: "written" | "dry-run" | "skipped-existing" | "skipped-empty";
+  error?: string;
 }
 
 function toPosixPath(filePath: string): string {
@@ -72,7 +73,14 @@ function buildSampleEntry(productDir: string, wavPath: string): SampleEntry {
 }
 
 export function buildTemporaryMetadata(productDir: string): ProductMetadata {
-  const samples = findWavFiles(productDir).map((wavPath) => buildSampleEntry(productDir, wavPath));
+  const samples: SampleEntry[] = [];
+  for (const wavPath of findWavFiles(productDir)) {
+    try {
+      samples.push(buildSampleEntry(productDir, wavPath));
+    } catch (error) {
+      console.warn((error as Error).message);
+    }
+  }
   return {
     samples,
     total_samples: samples.length,
@@ -89,7 +97,18 @@ export function reconstructTopLevelMetadata(
   const overwrite = options.overwrite ?? false;
 
   if (existsSync(metadataPath) && !overwrite) {
-    const existing = JSON.parse(readFileSync(metadataPath, "utf-8")) as ProductMetadata;
+    let existing: ProductMetadata;
+    try {
+      existing = JSON.parse(readFileSync(metadataPath, "utf-8")) as ProductMetadata;
+    } catch (err) {
+      return {
+        productDir,
+        metadataPath,
+        sampleCount: 0,
+        status: "skipped-existing",
+        error: `cannot parse existing metadata.json: ${(err as Error).message}`,
+      };
+    }
     return {
       productDir,
       metadataPath,

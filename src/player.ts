@@ -18,11 +18,14 @@ export class Player {
   private audio = new Audio();
   private currentPath: string | null = null;
   private listeners: PlayerListener[] = [];
+  private lastState: PlayerState = "stopped";
+  private suppressPauseEmit = false;
 
   /* istanbul ignore next -- depends on real audio completing playback */
   private readonly onEnded = (): void => { this.emitState("stopped"); };
   /* istanbul ignore next -- race with stop(); guard prevents double-emit */
   private readonly onPause = (): void => {
+    if (this.suppressPauseEmit) return;
     if (this.audio.ended || this.audio.currentTime === 0) return;
     this.emitState("stopped");
   };
@@ -75,8 +78,10 @@ export class Player {
   }
 
   stop(): void {
+    this.suppressPauseEmit = true;
     this.audio.pause();
     this.audio.currentTime = 0;
+    this.suppressPauseEmit = false;
     this.emitState("stopped");
   }
 
@@ -88,6 +93,8 @@ export class Player {
   }
 
   private emitState(state: PlayerState): void {
+    if (state === this.lastState) return;
+    this.lastState = state;
     for (const fn of this.listeners) fn(state);
   }
 }

@@ -1,0 +1,2508 @@
+{
+  "format": "A",
+  "product": "Dance_eJay1",
+  "appId": 49678854,
+  "bpm": 140,
+  "bpmAdjusted": null,
+  "author": null,
+  "title": null,
+  "registration": null,
+  "tracks": [
+    {
+      "beat": 0,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 0,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 1,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 760,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 2,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 3,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 4,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 906,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 4,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 4,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 2056,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 4,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 4,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 5,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 6,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 906,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 6,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 7,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 8,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 906,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 8,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 8,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 2056,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 8,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 2056,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 8,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 2056,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 8,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 8,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 9,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 10,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 906,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 10,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 11,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1247,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 11,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1234,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 11,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 825,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 12,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1378,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 12,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1235,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 12,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 12,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 14,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1213,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 15,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 16,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 964,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 16,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 16,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1940,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 16,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 16,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 17,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 18,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 964,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 18,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 19,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 20,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 964,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 20,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 20,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1944,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 20,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 20,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 20,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 21,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 21,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 22,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 964,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 22,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 22,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1944,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 22,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 23,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 23,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 24,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 964,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 24,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 24,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1943,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 24,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 24,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 25,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 765,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 26,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 964,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 26,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 27,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 825,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 28,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 964,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 28,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1944,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 28,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 28,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 28,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 29,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 30,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 964,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 30,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1944,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 30,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 31,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 31,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 32,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 32,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 32,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1591,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 32,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 32,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 32,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 32,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 33,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 33,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 34,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 34,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 34,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 35,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 35,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 36,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 36,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 36,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 36,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 36,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 36,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 37,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 37,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 37,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 38,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 38,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 38,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 39,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 39,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1228,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 39,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 40,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 40,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 40,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1591,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 40,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 40,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 40,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 40,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 41,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 41,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1261,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 41,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 42,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 42,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 42,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 42,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 43,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 43,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1261,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 43,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 44,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 44,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 44,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 44,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 44,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 44,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 45,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 45,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 45,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 46,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 46,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 46,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 46,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 47,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 47,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 47,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 48,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 48,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 48,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1591,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 48,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 48,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 48,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 48,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 49,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 49,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 49,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 50,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 50,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 50,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 50,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 51,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 51,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 52,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 52,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 52,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 53,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 53,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 54,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 54,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 55,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1944,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 55,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 55,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 55,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 55,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 56,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 56,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 56,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 56,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 56,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 56,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 57,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 57,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 57,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1944,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 57,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 58,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 58,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 58,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 58,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 58,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 59,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 59,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 59,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1944,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 59,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 60,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 60,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 60,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 60,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 60,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 60,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 863,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 60,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 864,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 61,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 61,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 61,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1944,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 61,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 62,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 62,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 62,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 62,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 62,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 63,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 63,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 63,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1944,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 63,
+      "channel": 7,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 64,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1423,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 64,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 64,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 64,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 64,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 65,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 65,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 66,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1431,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 66,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 66,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 66,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 66,
+      "channel": 6,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 67,
+      "channel": 0,
+      "sampleRef": {
+        "rawId": 1431,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 67,
+      "channel": 1,
+      "sampleRef": {
+        "rawId": 1191,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 67,
+      "channel": 5,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 68,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 910,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 68,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1623,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 68,
+      "channel": 4,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 69,
+      "channel": 3,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    },
+    {
+      "beat": 70,
+      "channel": 2,
+      "sampleRef": {
+        "rawId": 1255,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
+    }
+  ],
+  "mixer": {
+    "channels": [],
+    "eq": [],
+    "compressor": null,
+    "stereoWide": null,
+    "raw": {}
+  },
+  "drumMachine": null,
+  "tickerText": [],
+  "catalogs": []
+}

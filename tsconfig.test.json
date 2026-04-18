@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node", "vitest/globals"]
+  },
+  // Cover both Node-side test suites and browser-side test suites in a
+  // single project; the runtime tsconfigs (tsconfig.json /
+  // tsconfig.browser.json) intentionally exclude these files so a missing
+  // import in a test surfaces here rather than from a runtime build.
+  "include": [
+    "scripts/__tests__/**/*.ts",
+    "src/__tests__/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

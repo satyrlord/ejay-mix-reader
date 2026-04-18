@@ -7,10 +7,10 @@
  * Reads any `.mix` file and emits a normalised MixIR JSON object.
  *
  * Usage:
- *   tsx tools/mix-parser.ts --file <path>          # parse one file
- *   tsx tools/mix-parser.ts --dir <path>           # parse all .mix in dir
- *   tsx tools/mix-parser.ts --all                  # parse every archive .mix
- *   tsx tools/mix-parser.ts --all --out <path>     # write aggregate JSON
+ *   tsx scripts/mix-parser.ts --file <path>          # parse one file
+ *   tsx scripts/mix-parser.ts --dir <path>           # parse all .mix in dir
+ *   tsx scripts/mix-parser.ts --all                  # parse every archive .mix
+ *   tsx scripts/mix-parser.ts --all --out <path>     # write aggregate JSON
  */
 
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "fs";
@@ -72,19 +72,47 @@ const IMPLICIT_BPM: Record<number, number> = {
   [APP_SIG_HIPHOP1]: 90,
 };
 
-/** Product labels per Gen 1 app signature. */
+/** Product labels per Gen 1 app signature. Kept in sync with APP_ID_PRODUCTS
+ *  and the canonical `output/<product>/` folder names. */
 const FORMAT_A_PRODUCTS: Record<number, string> = {
   [APP_SIG_DANCE1]:  "Dance_eJay1",
-  [APP_SIG_RAVE]:    "Rave_eJay",
+  [APP_SIG_RAVE]:    "Rave",
   [APP_SIG_HIPHOP1]: "HipHop_eJay1",
 };
 
-/** Mixer state field separator: #°_# … %°_% (bytes 23 B0 5F 23 … 25 B0 5F 25). */
-const MIXER_SEP_OPEN  = "#\xB0_#";
-const MIXER_SEP_CLOSE = "%\xB0_%";
+const APP_ID_PRODUCTS: Record<number, string> = {
+  0x00000a06: "Dance_eJay1",
+  0x00000a07: "Rave",
+  0x00000a08: "HipHop_eJay1",
+  0x00000a09: "Dance_eJay2",
+  0x00000a0a: "Dance_eJay3",
+  0x00000a0b: "Techno_eJay",
+  0x00000a0c: "HipHop_eJay2",
+  0x00000a0d: "House_eJay",
+  0x00000a0e: "Dance_eJay4",
+  0x00000a0f: "Techno_eJay3",
+  0x00000a10: "HipHop_eJay3",
+  0x00000a11: "HipHop_eJay4",
+  0x00000a12: "Xtreme_eJay",
+};
 
 /** SKKENNUNG marker. */
 const SKKENNUNG_PREFIX = "#SKKENNUNG#:";
+
+/**
+ * Cache the latin1 string view of each Buffer. The full-buffer materialisation
+ * is reused by `detectFormat` and `parseFormatCTracks`; without memoisation
+ * the `--all` batch run re-encodes hundreds of MB of mix data.
+ */
+const latin1Cache = new WeakMap<Buffer, string>();
+function bufLatin1(buf: Buffer): string {
+  let cached = latin1Cache.get(buf);
+  if (cached === undefined) {
+    cached = buf.toString("latin1");
+    latin1Cache.set(buf, cached);
+  }
+  return cached;
+}
 
 // ── Format auto-detection ────────────────────────────────────
 
@@ -100,7 +128,7 @@ export function detectFormat(buf: Buffer): MixFormat | null {
   if (FORMAT_A_SIGS.has(appSig)) return "A";
 
   // Gen 2/3: scan for #SKKENNUNG# to confirm it's an eJay .mix
-  const text = buf.toString("latin1");
+  const text = bufLatin1(buf);
   if (text.indexOf("#SKKENNUNG#") === -1) return null;
 
   // Distinguish D from C from B by mixer state markers
@@ -123,11 +151,21 @@ export function parseMix(buf: Buffer, productHint?: string): MixIR | null {
   const format = detectFormat(buf);
   if (!format) return null;
 
-  switch (format) {
-    case "A": return parseFormatA(buf, productHint);
-    case "B": return parseFormatB(buf, productHint);
-    case "C": return parseFormatC(buf, productHint);
-    case "D": return parseFormatD(buf, productHint);
+  try {
+    switch (format) {
+      case "A": return parseFormatA(buf, productHint);
+      case "B": return parseFormatB(buf, productHint);
+      case "C": return parseFormatC(buf, productHint);
+      case "D": return parseFormatD(buf, productHint);
+    }
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return null;
+    }
+    if (error instanceof Error && error.message.startsWith("Invalid Gen 2/3 MIX:")) {
+      return null;
+    }
+    throw error;
   }
 }
 
@@ -176,15 +214,12 @@ export function parseFormatA(buf: Buffer, productHint?: string): MixIR {
     });
   }
 
-  // Extract trailer strings (informational — product sig, sample-pack labels)
-  const trailerStrings = trailerStart < buf.length
-    ? extractAsciiStrings(buf.subarray(trailerStart))
-    : [];
-
   return {
     format: "A",
     product,
-    appId: (headerAux << 16) | appSig,
+    // Compose unsigned: JS bitwise OR is signed 32-bit, so headerAux >= 0x8000
+    // would otherwise produce a negative appId.
+    appId: ((headerAux * 0x10000) + appSig) >>> 0,
     bpm,
     bpmAdjusted: null,
     author: null,
@@ -217,6 +252,10 @@ interface Gen23Header {
  * shared by Formats B, C, and D.
  */
 function parseGen23Header(buf: Buffer): Gen23Header {
+  if (buf.length < 0x10) {
+    throw new Error("Invalid Gen 2/3 MIX: truncated header");
+  }
+
   const appId = buf.readUInt32LE(0);
   const entryCount = buf.readUInt32LE(4);
   const bpm = buf.readUInt16LE(8);
@@ -332,6 +371,15 @@ function stripVideoOnlyMixerData(kv: Record<string, string>): Record<string, str
 function buildMixerState(kv: Record<string, string>, format: MixFormat): MixerState {
   const channels: ChannelState[] = [];
   const eq: number[] = [];
+  const parseOptionalInt = (value: string | undefined): number | null => {
+    if (value === undefined) return null;
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const parseIntWithDefault = (value: string | undefined, fallback: number): number => {
+    const parsed = parseOptionalInt(value);
+    return parsed ?? fallback;
+  };
 
   if (format === "D") {
     // Format D: MixVolume{N}, MixPan{N}, MixMute{N}, MixSolo{N}
@@ -343,9 +391,9 @@ function buildMixerState(kv: Record<string, string>, format: MixFormat): MixerSt
       if (vol !== undefined || pan !== undefined) {
         channels.push({
           index: i - 1,
-          volume1: vol !== undefined ? parseInt(vol, 10) : null,
+          volume1: parseOptionalInt(vol),
           volume2: null,
-          pan: pan !== undefined ? parseInt(pan, 10) : null,
+          pan: parseOptionalInt(pan),
           eq: null,
           muted: mute === "active" || mute === "1",
           solo: solo === "active" || solo === "1",
@@ -355,7 +403,7 @@ function buildMixerState(kv: Record<string, string>, format: MixFormat): MixerSt
     // 10-band EQ: BO_Equalizer{0..9} or DP_Equalizer{0..9}
     for (let i = 0; i < 10; i++) {
       const v = kv[`BO_Equalizer${i}`] ?? kv[`BOequ${i}`] ?? kv[`BoostEQ_${i}`];
-      eq.push(v !== undefined ? parseInt(v, 10) : 50);
+      eq.push(parseIntWithDefault(v, 50));
     }
   } else {
     // Format C: BOOU1_{N}, BOOU2_{N}, DrumEQ{N}
@@ -366,10 +414,10 @@ function buildMixerState(kv: Record<string, string>, format: MixFormat): MixerSt
       if (v1 !== undefined || v2 !== undefined || deq !== undefined) {
         channels.push({
           index: i,
-          volume1: v1 !== undefined ? parseInt(v1, 10) : null,
-          volume2: v2 !== undefined ? parseInt(v2, 10) : null,
+          volume1: parseOptionalInt(v1),
+          volume2: parseOptionalInt(v2),
           pan: null,
-          eq: deq !== undefined ? parseInt(deq, 10) : null,
+          eq: parseOptionalInt(deq),
           muted: false,
           solo: false,
         });
@@ -378,7 +426,7 @@ function buildMixerState(kv: Record<string, string>, format: MixFormat): MixerSt
     // 10-band EQ: BoostEQ_{0..9}
     for (let i = 0; i < 10; i++) {
       const v = kv[`BoostEQ_${i}`];
-      eq.push(v !== undefined ? parseInt(v, 10) : 50);
+      eq.push(parseIntWithDefault(v, 50));
     }
   }
 
@@ -390,9 +438,9 @@ function buildMixerState(kv: Record<string, string>, format: MixFormat): MixerSt
   const cLed   = kv["BoostCompressorLED"]   ?? kv["BO_COMP_LED"]          ?? kv["BOcomLED"];
   if (cDrive !== undefined || cGain !== undefined || cSpeed !== undefined) {
     compressor = {
-      drive: cDrive !== undefined ? parseInt(cDrive, 10) : 0,
-      gain:  cGain  !== undefined ? parseInt(cGain, 10)  : 0,
-      speed: cSpeed !== undefined ? parseInt(cSpeed, 10) : 0,
+      drive: parseIntWithDefault(cDrive, 0),
+      gain:  parseIntWithDefault(cGain, 0),
+      speed: parseIntWithDefault(cSpeed, 0),
       enabled: cLed === "active" || cLed === "1",
     };
   }
@@ -404,7 +452,7 @@ function buildMixerState(kv: Record<string, string>, format: MixFormat): MixerSt
     channels,
     eq,
     compressor,
-    stereoWide: sw !== undefined ? parseInt(sw, 10) : null,
+    stereoWide: parseOptionalInt(sw),
     raw: kv,
   };
 }
@@ -428,16 +476,16 @@ function buildDrumMachine(kv: Record<string, string>): DrumMachineState | null {
     pads.push({
       index: i,
       name: kv[`DrumName${i}`] ?? "",
-      volume: parseInt(kv[`DrumVolume${i}`] ?? "500", 10),
-      pan: parseInt(kv[`DrumPan${i}`] ?? "50", 10),
-      pitch: parseInt(kv[`DrumPitch${i}`] ?? "0", 10),
+      volume: Number.parseInt(kv[`DrumVolume${i}`] ?? "500", 10) || 500,
+      pan: Number.parseInt(kv[`DrumPan${i}`] ?? "50", 10) || 50,
+      pitch: Number.parseInt(kv[`DrumPitch${i}`] ?? "0", 10) || 0,
       reversed: kv[`DrumReverse${i}`] === "active",
       fx: kv[`DrumFX${i}`] ?? "passive",
     });
   }
 
   const effects = buildDrumEffects(kv);
-  const masterVol = parseInt(kv["DRUMvolume"] ?? "500", 10);
+  const masterVol = Number.parseInt(kv["DRUMvolume"] ?? "500", 10) || 500;
 
   return { pads, effects, masterVolume: masterVol };
 }
@@ -445,31 +493,31 @@ function buildDrumMachine(kv: Record<string, string>): DrumMachineState | null {
 function buildDrumEffects(kv: Record<string, string>): DrumEffectsChain {
   return {
     chorus: {
-      drive: parseInt(kv["DRUMchoDri"] ?? "0", 10),
-      speed: parseInt(kv["DRUMchoSpe"] ?? "0", 10),
+      drive: Number.parseInt(kv["DRUMchoDri"] ?? "0", 10) || 0,
+      speed: Number.parseInt(kv["DRUMchoSpe"] ?? "0", 10) || 0,
       enabled: kv["DRUMchoLED"] === "active",
     },
     echo: {
-      time: parseInt(kv["DRUMechTim"] ?? "0", 10),
-      feedback: parseInt(kv["DRUMechFee"] ?? "0", 10),
-      volume: parseInt(kv["DRUMechVol"] ?? "0", 10),
+      time: Number.parseInt(kv["DRUMechTim"] ?? "0", 10) || 0,
+      feedback: Number.parseInt(kv["DRUMechFee"] ?? "0", 10) || 0,
+      volume: Number.parseInt(kv["DRUMechVol"] ?? "0", 10) || 0,
       enabled: kv["DRUMechLED"] === "active",
     },
     eq: {
-      low: parseInt(kv["DRUMequ1"] ?? "50", 10),
-      mid: parseInt(kv["DRUMequ2"] ?? "50", 10),
-      high: parseInt(kv["DRUMequ3"] ?? "50", 10),
+      low: Number.parseInt(kv["DRUMequ1"] ?? "50", 10) || 50,
+      mid: Number.parseInt(kv["DRUMequ2"] ?? "50", 10) || 50,
+      high: Number.parseInt(kv["DRUMequ3"] ?? "50", 10) || 50,
       enabled: kv["DRUMequLED"] === "active",
     },
     overdrive: {
-      drive: parseInt(kv["DRUMoveDri"] ?? "0", 10),
-      filter: parseInt(kv["DRUMoveFil"] ?? "0", 10),
+      drive: Number.parseInt(kv["DRUMoveDri"] ?? "0", 10) || 0,
+      filter: Number.parseInt(kv["DRUMoveFil"] ?? "0", 10) || 0,
       enabled: kv["DRUMoveLED"] === "active",
     },
     reverb: {
-      preDelay: parseInt(kv["DRUMrevPre"] ?? "0", 10),
-      time: parseInt(kv["DRUMrevtim"] ?? "0", 10),
-      volume: parseInt(kv["DRUMrevVol"] ?? "0", 10),
+      preDelay: Number.parseInt(kv["DRUMrevPre"] ?? "0", 10) || 0,
+      time: Number.parseInt(kv["DRUMrevtim"] ?? "0", 10) || 0,
+      volume: Number.parseInt(kv["DRUMrevVol"] ?? "0", 10) || 0,
       enabled: kv["DRUMrevLED"] === "active",
     },
   };
@@ -603,7 +651,7 @@ export function parseFormatB(buf: Buffer, productHint?: string): MixIR {
 function findCatalogStart(buf: Buffer, searchFrom: number): number {
   for (let i = Math.max(0, searchFrom); i + 20 < buf.length; i++) {
     const len = buf.readUInt16LE(i);
-    if (len < 4 || len > 80) continue;
+    if (len < 4 || len > 200) continue;
     const nameBlockEnd = i + 2 + len;
     if (nameBlockEnd + 8 > buf.length) continue;
 
@@ -644,6 +692,7 @@ function parseFormatBTracks(buf: Buffer, startOffset: number): TrackPlacement[] 
       continue;
     }
 
+    const recordStart = offset;
     offset += 4;
     if (offset + 4 > buf.length) break;
 
@@ -663,10 +712,16 @@ function parseFormatBTracks(buf: Buffer, startOffset: number): TrackPlacement[] 
     offset++; // skip null
 
     // If name is empty, this was an empty catalog slot → skip
-    if (name.length === 0) continue;
+    if (name.length === 0 || name.length > 64 || !/^[A-Za-z0-9_. -]+$/.test(name)) {
+      offset = recordStart + 1;
+      continue;
+    }
 
     // Expect 0x01 tag
-    if (offset >= buf.length || buf[offset] !== 0x01) continue;
+    if (offset >= buf.length || buf[offset] !== 0x01) {
+      offset = recordStart + 1;
+      continue;
+    }
     offset++;
 
     if (offset + 8 > buf.length) break;
@@ -675,12 +730,22 @@ function parseFormatBTracks(buf: Buffer, startOffset: number): TrackPlacement[] 
     const beat = buf.readInt16LE(offset);
     offset += 2;
 
+    if (beat < -8) {
+      offset = recordStart + 1;
+      continue;
+    }
+
     // Flags (uint16 LE)
     offset += 2;
 
     // Sample data length (uint32 LE)
     const dataLen = buf.readUInt32LE(offset);
     offset += 4;
+
+    if (dataLen === 0 || dataLen > 50_000_000) {
+      offset = recordStart + 1;
+      continue;
+    }
 
     tracks.push({
       beat,
@@ -706,35 +771,30 @@ function parseFormatBTracks(buf: Buffer, startOffset: number): TrackPlacement[] 
  */
 function extractTickerText(buf: Buffer, searchFrom: number): string[] {
   const text: string[] = [];
-  const fileText = buf.toString("latin1", searchFrom);
+  const searchEnd = Math.min(buf.length, searchFrom + 4096);
 
-  // Look for short null-terminated strings that follow a length prefix
-  // Pattern: <len:u16> <text\0> 0x01
-  let offset = 0;
-  while (offset < fileText.length - 4) {
-    // Heuristic: ticker entries follow a recognisable pattern with
-    // short (1-20 char) strings. We look for length-prefixed strings.
-    const code = fileText.charCodeAt(offset);
-    if (code >= 3 && code <= 30) {
-      const strStart = offset + 2;
-      const strEnd = fileText.indexOf("\0", strStart);
-      if (strEnd > strStart && strEnd - strStart < 30) {
-        const candidate = fileText.slice(strStart, strEnd);
-        // Only include strings that look like words (printable, no control chars)
-        if (/^[\x20-\x7e]+$/.test(candidate) && candidate.length >= 1) {
-          // Verify the 0x01 tag follows
-          if (strEnd + 1 < fileText.length && fileText.charCodeAt(strEnd + 1) === 0x01) {
-            text.push(candidate);
-            offset = strEnd + 2;
-            continue;
-          }
-        }
-      }
-    }
-    offset++;
+  for (let offset = searchFrom; offset + 5 < searchEnd; offset++) {
+    const len = buf.readUInt16LE(offset);
+    if (len < 3 || len > 30) continue;
+
+    const textStart = offset + 2;
+    const textEnd = textStart + len - 2;
+    if (textEnd + 1 > searchEnd) continue;
+    if (buf[textEnd] !== 0x00 || buf[textEnd + 1] !== 0x01) continue;
+
+    const candidate = buf.toString("latin1", textStart, textEnd);
+    if (!/^[\x20-\x7e]+$/.test(candidate)) continue;
+    text.push(candidate);
+    offset = textEnd + 1;
   }
 
   return text;
+}
+
+interface FormatCTrackRecord {
+  displayName: string | null;
+  unresolvedLaneCode: number | null;
+  dataLength: number | null;
 }
 
 // ── Format C parser ──────────────────────────────────────────
@@ -796,7 +856,7 @@ export function parseFormatC(buf: Buffer, productHint?: string): MixIR {
  */
 function parseFormatCTracks(buf: Buffer, startOffset: number): TrackPlacement[] {
   const tracks: TrackPlacement[] = [];
-  const text = buf.toString("latin1");
+  const text = bufLatin1(buf);
 
   const pathMatches: Array<{ index: number; path: string }> = [];
   const tempPathPattern = /[A-Z]:\\[^\x00\xff]{0,120}?pxd32p[a-z]\.tmp\.?/gi;
@@ -817,17 +877,21 @@ function parseFormatCTracks(buf: Buffer, startOffset: number): TrackPlacement[] 
       }
     }
 
-    const nameField = findFormatCDNameField(buf, startOffset, first.index);
+    const record = parseFormatCTrackRecord(buf, startOffset, first.index);
+
+    // Skip placements where no record could be resolved at all. Emitting a
+    // phantom `rawId: 0` track inflates counts and masks parser regressions.
+    if (!record) continue;
 
     tracks.push({
-      beat: 0,
-      channel: tracks.length,
+      beat: null,
+      channel: null,
       sampleRef: {
-        rawId: 0,
+        rawId: record.unresolvedLaneCode ?? 0,
         internalName: null,
-        displayName: nameField?.name ?? null,
+        displayName: record.displayName ?? null,
         resolvedPath: null,
-        dataLength: null,
+        dataLength: record.dataLength ?? null,
       },
     });
   }
@@ -855,9 +919,13 @@ function parseFormatDTracks(buf: Buffer, startOffset: number): TrackPlacement[] 
     const nameField = findFormatCDNameField(buf, Math.max(startOffset, offset - 96), left.pathStart);
 
     tracks.push({
-      beat: 0,
-      channel: tracks.length,
+      beat: null,
+      channel: null,
       sampleRef: {
+        // Format D placements only carry temp paths plus an optional name
+        // field. The numeric sample id and stored data length are not
+        // recoverable from the on-disk layout discovered so far, so they are
+        // intentionally null/0. Update if a future analysis recovers them.
         rawId: 0,
         internalName: null,
         displayName: nameField?.name ?? null,
@@ -904,6 +972,29 @@ function readLengthPrefixedTempPath(
 
 function isTempPath(value: string): boolean {
   return /^[A-Z]:\\.*pxd32p[a-z]\.tmp[.,]?$/i.test(value);
+}
+
+function parseFormatCTrackRecord(
+  buf: Buffer,
+  lowerBound: number,
+  pathStart: number,
+): FormatCTrackRecord | null {
+  const nameField = findFormatCDNameField(buf, lowerBound, pathStart);
+  if (!nameField) return null;
+
+  const nameEnd = nameField.offset + 2 + nameField.name.length;
+  if (nameEnd + 10 > pathStart || pathStart > buf.length) return null;
+
+  const laneCodeOffset = nameEnd;
+  const unknown32Offset = laneCodeOffset + 2;
+  const dataLengthOffset = unknown32Offset + 4;
+  if (dataLengthOffset + 4 > pathStart) return null;
+
+  return {
+    displayName: nameField.name,
+    unresolvedLaneCode: buf.readInt16LE(laneCodeOffset),
+    dataLength: buf.readUInt32LE(dataLengthOffset),
+  };
 }
 
 function findFormatCDNameField(
@@ -1045,7 +1136,7 @@ function inferProduct(catalogs: CatalogEntry[], appId: number): string | null {
       .replace(/[^a-zA-Z0-9_]/g, "");
     return name || null;
   }
-  return null;
+  return APP_ID_PRODUCTS[appId] ?? null;
 }
 
 /** Create an empty MixerState (for Format A/B). */
@@ -1085,24 +1176,39 @@ export function listMixFiles(dir: string): string[] {
 
 // ── CLI ──────────────────────────────────────────────────────
 
-const KNOWN_MIX_DIRS = [
-  "archive/Dance_eJay1/MIX",
-  "archive/Dance_eJay2/MIX",
-  "archive/Dance_eJay3/MIX",
-  "archive/Dance_eJay4/Mix",
-  "archive/Dance_SuperPack/MIX",
-  "archive/GenerationPack1/Dance/MIX",
-  "archive/GenerationPack1/HipHop/MIX",
-  "archive/GenerationPack1/Rave/MIX",
-  "archive/HipHop 2/MIX",
-  "archive/HipHop 3/MIX",
-  "archive/HipHop 4/MIX",
-  "archive/House_eJay/Mix",
-  "archive/Rave/MIX",
-  "archive/TECHNO_EJAY/MIX",
-  "archive/Techno 3/MIX",
-  "archive/Xtreme_eJay/mix",
-];
+function discoverMixDirs(rootDir: string, maxDepth = 4): string[] {
+  const dirs: string[] = [];
+  const queue: Array<{ path: string; depth: number }> = [{ path: rootDir, depth: 0 }];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    let entries: string[];
+    try {
+      entries = readdirSync(current.path);
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(current.path, entry);
+      let stats;
+      try {
+        stats = statSync(fullPath);
+      } catch {
+        continue;
+      }
+      if (!stats.isDirectory()) continue;
+      if (entry.toLowerCase() === "mix") {
+        dirs.push(fullPath);
+      }
+      if (current.depth + 1 < maxDepth) {
+        queue.push({ path: fullPath, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  return dirs.sort();
+}
 
 export function main(args: string[] = process.argv.slice(2)): number {
   const { values } = parseArgs({
@@ -1138,8 +1244,7 @@ export function main(args: string[] = process.argv.slice(2)): number {
       }
     }
   } else if (values.all) {
-    for (const relDir of KNOWN_MIX_DIRS) {
-      const absDir = resolve(relDir);
+    for (const absDir of discoverMixDirs(resolve("archive"))) {
       for (const f of listMixFiles(absDir)) {
         try {
           const mix = parseFile(f);
@@ -1150,7 +1255,7 @@ export function main(args: string[] = process.argv.slice(2)): number {
       }
     }
   } else {
-    console.error("Usage: tsx tools/mix-parser.ts --file <path> | --dir <path> | --all [--out <path>]");
+    console.error("Usage: tsx scripts/mix-parser.ts --file <path> | --dir <path> | --all [--out <path>]");
     return 1;
   }
 
@@ -1163,7 +1268,7 @@ export function main(args: string[] = process.argv.slice(2)): number {
     title: r.mix?.title ?? null,
     trackCount: r.mix?.tracks.length ?? 0,
     catalogCount: r.mix?.catalogs.length ?? 0,
-    mixerControlCount: r.mix ? Object.keys(r.mix.mixer.raw).length : 0,
+    mixerControlCount: r.mix ? countMixerControls(r.mix.mixer.raw) : 0,
     error: r.error ?? null,
   }));
 
@@ -1193,9 +1298,13 @@ export function main(args: string[] = process.argv.slice(2)): number {
   return results.some(r => r.error) ? 1 : 0;
 }
 
+function countMixerControls(raw: Record<string, string>): number {
+  return Object.keys(raw).length;
+}
+
 // Direct execution
 const isDirectRun = process.argv[1] &&
-  resolve(process.argv[1]).replace(/\\/g, "/").endsWith("tools/mix-parser.ts");
+  resolve(process.argv[1]).replace(/\\/g, "/").endsWith("scripts/mix-parser.ts");
 if (isDirectRun) {
   process.exit(main());
 }

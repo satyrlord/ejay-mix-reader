@@ -7,6 +7,7 @@ import {
   getChannel,
   collectMetadata,
   reorganize,
+  sanitizeChannelToken,
 } from "../reorganize.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -183,6 +184,10 @@ describe("getChannel", () => {
     expect(getChannel("HS1AQQ01")).toBe("Xtra");
   });
 
+  it("falls back to category hints when a regex-derived code is unknown", () => {
+    expect(getChannel("D4SP001", "effect")).toBe("Effect");
+  });
+
   it("uses longest-prefix matching for multi-char codes", () => {
     // GCA is in CHANNEL_MAP → Drum
     expect(getChannel("GCA01")).toBe("Drum");
@@ -191,6 +196,7 @@ describe("getChannel", () => {
   it("falls through to prefix when no regex matches", () => {
     expect(getChannel("RP01")).toBe("Rap");
     expect(getChannel("LY01")).toBe("Layer");
+    expect(getChannel("SC01")).toBe("Scratch");
   });
 
   it("uses category hints for various keywords", () => {
@@ -366,6 +372,42 @@ describe("reorganize", () => {
     }
   });
 
+  it("ignores traversal-style metadata paths", () => {
+    const tmp = createTempDir();
+    try {
+      writeFileSync(join(tmp, "BS01.wav"), "pcm-data");
+      writeFileSync(join(tmp, "metadata.json"), JSON.stringify({
+        samples: [{ filename: "../BS01.wav", internal_name: "BS01" }],
+      }));
+
+      reorganize(tmp);
+
+      expect(existsSync(join(tmp, "Bass", "BS01.wav"))).toBe(false);
+      expect(existsSync(join(tmp, "metadata.json"))).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("sanitizes source_archive before choosing collision-safe names", () => {
+    const tmp = createTempDir();
+    try {
+      mkdirSync(join(tmp, "Bass"), { recursive: true });
+      writeFileSync(join(tmp, "Bass", "sample.wav"), "existing");
+      writeFileSync(join(tmp, "sample.wav"), "new-data");
+      writeFileSync(join(tmp, "metadata.json"), JSON.stringify({
+        samples: [{ filename: "sample.wav", internal_name: "BS01", source_archive: "..\\PACK/1" }],
+      }));
+
+      reorganize(tmp);
+
+      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8"));
+      expect(meta.samples[0].filename).toBe(".._PACK_1 sample.wav");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("resolves secondary collision names", () => {
     const tmp = createTempDir();
     try {
@@ -447,6 +489,220 @@ describe("reorganize", () => {
 
       reorganize(tmp);
       expect(existsSync(join(tmp, "metadata.json"))).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("dedupes root and nested metadata for the same source file", () => {
+    const tmp = createTempDir();
+    try {
+      const packDir = join(tmp, "pack");
+      mkdirSync(packDir, { recursive: true });
+      writeFileSync(join(packDir, "BS01.wav"), "pcm-data");
+
+      writeFileSync(join(tmp, "metadata.json"), JSON.stringify({
+        samples: [{ filename: "pack/BS01.wav", internal_name: "BS01", alias: "root" }],
+      }));
+      writeFileSync(join(packDir, "metadata.json"), JSON.stringify({
+        samples: [{ filename: "BS01.wav", internal_name: "BS01", alias: "nested" }],
+      }));
+
+      reorganize(tmp);
+
+      expect(existsSync(join(tmp, "Bass", "BS01.wav"))).toBe(true);
+      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8"));
+      expect(meta.samples).toHaveLength(1);
+      expect(meta.samples[0].channel).toBe("Bass");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers the richer metadata record when duplicate sources collapse to one file", () => {
+    const tmp = createTempDir();
+    try {
+      const packDir = join(tmp, "pack");
+      mkdirSync(packDir, { recursive: true });
+      writeFileSync(join(packDir, "BS01.wav"), "pcm-data");
+
+      writeFileSync(join(tmp, "metadata.json"), JSON.stringify({
+        samples: [{ filename: "pack/BS01.wav", internal_name: "BS01", alias: "root" }],
+      }));
+      writeFileSync(join(packDir, "metadata.json"), JSON.stringify({
+        samples: [{
+          filename: "BS01.wav",
+          internal_name: "BS01",
+          alias: "nested",
+          detail: "kept",
+          source_archive: "PACK1",
+        }],
+      }));
+
+      reorganize(tmp);
+
+      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8"));
+      expect(meta.samples).toHaveLength(1);
+      expect(meta.samples[0].alias).toBe("nested");
+      expect(meta.samples[0].detail).toBe("kept");
+      expect(meta.samples[0].source_archive).toBe("PACK1");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("counts the same missing source file once when duplicate metadata entries reference it", () => {
+    const tmp = createTempDir();
+    try {
+      const packDir = join(tmp, "pack");
+      mkdirSync(packDir, { recursive: true });
+
+      writeFileSync(join(tmp, "metadata.json"), JSON.stringify({
+        samples: [{ filename: "pack/missing.wav", internal_name: "BS01" }],
+      }));
+      writeFileSync(join(packDir, "metadata.json"), JSON.stringify({
+        samples: [{ filename: "missing.wav", internal_name: "BS01" }],
+      }));
+
+      const logs: string[] = [];
+      const origLog = console.log;
+      console.log = (...args: unknown[]) => logs.push(args.join(" "));
+      try {
+        reorganize(tmp);
+      } finally {
+        console.log = origLog;
+      }
+
+      expect(logs.some((line) => line.includes("1 skipped (missing files)"))).toBe(true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("treats already-organized files as unchanged even when metadata casing differs", () => {
+    const tmp = createTempDir();
+    try {
+      mkdirSync(join(tmp, "Bass"), { recursive: true });
+      writeFileSync(join(tmp, "Bass", "BS01.wav"), "pcm-data");
+      writeFileSync(join(tmp, "metadata.json"), JSON.stringify({
+        samples: [{ filename: "bass/BS01.wav", internal_name: "BS01", channel: "Bass" }],
+      }));
+
+      const logs: string[] = [];
+      const origLog = console.log;
+      console.log = (...args: unknown[]) => logs.push(args.join(" "));
+      try {
+        reorganize(tmp);
+      } finally {
+        console.log = origLog;
+      }
+
+      expect(existsSync(join(tmp, "Bass", "BS01.wav"))).toBe(true);
+      expect(logs.some((line) => line.includes("1 already in place"))).toBe(true);
+
+      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8"));
+      expect(meta.samples).toHaveLength(1);
+      expect(meta.samples[0].filename).toBe("BS01.wav");
+      expect(meta.samples[0].channel).toBe("Bass");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves metadata when rerun on an already organized product", () => {
+    const tmp = createTempDir();
+    try {
+      mkdirSync(join(tmp, "Bass"), { recursive: true });
+      writeFileSync(join(tmp, "Bass", "BS01.wav"), "pcm-data");
+      writeFileSync(join(tmp, "metadata.json"), JSON.stringify({
+        samples: [{ filename: "BS01.wav", internal_name: "BS01", channel: "Bass" }],
+      }));
+
+      reorganize(tmp);
+
+      expect(existsSync(join(tmp, "Bass", "BS01.wav"))).toBe(true);
+      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8"));
+      expect(meta.samples).toHaveLength(1);
+      expect(meta.samples[0].filename).toBe("BS01.wav");
+      expect(meta.samples[0].channel).toBe("Bass");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("sanitizeChannelToken", () => {
+  it("accepts simple alnum tokens", () => {
+    expect(sanitizeChannelToken("Drum")).toBe("Drum");
+    expect(sanitizeChannelToken("Hi-Hat 1")).toBe("Hi-Hat 1");
+  });
+
+  it("rejects path separators and traversal segments", () => {
+    expect(sanitizeChannelToken("../etc")).toBeNull();
+    expect(sanitizeChannelToken("..\\foo")).toBeNull();
+    expect(sanitizeChannelToken("a/b")).toBeNull();
+    expect(sanitizeChannelToken("a\\b")).toBeNull();
+    expect(sanitizeChannelToken("..")).toBeNull();
+    expect(sanitizeChannelToken(".")).toBeNull();
+    expect(sanitizeChannelToken("")).toBeNull();
+    expect(sanitizeChannelToken("   ")).toBeNull();
+  });
+
+  it("rejects non-string and special characters", () => {
+    expect(sanitizeChannelToken(undefined)).toBeNull();
+    expect(sanitizeChannelToken(null)).toBeNull();
+    expect(sanitizeChannelToken(123)).toBeNull();
+    expect(sanitizeChannelToken("name\0null")).toBeNull();
+    expect(sanitizeChannelToken("name:colon")).toBeNull();
+  });
+});
+
+describe("reorganize path-traversal hardening", () => {
+  it("ignores malicious channel values in metadata and falls back to inference", () => {
+    const tmp = createTempDir();
+    try {
+      // BS01 deterministically infers to "Bass". A poisoned metadata.json with
+      // channel "../escape" must not redirect the move outside the product dir.
+      writeFileSync(join(tmp, "BS01.wav"), "pcm-data");
+      writeFileSync(
+        join(tmp, "metadata.json"),
+        JSON.stringify({
+          samples: [
+            { filename: "BS01.wav", internal_name: "BS01", channel: "../escape" },
+          ],
+        }),
+      );
+
+      reorganize(tmp);
+
+      expect(existsSync(join(tmp, "Bass", "BS01.wav"))).toBe(true);
+      // Confirm nothing was placed at the traversal target.
+      expect(existsSync(join(tmp, "..", "escape"))).toBe(false);
+      expect(existsSync(join(tmp, "escape"))).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to Xtra when channel is unsafe and no inference is available", () => {
+    const tmp = createTempDir();
+    try {
+      // ZZZZ does not match any inference rule (returns "Xtra"). A poisoned
+      // channel must not be honoured; it must collapse to the safe default.
+      writeFileSync(join(tmp, "ZZZZ.wav"), "pcm-data");
+      writeFileSync(
+        join(tmp, "metadata.json"),
+        JSON.stringify({
+          samples: [
+            { filename: "ZZZZ.wav", internal_name: "ZZZZ", channel: "../../tmp" },
+          ],
+        }),
+      );
+
+      reorganize(tmp);
+
+      expect(existsSync(join(tmp, "Xtra", "ZZZZ.wav"))).toBe(true);
+      expect(existsSync(join(tmp, "..", "..", "tmp"))).toBe(false);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

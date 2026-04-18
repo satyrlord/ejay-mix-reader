@@ -5,7 +5,10 @@
     "src/data.ts",
     "src/library.ts",
     "src/player.ts",
-    "src/render.ts"
+    "src/render.ts",
+    "src/mix-player.ts",
+    "src/mix-buffer.ts",
+    "src/mix-parser.ts"
   ],
   "exclude": [
     "dist/**",
@@ -23,5 +26,11 @@
     "html",
     "lcov"
   ],
-  "temp-dir": ".nyc_output"
+  "temp-dir": ".nyc_output",
+  "check-coverage": true,
+  "per-file": true,
+  "statements": 80,
+  "branches": 80,
+  "functions": 80,
+  "lines": 80
 }
