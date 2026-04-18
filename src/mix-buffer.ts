@@ -47,7 +47,12 @@ export class MixBuffer {
   }
 
   /** Decode a byte range as a latin1 (ISO 8859-1) string. */
-  toString(_encoding: string, start?: number, end?: number): string {
+  toString(encoding: MixBufferEncoding = "latin1", start?: number, end?: number): string {
+    // Keep the runtime guard for JS callers and future encoding expansion.
+    if (encoding !== "latin1") {
+      throw new Error(`Unsupported MixBuffer encoding: ${encoding}`);
+    }
+
     const s = start ?? 0;
     const e = end ?? this.length;
     return latin1Decode(this.bytes, s, e);
@@ -64,15 +69,25 @@ export class MixBuffer {
   }
 }
 
+export type MixBufferEncoding = "latin1";
+
+const LATIN1_DECODE_CHUNK_SIZE = 0x8000;
+
 /** Decode bytes as latin1 (each byte maps 1:1 to the same Unicode code point). */
 function latin1Decode(bytes: Uint8Array, start: number, end: number): string {
-  // TextDecoder('latin1') is not universally supported; manual decode is
-  // both safe and fast for the small strings in .mix files.
   const len = end - start;
   if (len <= 0) return "";
-  const codes = new Array<number>(len);
-  for (let i = 0; i < len; i++) {
-    codes[i] = bytes[start + i];
+
+  let decoded = "";
+  for (let offset = start; offset < end; offset += LATIN1_DECODE_CHUNK_SIZE) {
+    const chunkEnd = Math.min(end, offset + LATIN1_DECODE_CHUNK_SIZE);
+    const chunkLength = chunkEnd - offset;
+    const codes = new Array<number>(chunkLength);
+    for (let index = 0; index < chunkLength; index++) {
+      codes[index] = bytes[offset + index];
+    }
+    decoded += String.fromCharCode(...codes);
   }
-  return String.fromCharCode(...codes);
+
+  return decoded;
 }

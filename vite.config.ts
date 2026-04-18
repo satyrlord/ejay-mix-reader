@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
 import tailwindcss from "@tailwindcss/vite";
@@ -13,7 +13,7 @@ import istanbulPluginRaw, { type IstanbulPluginOptions } from "vite-plugin-istan
 const istanbulPlugin = istanbulPluginRaw as unknown as (opts?: IstanbulPluginOptions) => Plugin;
 
 import { ARCHIVE_MIX_DIRS } from "./scripts/build-index.js";
-import { CATEGORY_CONFIG_FILENAME, normalizeCategoryConfig } from "./src/data.js";
+import { CATEGORY_CONFIG_FILENAME, CATEGORY_CONFIG_UPDATED_EVENT, normalizeCategoryConfig } from "./src/data.js";
 
 const COVERAGE_SOURCE_FILES = [
   "src/main.ts",
@@ -29,6 +29,58 @@ const COVERAGE_SOURCE_FILES = [
 // Shared list used by both blockingWarmup and server.warmup.clientFiles so they
 // stay in sync: app.css must be pre-transformed together with the TS entry points.
 const WARMUP_FILES = [...COVERAGE_SOURCE_FILES, "src/app.css"] as const;
+
+const CONTENT_SECURITY_POLICY_PLACEHOLDER = "__EJAY_CONTENT_SECURITY_POLICY__";
+
+const APP_VERSION = (() => {
+  try {
+    const parsed = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf-8")) as {
+      version?: string;
+      appVersion?: string;
+    };
+    const explicitAppVersion = typeof parsed.appVersion === "string" ? parsed.appVersion.trim() : "";
+    if (explicitAppVersion.length > 0) {
+      return explicitAppVersion;
+    }
+
+    return `v${parsed.version ?? "0.0.0"}`;
+  } catch {
+    return "v0.0.0";
+  }
+})();
+
+const DEV_WEBSOCKET_PORT = (() => {
+  const parsedPort = Number.parseInt(process.env.VITE_DEV_SERVER_PORT ?? "3000", 10);
+  return Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 3000;
+})();
+
+function buildContentSecurityPolicy(allowDevWebSocket: boolean): string {
+  const connectSrc = allowDevWebSocket ? `'self' ws://127.0.0.1:${DEV_WEBSOCKET_PORT}` : "'self'";
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "script-src 'self'",
+    "worker-src 'self' blob:",
+    `connect-src ${connectSrc}`,
+    "img-src 'self' data: blob:",
+    "media-src 'self' blob:",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "form-action 'self'",
+  ].join("; ");
+}
+
+function injectContentSecurityPolicy(allowDevWebSocket: boolean): Plugin {
+  const policy = buildContentSecurityPolicy(allowDevWebSocket);
+
+  return {
+    name: "inject-content-security-policy",
+    transformIndexHtml(html) {
+      return html.replace(CONTENT_SECURITY_POLICY_PLACEHOLDER, policy);
+    },
+  };
+}
 
 /**
  * Creates a Vite development-server plugin that delays HTTP responses until the
@@ -156,6 +208,13 @@ function serveMixFiles(archiveRoot: string): import("vite").Plugin {
   return {
     name: "serve-mix-files",
     configureServer(server) {
+      const respondWithReadError = (absolutePath: string, error: unknown, res: NodeJS.WritableStream & { statusCode: number; writableEnded?: boolean; end(chunk?: string): void; }): void => {
+        server.config.logger.warn(`[serve-mix-files] Failed to read ${absolutePath}: ${String(error)}`);
+        if (res.writableEnded) return;
+        res.statusCode = 500;
+        res.end("Internal error");
+      };
+
       server.middlewares.use((req, res, next) => {
         if (!req.url || !req.url.startsWith("/mix/")) { next(); return; }
         const resolved = resolveMixUrl(req.url, archiveRoot);
@@ -166,15 +225,15 @@ function serveMixFiles(archiveRoot: string): import("vite").Plugin {
           return;
         }
         try {
-          const buf = readFileSync(resolved.absolutePath);
           res.setHeader("Content-Type", "application/octet-stream");
-          res.setHeader("Content-Length", buf.length);
           res.setHeader("Cache-Control", "no-cache");
-          res.end(buf);
+          const stream = createReadStream(resolved.absolutePath);
+          stream.on("error", (err) => {
+            respondWithReadError(resolved.absolutePath, err, res);
+          });
+          stream.pipe(res);
         } catch (err) {
-          server.config.logger.warn(`[serve-mix-files] Failed to read ${resolved.absolutePath}: ${String(err)}`);
-          res.statusCode = 500;
-          res.end("Internal error");
+          respondWithReadError(resolved.absolutePath, err, res);
         }
       });
     },
@@ -191,6 +250,24 @@ function manageCategoryConfig(outputRoot: string): Plugin {
     name: "manage-category-config",
     configureServer(server) {
       const configPath = resolve(outputRoot, CATEGORY_CONFIG_FILENAME);
+
+      const emitCategoryConfigUpdated = (): void => {
+        server.ws.send({
+          type: "custom",
+          event: CATEGORY_CONFIG_UPDATED_EVENT,
+          data: null,
+        });
+      };
+
+      const handleWatchedConfigChange = (filePath: string): void => {
+        if (resolve(filePath) !== configPath) return;
+        emitCategoryConfigUpdated();
+      };
+
+      server.watcher.add(configPath);
+      server.watcher.on("add", handleWatchedConfigChange);
+      server.watcher.on("change", handleWatchedConfigChange);
+      server.watcher.on("unlink", handleWatchedConfigChange);
 
       server.middlewares.use((req, res, next) => {
         if (req.url !== "/__category-config") {
@@ -223,6 +300,7 @@ function manageCategoryConfig(outputRoot: string): Plugin {
 
             writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
             res.statusCode = 204;
+            emitCategoryConfigUpdated();
             res.end();
           } catch (error) {
             server.config.logger.warn(`[manage-category-config] Failed to write ${configPath}: ${String(error)}`);
@@ -285,9 +363,12 @@ function copyMixFilesPlugin(archiveRoot: string): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   appType: "spa",
   base: "./",
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   build: {
     outDir: "dist",
     sourcemap: true,
@@ -299,6 +380,7 @@ export default defineConfig({
   },
   plugins: [
     tailwindcss(),
+    injectContentSecurityPolicy(command === "serve"),
     manageCategoryConfig(resolve(process.cwd(), "output")),
     serveMixFiles(resolve(process.cwd(), "archive")),
     copyMixFilesPlugin(resolve(process.cwd(), "archive")),
@@ -325,4 +407,4 @@ export default defineConfig({
     port: 3000,
     strictPort: true,
   },
-});
+}));

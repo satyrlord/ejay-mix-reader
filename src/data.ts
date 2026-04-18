@@ -40,6 +40,9 @@ export const DRUM_SYSTEM_SUBCATEGORIES = DRUM_SUBCATEGORIES.filter((entry) => en
 export const VOICE_SYSTEM_SUBCATEGORIES = VOICE_SUBCATEGORIES.filter((entry) => entry !== "misc");
 
 export const CATEGORY_CONFIG_FILENAME = "categories.json";
+export const CATEGORY_CONFIG_UPDATED_EVENT = "category-config-updated";
+export const UNSORTED_CATEGORY_ID = "Unsorted";
+export const UNSORTED_SUBCATEGORY_ID = "unsorted";
 
 export interface CategoryConfigEntry {
   id: string;
@@ -134,6 +137,10 @@ export interface SampleFilterOptions {
   availableSubcategories?: string[];
 }
 
+export interface HumanizeIdentifierOptions {
+  compactDmkit?: boolean;
+}
+
 function normalizeText(value: string | null | undefined): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -170,7 +177,7 @@ function defaultSubcategoryOrder(categoryId: string): readonly string[] {
   const normalized = normalizeCategoryLabel(categoryId);
   if (normalized === "Drum") return DRUM_SUBCATEGORIES;
   if (normalized === "Voice") return VOICE_SUBCATEGORIES;
-  return ["unsorted"];
+  return [UNSORTED_SUBCATEGORY_ID];
 }
 
 function systemSubcategoryOrder(categoryId: string): readonly string[] {
@@ -203,6 +210,33 @@ export function cloneCategoryConfig(config: CategoryConfig): CategoryConfig {
 
 export function buildDefaultCategoryConfig(): CategoryConfig {
   return cloneCategoryConfig(DEFAULT_CATEGORY_CONFIG);
+}
+
+export function categoryConfigsEqual(left: CategoryConfig, right: CategoryConfig): boolean {
+  if (left.categories.length !== right.categories.length) {
+    return false;
+  }
+
+  for (let categoryIndex = 0; categoryIndex < left.categories.length; categoryIndex++) {
+    const leftCategory = left.categories[categoryIndex];
+    const rightCategory = right.categories[categoryIndex];
+
+    if (
+      leftCategory.id !== rightCategory.id ||
+      leftCategory.name !== rightCategory.name ||
+      leftCategory.subcategories.length !== rightCategory.subcategories.length
+    ) {
+      return false;
+    }
+
+    for (let subcategoryIndex = 0; subcategoryIndex < leftCategory.subcategories.length; subcategoryIndex++) {
+      if (leftCategory.subcategories[subcategoryIndex] !== rightCategory.subcategories[subcategoryIndex]) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 export function normalizeCategoryConfig(value: unknown): CategoryConfig | null {
@@ -360,12 +394,17 @@ export function sampleDisplayName(sample: Pick<Sample, "alias" | "filename">): s
   return sample.filename.replace(/^.*[\\/]/, "").replace(/\.wav$/i, "");
 }
 
-export function humanizeIdentifier(value: string): string {
-  return value
+/** Humanize ids for display; `compactDmkit` is opt-in so existing callers keep spaced `DMKIT 1` output by default. */
+export function humanizeIdentifier(value: string, options: HumanizeIdentifierOptions = {}): string {
+  const humanized = value
     .replace(/_/g, " ")
     .replace(/(\d+)$/, " $1")
     .replace(/ {2,}/g, " ")
     .trim();
+
+  return options.compactDmkit
+    ? humanized.replace(/\bDMKIT (\d+)\b/g, "DMKIT$1")
+    : humanized;
 }
 
 export function buildCategoryEntries(
@@ -448,9 +487,7 @@ export function filterSamples(samples: Sample[], filters: SampleFilterOptions): 
         if (!matchesSpecialSubcategory) {
           return false;
         }
-      }
-
-      else if (subcategory === "misc") {
+      } else if (subcategory === "misc") {
         if (sampleSub !== "misc" && sampleSub !== "") {
           return false;
         }

@@ -132,11 +132,21 @@ export const DPCM_STEP_TABLE: readonly number[] = [
  */
 export function decodePxdAudio(compressed: Buffer, decodedSize: number): Buffer {
   const dictionary = new Map<number, Buffer>();
-  const output: number[] = [];
+  const output = Buffer.alloc(decodedSize, 0x80);
+  let writeOffset = 0;
   let pos = 0;
   const length = compressed.length;
 
-  while (pos < length && output.length < decodedSize) {
+  const writeBytes = (bytes: Buffer): void => {
+    const remaining = output.length - writeOffset;
+    if (remaining <= 0) return;
+
+    const bytesToCopy = Math.min(remaining, bytes.length);
+    bytes.copy(output, writeOffset, 0, bytesToCopy);
+    writeOffset += bytesToCopy;
+  };
+
+  while (pos < length && writeOffset < decodedSize) {
     const b = compressed[pos];
 
     if (b in OPCODES) {
@@ -145,28 +155,27 @@ export function decodePxdAudio(compressed: Buffer, decodedSize: number): Buffer 
       const key = compressed[pos + 1];
       const payload = compressed.subarray(pos + 2, pos + 2 + snippetLen);
       dictionary.set(key, Buffer.from(payload));
-      for (const byte of payload) output.push(byte);
+      writeBytes(payload);
       pos += 2 + snippetLen;
     } else if (b === LITERAL_ESCAPE) {
       if (pos + 1 >= length) break;
-      output.push(compressed[pos + 1]);
+      output[writeOffset] = compressed[pos + 1];
+      writeOffset++;
       pos += 2;
     } else if (b === SILENCE_BYTE) {
-      for (const byte of SILENCE_FILL) output.push(byte);
+      writeBytes(SILENCE_FILL);
       pos += 1;
     } else if (dictionary.has(b)) {
-      for (const byte of dictionary.get(b)!) output.push(byte);
+      writeBytes(dictionary.get(b)!);
       pos += 1;
     } else {
-      output.push(b);
+      output[writeOffset] = b;
+      writeOffset++;
       pos += 1;
     }
   }
 
-  // Pad with silence if decoder undershoots, truncate if overshoots
-  while (output.length < decodedSize) output.push(0x80);
-
-  return Buffer.from(output.slice(0, decodedSize));
+  return output;
 }
 
 /**
@@ -215,7 +224,7 @@ export function parsePxdHeader(data: Buffer): PxdHeader | null {
   // Strip trailing nulls
   let trimEnd = metadataRaw.length;
   while (trimEnd > 0 && metadataRaw[trimEnd - 1] === 0) trimEnd--;
-  const metadataText = metadataRaw.subarray(0, trimEnd).toString("ascii");
+  const metadataText = metadataRaw.subarray(0, trimEnd).toString("latin1");
 
   const marker = data[metaEnd];
   if (marker !== AUDIO_MARKER) return null;

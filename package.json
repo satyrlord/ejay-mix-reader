@@ -1,6 +1,7 @@
 {
   "name": "ejay-mix-reader",
   "version": "1.0.0",
+  "appVersion": "v1.14",
   "private": true,
   "type": "module",
   "description": "Extract and browse audio samples from eJay music software titles.",

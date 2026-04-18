@@ -164,7 +164,6 @@ export class FetchLibrary implements Library {
       throw new Error(`Failed to save category config: ${response.status}`);
     }
 
-    this.categoryConfigPromise = Promise.resolve(buildDefaultCategoryConfig());
     this.categoryConfigPromise = Promise.resolve(config);
   }
 

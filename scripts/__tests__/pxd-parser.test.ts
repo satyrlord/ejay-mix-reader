@@ -266,6 +266,21 @@ describe("parsePxdHeader", () => {
     expect(result).not.toBeNull();
     expect(result!.metadataText).toBe("Test");
   });
+
+  it("preserves latin1 metadata bytes", () => {
+    const metadata = Buffer.from("Mädchen", "latin1");
+    const header = Buffer.alloc(5 + metadata.length + 7);
+    header.write("tPxD", 0, "ascii");
+    header[4] = metadata.length;
+    metadata.copy(header, 5);
+    const metaEnd = 5 + metadata.length;
+    header[metaEnd] = 0x54;
+    header.writeUInt32LE(1, metaEnd + 1);
+    header.writeUInt16LE(0, metaEnd + 5);
+
+    const result = parsePxdHeader(header);
+    expect(result?.metadataText).toBe("Mädchen");
+  });
 });
 
 // ── decodePxdFile ────────────────────────────────────────────

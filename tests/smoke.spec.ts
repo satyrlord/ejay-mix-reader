@@ -1,4 +1,15 @@
+import { readFileSync } from "node:fs";
+
 import { test, expect } from "./baseFixtures.js";
+
+const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")) as {
+  version?: string;
+  appVersion?: string;
+};
+
+const expectedTransportVersion = typeof packageJson.appVersion === "string" && packageJson.appVersion.trim().length > 0
+  ? packageJson.appVersion.trim()
+  : `v${packageJson.version ?? "0.0.0"}`;
 
 test("page title is set", async ({ page }) => {
   await page.goto("/");
@@ -17,6 +28,8 @@ test("category sidebar renders the normalized category matrix", async ({ page })
   const buttons = page.locator(".category-btn");
   await expect(buttons.first()).toBeVisible();
   expect(await buttons.count()).toBeGreaterThanOrEqual(10);
+  await expect(page.locator('.category-system-btn[data-category-id="Unsorted"]')).toBeVisible();
+  await expect(page.locator(".load-json-btn.category-system-btn")).toBeVisible();
 });
 
 test("first category is active by default", async ({ page }) => {
@@ -103,4 +116,9 @@ test("transport bar is present and idle", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#transport")).toBeVisible();
   await expect(page.locator("#transport-name")).toHaveText("No sample playing");
+});
+
+test("transport bar shows the configured app version", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".transport-version")).toHaveText(expectedTransportVersion);
 });

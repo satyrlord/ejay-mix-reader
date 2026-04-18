@@ -420,8 +420,11 @@ describe("MixPlayerHost", () => {
   it("ignores scheduled specs for unknown channels", () => {
     const ctx = makeCtx();
     const host = new MixPlayerHost(ctx);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     host.scheduleSample({ buffer: {}, beat: 0, channelId: "ghost" });
     expect(host.play(120)).toBe(0);
+    expect(warnSpy).toHaveBeenCalledWith("Skipping scheduled sample for unknown channel: ghost");
+    warnSpy.mockRestore();
   });
 
   it("stops active sources and clears them", () => {

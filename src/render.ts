@@ -1,7 +1,7 @@
 // DOM rendering functions for the normalized Sound Browser SPA.
 
 import type { CategoryEntry, Sample } from "./data.js";
-import { sampleCategory, sampleDisplayName } from "./data.js";
+import { sampleCategory, sampleDisplayName, UNSORTED_CATEGORY_ID, UNSORTED_SUBCATEGORY_ID } from "./data.js";
 import type { Library } from "./library.js";
 import type { Player } from "./player.js";
 
@@ -80,6 +80,51 @@ function hasSubcategoryDraftValue(value: string): boolean {
   return value.trim().length > 0;
 }
 
+function createBpmSelect(selectId: string, ariaLabel: string): HTMLSelectElement {
+  const select = document.createElement("select");
+  select.id = selectId;
+  select.setAttribute("aria-label", ariaLabel);
+
+  for (const value of BPM_VALUES) {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = String(value);
+    option.selected = value === 140;
+    select.appendChild(option);
+  }
+
+  return select;
+}
+
+function createSidebarButton(options: {
+  className: string;
+  label: string;
+  isActive?: boolean;
+  categoryId?: string;
+  sidebarRole?: string;
+  onClick?: () => void;
+}): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = options.className;
+  button.textContent = options.label;
+
+  if (options.categoryId) {
+    button.dataset.categoryId = options.categoryId;
+  }
+  if (options.sidebarRole) {
+    button.dataset.sidebarRole = options.sidebarRole;
+  }
+  if (options.isActive) {
+    button.classList.add("is-active");
+  }
+  if (options.onClick) {
+    button.addEventListener("click", options.onClick);
+  }
+
+  return button;
+}
+
 export interface SpaShellSlots {
   shell: HTMLElement;
   sidebar: HTMLElement;
@@ -103,33 +148,47 @@ export function renderHomePage(
   wrapper.id = "home-page";
   wrapper.className = "home-page";
 
-  wrapper.innerHTML = `
-    <div class="home-card">
-      <div class="home-logo" aria-hidden="true">
-        <span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <h1 class="home-title"><span>eJay</span> Sound Browser</h1>
-      <p class="home-copy">Browse, search, and preview extracted audio samples from your eJay library.</p>
-      <div class="home-actions"></div>
-      <footer class="home-footer">
-        <a href="https://github.com/satyrlord/ejay-mix-reader" target="_blank" rel="noopener noreferrer">
-          satyrlord/ejay-mix-reader
-        </a>
-      </footer>
-    </div>
-    <div class="home-bpm-corner">
-      <span>BPM filter</span>
-      <select id="home-bpm" aria-label="BPM filter">
-        ${BPM_VALUES.map((value) => `<option value="${value}"${value === 140 ? " selected" : ""}>${value}</option>`).join("")}
-      </select>
-    </div>
-  `;
+  const card = document.createElement("div");
+  card.className = "home-card";
 
-  const actions = wrapper.querySelector(".home-actions");
-  if (!actions) {
-    container.appendChild(wrapper);
-    return;
+  const logo = document.createElement("div");
+  logo.className = "home-logo";
+  logo.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 6; index++) {
+    logo.appendChild(document.createElement("span"));
   }
+
+  const title = document.createElement("h1");
+  title.className = "home-title";
+  const titleBrand = document.createElement("span");
+  titleBrand.textContent = "eJay";
+  title.append(titleBrand, document.createTextNode(" Sound Browser"));
+
+  const copy = document.createElement("p");
+  copy.className = "home-copy";
+  copy.textContent = "Browse, search, and preview extracted audio samples from your eJay library.";
+
+  const actions = document.createElement("div");
+  actions.className = "home-actions";
+
+  const footer = document.createElement("footer");
+  footer.className = "home-footer";
+  const repoLink = document.createElement("a");
+  repoLink.href = "https://github.com/satyrlord/ejay-mix-reader";
+  repoLink.target = "_blank";
+  repoLink.rel = "noopener noreferrer";
+  repoLink.textContent = "satyrlord/ejay-mix-reader";
+  footer.appendChild(repoLink);
+
+  card.append(logo, title, copy, actions, footer);
+
+  const bpmCorner = document.createElement("div");
+  bpmCorner.className = "home-bpm-corner";
+  const bpmLabel = document.createElement("span");
+  bpmLabel.textContent = "BPM filter";
+  bpmCorner.append(bpmLabel, createBpmSelect("home-bpm", "BPM filter"));
+
+  wrapper.append(card, bpmCorner);
 
   const pickBtn = document.createElement("button");
   pickBtn.id = "pick-folder-btn";
@@ -199,13 +258,11 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
 
   const bpmWrap = document.createElement("label");
   bpmWrap.className = "spa-bpm";
-  bpmWrap.innerHTML = `
-    <span class="spa-bpm-label">BPM</span>
-    <select id="bpm-filter" aria-label="BPM filter">
-      ${BPM_VALUES.map((value) => `<option value="${value}"${value === 140 ? " selected" : ""}>${value}</option>`).join("")}
-    </select>
-  `;
-  const bpm = bpmWrap.querySelector("select") as HTMLSelectElement;
+  const bpmLabel = document.createElement("span");
+  bpmLabel.className = "spa-bpm-label";
+  bpmLabel.textContent = "BPM";
+  const bpm = createBpmSelect("bpm-filter", "BPM filter");
+  bpmWrap.append(bpmLabel, bpm);
 
   contextControls.append(tabs, bpmWrap);
   contextStrip.append(contextStatus, contextControls);
@@ -313,27 +370,40 @@ export function renderCategorySidebar(
   const grid = document.createElement("div");
   grid.className = "category-grid";
 
+  const unsortedCategory = categories.find((category) => category.id === UNSORTED_CATEGORY_ID) ?? {
+    id: UNSORTED_CATEGORY_ID,
+    name: UNSORTED_CATEGORY_ID,
+    subcategories: [UNSORTED_SUBCATEGORY_ID],
+    sampleCount: 0,
+  };
+
   for (const category of categories) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "category-btn";
-    button.dataset.categoryId = category.id;
-    button.textContent = category.name;
-    if (activeId === category.id) {
-      button.classList.add("is-active");
-    }
-    button.addEventListener("click", () => onSelect(category));
-    grid.appendChild(button);
+    if (category.id === UNSORTED_CATEGORY_ID) continue;
+
+    grid.appendChild(createSidebarButton({
+      className: "category-btn",
+      label: category.name,
+      categoryId: category.id,
+      isActive: activeId === category.id,
+      onClick: () => onSelect(category),
+    }));
   }
 
-  const loadJsonBtn = document.createElement("button");
-  loadJsonBtn.type = "button";
-  loadJsonBtn.className = "load-json-btn";
-  loadJsonBtn.textContent = "Load JSON";
-  if (onLoadJson) {
-    loadJsonBtn.addEventListener("click", onLoadJson);
-  }
-  grid.appendChild(loadJsonBtn);
+  grid.appendChild(createSidebarButton({
+    className: "category-system-btn",
+    label: unsortedCategory.name,
+    categoryId: unsortedCategory.id,
+    sidebarRole: "system-feature",
+    isActive: activeId === unsortedCategory.id,
+    onClick: () => onSelect(unsortedCategory),
+  }));
+
+  grid.appendChild(createSidebarButton({
+    className: "category-system-btn load-json-btn",
+    label: "Load JSON",
+    sidebarRole: "system-feature",
+    onClick: onLoadJson,
+  }));
 
   container.appendChild(grid);
 }
@@ -537,7 +607,7 @@ function categoryColor(category: string): string {
   return `var(--channel-${token || "unknown"}, #4a90d9)`;
 }
 
-function showErrorToast(message: string): void {
+export function showErrorToast(message: string): void {
   const existing = document.getElementById("error-toast");
   if (existing) existing.remove();
 
@@ -549,10 +619,83 @@ function showErrorToast(message: string): void {
   window.setTimeout(() => toast.remove(), 3000);
 }
 
-const APP_VERSION = "v1.14";
+const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "v0.0.0";
 const BUILD_LABEL = import.meta.env.DEV
   ? "eJay mix reader \u2014 full version"
   : "eJay mix reader demo \u2014 clone this repo for full functionality";
+
+const GLOBAL_UI_1000MS_EFFECT_CSS_VAR = "--ui-deliberate-1000ms-effect-duration";
+
+// 1000 ms is deliberate UX pacing so these fades read as intentional, not as layout or rendering bugs.
+export const GLOBAL_UI_1000MS_EFFECT_MS = 1000;
+export const TRANSPORT_BUILD_LABEL_REVEAL_DELAY_MS = GLOBAL_UI_1000MS_EFFECT_MS;
+
+function applyGlobalUiTimingConstants(): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.style.setProperty(
+    GLOBAL_UI_1000MS_EFFECT_CSS_VAR,
+    `${GLOBAL_UI_1000MS_EFFECT_MS}ms`,
+  );
+}
+
+applyGlobalUiTimingConstants();
+
+const transportBuildLabelAudioSources = new Set<string>();
+let transportBuildLabelRevealTimeoutId: number | null = null;
+
+function getTransportBuildLabel(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".transport-build-label");
+}
+
+function clearTransportBuildLabelRevealTimeout(): void {
+  if (transportBuildLabelRevealTimeoutId === null) return;
+  window.clearTimeout(transportBuildLabelRevealTimeoutId);
+  transportBuildLabelRevealTimeoutId = null;
+}
+
+function getTransportBuildLabelSoundState(): "idle" | "playing" | "cooldown" {
+  if (transportBuildLabelAudioSources.size > 0) return "playing";
+  if (transportBuildLabelRevealTimeoutId !== null) return "cooldown";
+  return "idle";
+}
+
+function syncTransportBuildLabelVisibility(): void {
+  const label = getTransportBuildLabel();
+  if (!label) return;
+
+  const soundState = getTransportBuildLabelSoundState();
+  label.dataset.soundState = soundState;
+  label.classList.toggle("is-hidden", soundState !== "idle");
+}
+
+export function setTransportBuildLabelAudioPlaying(sourceId: string, isPlaying: boolean): void {
+  const normalizedSourceId = sourceId.trim();
+  if (!normalizedSourceId) return;
+
+  if (isPlaying) {
+    clearTransportBuildLabelRevealTimeout();
+    transportBuildLabelAudioSources.add(normalizedSourceId);
+    syncTransportBuildLabelVisibility();
+    return;
+  }
+
+  const hadActiveSource = transportBuildLabelAudioSources.delete(normalizedSourceId);
+  if (transportBuildLabelAudioSources.size > 0) {
+    syncTransportBuildLabelVisibility();
+    return;
+  }
+  if (!hadActiveSource) {
+    syncTransportBuildLabelVisibility();
+    return;
+  }
+
+  clearTransportBuildLabelRevealTimeout();
+  transportBuildLabelRevealTimeoutId = window.setTimeout(() => {
+    transportBuildLabelRevealTimeoutId = null;
+    syncTransportBuildLabelVisibility();
+  }, TRANSPORT_BUILD_LABEL_REVEAL_DELAY_MS);
+  syncTransportBuildLabelVisibility();
+}
 
 export function renderTransportBar(container: HTMLElement): HTMLElement {
   const bar = document.createElement("div");
@@ -575,6 +718,7 @@ export function renderTransportBar(container: HTMLElement): HTMLElement {
     </div>
   `;
   container.appendChild(bar);
+  syncTransportBuildLabelVisibility();
   return bar;
 }
 

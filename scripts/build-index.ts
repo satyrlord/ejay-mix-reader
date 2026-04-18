@@ -13,6 +13,7 @@ import {
   buildCategoryEntries,
   buildDefaultCategoryConfig,
   CATEGORY_CONFIG_FILENAME,
+  humanizeIdentifier,
   normalizeCategoryConfig,
 } from "../src/data.js";
 import type {
@@ -73,12 +74,7 @@ interface RawMetadata {
 }
 
 export function deriveDisplayName(folderId: string): string {
-  return folderId
-    .replace(/_/g, " ")
-    .replace(/(\d+)$/, " $1")
-    .replace(/\bDMKIT (\d+)\b/g, "DMKIT$1")
-    .replace(/  +/g, " ")
-    .trim();
+  return humanizeIdentifier(folderId, { compactDmkit: true });
 }
 
 export function countWavFiles(dirPath: string): number {

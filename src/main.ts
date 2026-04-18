@@ -5,11 +5,16 @@ import {
   addSubcategoryToCategoryConfig,
   buildCategoryEntries,
   buildDefaultCategoryConfig,
+  categoryConfigsEqual,
+  CATEGORY_CONFIG_UPDATED_EVENT,
   filterSamples,
   getSubcategoryKind,
   normalizeCategoryLabel,
   removeSubcategoryFromCategoryConfig,
+  sampleCategory,
   sortSamplesForGrid,
+  UNSORTED_CATEGORY_ID,
+  UNSORTED_SUBCATEGORY_ID,
 } from "./data.js";
 import type { Library } from "./library.js";
 import { FetchLibrary, pickLibraryFolder } from "./library.js";
@@ -19,7 +24,9 @@ import {
   renderHomePage,
   renderSampleGrid,
   renderSpaShell,
+  setTransportBuildLabelAudioPlaying,
   renderSubcategoryTabs,
+  showErrorToast,
   type SubcategoryAddOptions,
   type SpaShellSlots,
   type UiTab,
@@ -28,6 +35,7 @@ import {
 } from "./render.js";
 
 type CategoryTabMode = "subcategory";
+type SubcategoryOperation = "add" | "remove";
 
 interface CategoryTab extends UiTab {
   mode: CategoryTabMode;
@@ -65,13 +73,11 @@ const state: AppState = {
 const player = new Player();
 let slots: SpaShellSlots | null = null;
 let progressUpdateIntervalId: number | null = null;
-let categoryConfigPollIntervalId: number | null = null;
+let stopCategoryConfigWatch: (() => void) | null = null;
 let categoryConfigRefreshInFlight = false;
-let subcategoryAddSubmitInFlight = false;
-let subcategoryRemoveSubmitInFlight = false;
+const subcategoryOperationsInFlight = new Set<SubcategoryOperation>();
 let cleanupSubcategoryContextMenu: (() => void) | null = null;
 
-const CATEGORY_CONFIG_POLL_INTERVAL_MS = 1000;
 const SUBCATEGORY_CONTEXT_MENU_ID = "subcategory-context-menu";
 
 const appElement = document.getElementById("app");
@@ -85,13 +91,25 @@ function clearProgressUpdateInterval(): void {
   progressUpdateIntervalId = null;
 }
 
-function clearCategoryConfigPollInterval(): void {
-  if (categoryConfigPollIntervalId === null) return;
-  clearInterval(categoryConfigPollIntervalId);
-  categoryConfigPollIntervalId = null;
+function clearCategoryConfigWatcher(): void {
+  stopCategoryConfigWatch?.();
+  stopCategoryConfigWatch = null;
+}
+
+function isSubcategoryOperationInFlight(operation: SubcategoryOperation): boolean {
+  return subcategoryOperationsInFlight.has(operation);
+}
+
+function beginSubcategoryOperation(operation: SubcategoryOperation): void {
+  subcategoryOperationsInFlight.add(operation);
+}
+
+function completeSubcategoryOperation(operation: SubcategoryOperation): void {
+  subcategoryOperationsInFlight.delete(operation);
 }
 
 player.onStateChange((playerState) => {
+  setTransportBuildLabelAudioPlaying("sample", playerState === "playing");
   updatePlayingBlock(player.activePath);
   updateTransport(player.activePath, player);
 
@@ -131,7 +149,7 @@ async function startWithFetchLibrary(): Promise<void> {
 }
 
 async function startBrowser(library: Library): Promise<void> {
-  clearCategoryConfigPollInterval();
+  clearCategoryConfigWatcher();
   closeSubcategoryContextMenu();
   resetSubcategoryAddState();
   state.library = library;
@@ -170,7 +188,7 @@ async function startBrowser(library: Library): Promise<void> {
   void index;
   state.samples = samples;
   applyCategoryConfig(categoryConfig);
-  startCategoryConfigPolling();
+  startCategoryConfigWatching();
 }
 
 function selectCategory(category: CategoryEntry): void {
@@ -180,6 +198,19 @@ function selectCategory(category: CategoryEntry): void {
   state.activeCategory = category;
   state.activeTab = null;
   syncActiveCategory();
+}
+
+function buildSystemUnsortedCategory(): CategoryEntry {
+  const unsortedSampleCount = state.samples.reduce((count, sample) => (
+    sampleCategory(sample) === UNSORTED_CATEGORY_ID ? count + 1 : count
+  ), 0);
+
+  return {
+    id: UNSORTED_CATEGORY_ID,
+    name: UNSORTED_CATEGORY_ID,
+    subcategories: [UNSORTED_SUBCATEGORY_ID],
+    sampleCount: unsortedSampleCount,
+  };
 }
 
 function buildTabsForCategory(category: CategoryEntry): CategoryTab[] {
@@ -246,7 +277,7 @@ function renderEmptyState(message: string): void {
 }
 
 window.addEventListener("beforeunload", () => {
-  clearCategoryConfigPollInterval();
+  clearCategoryConfigWatcher();
   clearProgressUpdateInterval();
   closeSubcategoryContextMenu();
   player.destroy();
@@ -262,11 +293,13 @@ function applyCategoryConfig(config: CategoryConfig, preferredTabId: string | nu
 
 function syncActiveCategory(preferredTabId: string | null = null): void {
   const currentSlots = slots;
+  /* istanbul ignore next -- renderSpaShell always establishes slots before syncActiveCategory runs */
   if (!currentSlots) return;
 
   const activeCategoryId = state.activeCategory?.id ?? null;
   state.activeCategory = activeCategoryId
-    ? state.categories.find((category) => category.id === activeCategoryId) ?? null
+    ? state.categories.find((category) => category.id === activeCategoryId)
+      ?? (activeCategoryId === UNSORTED_CATEGORY_ID ? buildSystemUnsortedCategory() : null)
     : null;
 
   if (!state.activeCategory) {
@@ -300,23 +333,35 @@ function syncActiveCategory(preferredTabId: string | null = null): void {
   refreshSamples();
 }
 
-function startCategoryConfigPolling(): void {
-  clearCategoryConfigPollInterval();
+function startCategoryConfigWatching(): void {
+  clearCategoryConfigWatcher();
+  /* istanbul ignore next -- the shipped browser libraries always expose config loading */
   if (!state.library?.loadCategoryConfig) return;
 
-  categoryConfigPollIntervalId = window.setInterval(() => {
+  const hot = import.meta.hot;
+
+  const handleCategoryConfigUpdated = (): void => {
     void refreshCategoryConfig(true);
-  }, CATEGORY_CONFIG_POLL_INTERVAL_MS);
+  };
+
+  window.addEventListener(CATEGORY_CONFIG_UPDATED_EVENT, handleCategoryConfigUpdated as EventListener);
+  hot?.on(CATEGORY_CONFIG_UPDATED_EVENT, handleCategoryConfigUpdated);
+  stopCategoryConfigWatch = () => {
+    window.removeEventListener(CATEGORY_CONFIG_UPDATED_EVENT, handleCategoryConfigUpdated as EventListener);
+    hot?.off(CATEGORY_CONFIG_UPDATED_EVENT, handleCategoryConfigUpdated);
+  };
 }
 
 async function refreshCategoryConfig(force: boolean): Promise<void> {
   const library = state.library;
-  if (!library?.loadCategoryConfig || categoryConfigRefreshInFlight) return;
+  /* istanbul ignore next -- refreshes are only scheduled after watcher setup validates config loading */
+  if (!library?.loadCategoryConfig) return;
+  if (categoryConfigRefreshInFlight) return;
 
   categoryConfigRefreshInFlight = true;
   try {
     const nextConfig = await library.loadCategoryConfig({ force });
-    if (JSON.stringify(nextConfig) === JSON.stringify(state.categoryConfig)) {
+    if (categoryConfigsEqual(nextConfig, state.categoryConfig)) {
       return;
     }
     applyCategoryConfig(nextConfig);
@@ -339,6 +384,7 @@ function closeSubcategoryContextMenu(): void {
 }
 
 function findTabById(tabId: string | null | undefined): CategoryTab | null {
+  /* istanbul ignore next -- context-menu events only target rendered tab buttons with ids */
   if (!tabId) return null;
   return state.tabs.find((tab) => tab.id === tabId) ?? null;
 }
@@ -481,40 +527,41 @@ function cancelSubcategoryAdd(): void {
 async function handleCreateSubcategory(): Promise<void> {
   const library = state.library;
   const activeCategory = state.activeCategory;
-  if (!library?.saveCategoryConfig || !activeCategory || subcategoryAddSubmitInFlight) return;
+  /* istanbul ignore next -- the UI keeps add disabled unless writes are available and no submit is in flight */
+  if (!library?.saveCategoryConfig || !activeCategory || isSubcategoryOperationInFlight("add")) return;
 
   closeSubcategoryContextMenu();
   const subcategoryName = normalizeCategoryLabel(state.subcategoryDraft);
+  /* istanbul ignore next -- the confirm button stays disabled for blank drafts */
   if (!subcategoryName) return;
 
-  subcategoryAddSubmitInFlight = true;
-  const existingTab = state.tabs.find(
-    (tab) => tab.value !== null && normalizeCategoryLabel(tab.value).toLowerCase() === subcategoryName.toLowerCase(),
-  );
-  if (existingTab || getSubcategoryKind(activeCategory.id, subcategoryName) !== "user") {
-    resetSubcategoryAddState();
-    applyCategoryConfig(state.categoryConfig, existingTab?.id ?? state.activeTab?.id ?? null);
-    subcategoryAddSubmitInFlight = false;
-    return;
-  }
-
-  const nextConfig = addSubcategoryToCategoryConfig(state.categoryConfig, activeCategory.id, subcategoryName);
-  if (JSON.stringify(nextConfig) === JSON.stringify(state.categoryConfig)) {
-    resetSubcategoryAddState();
-    applyCategoryConfig(state.categoryConfig, `subcategory:${subcategoryName}`);
-    subcategoryAddSubmitInFlight = false;
-    return;
-  }
+  beginSubcategoryOperation("add");
 
   try {
+    const existingTab = state.tabs.find(
+      (tab) => tab.value !== null && normalizeCategoryLabel(tab.value).toLowerCase() === subcategoryName.toLowerCase(),
+    );
+    if (existingTab || getSubcategoryKind(activeCategory.id, subcategoryName) !== "user") {
+      resetSubcategoryAddState();
+      applyCategoryConfig(state.categoryConfig, existingTab?.id ?? state.activeTab?.id ?? null);
+      return;
+    }
+
+    const nextConfig = addSubcategoryToCategoryConfig(state.categoryConfig, activeCategory.id, subcategoryName);
+    if (categoryConfigsEqual(nextConfig, state.categoryConfig)) {
+      resetSubcategoryAddState();
+      applyCategoryConfig(state.categoryConfig, `subcategory:${subcategoryName}`);
+      return;
+    }
+
     await library.saveCategoryConfig(nextConfig);
     resetSubcategoryAddState();
     applyCategoryConfig(nextConfig, `subcategory:${subcategoryName}`);
   } catch (error) {
     console.error("Failed to save category config.", error);
-    window.alert("Could not save categories.json.");
+    showErrorToast("Could not save categories.json.");
   } finally {
-    subcategoryAddSubmitInFlight = false;
+    completeSubcategoryOperation("add");
   }
 }
 
@@ -526,27 +573,27 @@ async function handleRemoveSubcategory(tab: CategoryTab): Promise<void> {
     !activeCategory ||
     !tab.removable ||
     !tab.value ||
-    subcategoryRemoveSubmitInFlight
+    isSubcategoryOperationInFlight("remove")
   ) {
     return;
   }
 
-  subcategoryRemoveSubmitInFlight = true;
+  beginSubcategoryOperation("remove");
   closeSubcategoryContextMenu();
-  const nextConfig = removeSubcategoryFromCategoryConfig(state.categoryConfig, activeCategory.id, tab.value);
-  if (JSON.stringify(nextConfig) === JSON.stringify(state.categoryConfig)) {
-    subcategoryRemoveSubmitInFlight = false;
-    return;
-  }
 
   try {
+    const nextConfig = removeSubcategoryFromCategoryConfig(state.categoryConfig, activeCategory.id, tab.value);
+    if (categoryConfigsEqual(nextConfig, state.categoryConfig)) {
+      return;
+    }
+
     await library.saveCategoryConfig(nextConfig);
     applyCategoryConfig(nextConfig);
   } catch (error) {
     console.error("Failed to save category config.", error);
-    window.alert("Could not save categories.json.");
+    showErrorToast("Could not save categories.json.");
   } finally {
-    subcategoryRemoveSubmitInFlight = false;
+    completeSubcategoryOperation("remove");
   }
 }
 

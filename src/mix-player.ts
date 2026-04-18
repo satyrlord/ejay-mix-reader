@@ -127,20 +127,25 @@ export function buildImpulseResponse(
 
 /** Minimal shape of the Web Audio nodes we touch. Kept narrow for testability. */
 export interface AudioNodeLike {
-  connect(destination: AudioNodeLike): AudioNodeLike | void;
+  /** Returns the downstream node for node-to-node connections; AudioParam targets typically yield `void`. */
+  connect(destination: AudioNodeLike | AudioParamLike): AudioNodeLike | void;
   disconnect?(): void;
 }
 
+export interface AudioParamLike {
+  value: number;
+}
+
 export interface GainNodeLike extends AudioNodeLike {
-  gain: { value: number };
+  gain: AudioParamLike;
 }
 
 export interface StereoPannerNodeLike extends AudioNodeLike {
-  pan: { value: number };
+  pan: AudioParamLike;
 }
 
 export interface DelayNodeLike extends AudioNodeLike {
-  delayTime: { value: number };
+  delayTime: AudioParamLike;
 }
 
 export interface ConvolverNodeLike extends AudioNodeLike {
@@ -148,22 +153,22 @@ export interface ConvolverNodeLike extends AudioNodeLike {
 }
 
 export interface DynamicsCompressorNodeLike extends AudioNodeLike {
-  threshold: { value: number };
-  ratio: { value: number };
+  threshold: AudioParamLike;
+  ratio: AudioParamLike;
 }
 
 export interface AudioBufferSourceNodeLike extends AudioNodeLike {
   buffer: unknown;
-  playbackRate: { value: number };
+  playbackRate: AudioParamLike;
   start(when?: number): void;
   stop(when?: number): void;
 }
 
 export interface BiquadFilterNodeLike extends AudioNodeLike {
   type: string;
-  frequency: { value: number };
-  Q: { value: number };
-  gain: { value: number };
+  frequency: AudioParamLike;
+  Q: AudioParamLike;
+  gain: AudioParamLike;
 }
 
 export interface WaveShaperNodeLike extends AudioNodeLike {
@@ -173,7 +178,7 @@ export interface WaveShaperNodeLike extends AudioNodeLike {
 
 export interface OscillatorNodeLike extends AudioNodeLike {
   type: string;
-  frequency: { value: number };
+  frequency: AudioParamLike;
   start(when?: number): void;
   stop(when?: number): void;
 }
@@ -430,7 +435,7 @@ export function createEffect(ctx: AudioContextLike, kind: EffectKind): EffectHan
       lfo.type = "sine";
       lfo.frequency.value = 1.5;
       lfo.connect(depth);
-      depth.connect(delay as unknown as AudioNodeLike); // modulate delayTime; browsers accept AudioParam target
+      depth.connect(delay.delayTime);
       const wet = ctx.createGain();
       wet.gain.value = 0.5;
       const out = ctx.createGain();
@@ -453,7 +458,7 @@ export function createEffect(ctx: AudioContextLike, kind: EffectKind): EffectHan
       const depth = ctx.createGain();
       depth.gain.value = 800;
       lfo.connect(depth);
-      depth.connect(band as unknown as AudioNodeLike); // modulate band.frequency
+      depth.connect(band.frequency);
       /* istanbul ignore next -- see chorus note */
       try { lfo.start(0); } catch { /* already started */ }
       return { kind, input: band, output: band };
@@ -552,7 +557,10 @@ export class MixPlayerHost {
     const started: AudioBufferSourceNodeLike[] = [];
     for (const spec of this.scheduled) {
       const channel = this.channels.get(spec.channelId);
-      if (!channel) continue;
+      if (!channel) {
+        console.warn(`Skipping scheduled sample for unknown channel: ${spec.channelId}`);
+        continue;
+      }
       const src = this.ctx.createBufferSource();
       src.buffer = spec.buffer;
       src.playbackRate.value = semitonesToRate(spec.semitones ?? 0);

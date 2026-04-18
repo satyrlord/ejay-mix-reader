@@ -187,3 +187,117 @@ be updated.
 - **Generated report/temp directories are disposable**: do not treat
   `coverage/`, `playwright-report/`, `test-results/`, `.nyc_output/`, or
   `dist/` as hand-maintained source folders.
+
+## Planned: MIX Sample Resolution Translation Layer
+
+When loading a `.mix` file in the browser, sample references emitted by
+`src/mix-parser.ts` (`MixIR.sampleRef`-style entries) are currently resolved
+directly against `data/index.json` / `output/<product>/metadata.json`. Some
+references fail because the original sample lives under a different product
+folder (deduplicated by `scripts/find-duplicates.ts`) or under a renamed
+filename (`scripts/rename-samples.ts`). Today these failures silently drop
+the voice from playback.
+
+This section captures the plan to introduce a dedicated **sample resolution
+translation layer** with a tiered fallback strategy and structured logging.
+
+### Goals
+
+- Centralise *every* sample lookup performed by `src/mix-player.ts` (and any
+  future MIX consumer) behind a single resolver API.
+- Apply a deterministic chain of fallbacks before declaring a sample missing.
+- Emit a machine-readable log of unresolved samples so the catalog and
+  duplicate database can be improved over time.
+- Keep the resolver pure-by-default and unit-testable without a real
+  `AudioContext` or filesystem (mirrors the `mix-player.ts` style).
+
+### Resolution Pipeline
+
+For each `(product, channel, filename)` reference requested by the player:
+
+1. **Primary lookup** — exact match in the in-memory catalog built from
+   `data/index.json`. This is the existing behaviour.
+2. **Duplicate fallback** — if the primary lookup misses, consult a parsed
+   index of `logs/duplicates.csv` (keyed by `(product, channel, filename)`
+   and by `hash_prefix`). If any duplicate row exists for the same
+   `hash_prefix`, return the first row whose target file is present in the
+   catalog.
+3. **Catalog-wide fallback** — if duplicates do not yield a hit, perform a
+   filename-only search across **all** `output/**/metadata.json` entries
+   (already aggregated in `data/index.json`). The first match wins; matches
+   with the same channel are preferred over cross-channel matches.
+4. **Logged miss** — if all three tiers fail, append a row to
+   `logs/log.csv` (created on demand) and return `null` so the player can
+   skip the voice without throwing.
+
+### Log Format (`logs/log.csv`)
+
+CSV with a stable header so the file can be opened in tooling and diffed in
+git:
+
+```csv
+timestamp_iso,mix_path,product,channel,filename,reason
+```
+
+- `reason` is one of `not_in_catalog`, `not_in_duplicates`,
+  `not_in_any_metadata` — emitted at whichever tier produced the final
+  miss (always `not_in_any_metadata` for full-pipeline failures, but the
+  field is reserved for future per-tier diagnostics).
+- Rows are append-only; the resolver de-duplicates within a single load
+  session to avoid log spam from a repeated voice.
+
+### New Files
+
+- `src/sample-resolver.ts` — pure resolver: takes a catalog snapshot, a
+  parsed duplicates index, and a logger callback; exports a
+  `resolveSample(ref): ResolvedSample | null` function plus small helpers
+  (`parseDuplicatesCsv`, `buildDuplicateIndex`, `formatLogRow`).
+- `src/duplicates-loader.ts` — browser-side fetch + parse for
+  `logs/duplicates.csv`. Returns the structured index consumed by
+  `sample-resolver.ts`. Kept separate so the resolver itself stays pure.
+- `src/miss-logger.ts` — thin abstraction over the log sink. In the
+  browser this POSTs (or buffers + downloads) CSV rows; in tests it is
+  replaced with an in-memory collector.
+- `src/__tests__/sample-resolver.test.ts` — Vitest unit coverage for the
+  three-tier pipeline, duplicate index lookup, and log row formatting.
+
+### Touched Existing Files
+
+- `src/mix-player.ts` — replace direct catalog lookups with calls to
+  `resolveSample`. Inject the resolver via constructor/factory so tests
+  keep using stubs.
+- `src/mix-parser.ts` — no behavioural change; only verify that emitted
+  `sampleRef` entries carry enough fields (`product`, `channel`,
+  `filename`) for the resolver.
+- `src/data.ts` — expose the aggregated `data/index.json` view as a
+  catalog snapshot the resolver can consume without re-fetching.
+- `index.html` / Vite static-asset config — ensure `logs/duplicates.csv`
+  is served at runtime (read-only). `logs/log.csv` is **not** shipped;
+  it is a developer-side artifact populated by the miss logger.
+
+### Tooling and Tests
+
+- **Build/serve** — `logs/duplicates.csv` becomes a runtime asset. Add it
+  to Vite's `publicDir` allow-list (or copy via a build step) without
+  enlarging the production bundle.
+- **Unit tests** (`npm run test:unit`) — cover the resolver in isolation:
+  primary hit, duplicate fallback, catalog-wide fallback, logged miss,
+  duplicate row malformed, empty duplicates file, repeated misses
+  de-duplicated within a session.
+- **Playwright** (`tests/mix-playback.spec.ts`) — add a regression that
+  loads a known-good `.mix` whose voices include at least one
+  duplicate-only sample, asserting playback proceeds and no
+  `not_in_any_metadata` row is produced.
+- **Coverage** — `src/sample-resolver.ts`, `src/duplicates-loader.ts`,
+  and `src/miss-logger.ts` must each meet the 80% per-cell threshold
+  enforced by `scripts/test-coverage.ts`. Add them to the browser
+  include lists in `vite.config.ts`, `.nycrc.json`, and
+  `tsconfig.browser.json`.
+
+### Out of Scope
+
+- Editing `logs/duplicates.csv` (read-only input produced by
+  `scripts/find-duplicates.ts`).
+- Mutating any `output/**/metadata.json` file at runtime.
+- Persisting `logs/log.csv` from the browser without a developer-driven
+  download/POST step (no silent server writes from the SPA).

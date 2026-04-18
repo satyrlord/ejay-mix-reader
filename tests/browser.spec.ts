@@ -784,6 +784,9 @@ test.describe("render edge cases", () => {
       return {
         categoryCount: sidebar.querySelectorAll(".category-btn").length,
         activeCategory: sidebar.querySelector(".category-btn.is-active")?.getAttribute("data-category-id"),
+        systemFeatureCount: sidebar.querySelectorAll(".category-system-btn").length,
+        unsortedRole: sidebar.querySelector('.category-system-btn[data-category-id="Unsorted"]')?.getAttribute("data-sidebar-role"),
+        loadJsonRole: sidebar.querySelector('.load-json-btn')?.getAttribute("data-sidebar-role"),
         tabCount: tabs.querySelectorAll(".subcategory-tab").length,
         activeTab: tabs.querySelector(".subcategory-tab.is-active")?.getAttribute("data-tab-id"),
         plusVisible: Boolean(tabs.querySelector("#subcategory-add")),
@@ -793,6 +796,9 @@ test.describe("render edge cases", () => {
 
     expect(result.categoryCount).toBe(2);
     expect(result.activeCategory).toBe("Drum");
+    expect(result.systemFeatureCount).toBe(2);
+    expect(result.unsortedRole).toBe("system-feature");
+    expect(result.loadJsonRole).toBe("system-feature");
     expect(result.tabCount).toBe(2);
     expect(result.activeTab).toBe("kick");
     expect(result.plusVisible).toBe(true);
@@ -1018,6 +1024,176 @@ test.describe("render edge cases", () => {
 
     expect(result.idle).toBe("No sample playing");
     expect(result.playing).toBe(true);
+  });
+
+  test("transport build label stays centered as playback text changes", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const render = await import(/* @vite-ignore */ modPath);
+      document.body.innerHTML = "";
+
+      const transportHost = document.createElement("div");
+      document.body.appendChild(transportHost);
+      render.renderTransportBar(transportHost);
+
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+
+      const bar = document.getElementById("transport") as HTMLElement | null;
+      const label = document.querySelector<HTMLElement>(".transport-build-label");
+      if (!bar || !label) {
+        throw new Error("Missing transport elements");
+      }
+
+      const centerDelta = (): number => {
+        const barRect = bar.getBoundingClientRect();
+        const labelRect = label.getBoundingClientRect();
+        const barCenter = barRect.left + (barRect.width / 2);
+        const labelCenter = labelRect.left + (labelRect.width / 2);
+        return Math.abs(barCenter - labelCenter);
+      };
+
+      render.updateTransport("mock://short.wav", { currentTime: 0, duration: 0 } as never);
+      const shortDelta = centerDelta();
+
+      render.updateTransport(
+        "mock://extremely-long-sample-name-that-should-not-shift-the-centered-build-label.wav",
+        { currentTime: 0, duration: 0 } as never,
+      );
+      const longDelta = centerDelta();
+
+      return {
+        shortDelta,
+        longDelta,
+      };
+    }, RENDER_MOD);
+
+    expect(result.shortDelta).toBeLessThan(1.5);
+    expect(result.longDelta).toBeLessThan(1.5);
+  });
+
+  test("transport build label stays hidden until all audio stops and cooldown completes", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const render = await import(/* @vite-ignore */ modPath);
+      document.body.innerHTML = "";
+
+      const transportHost = document.createElement("div");
+      document.body.appendChild(transportHost);
+      render.renderTransportBar(transportHost);
+
+      const label = document.querySelector<HTMLElement>(".transport-build-label");
+      if (!label) {
+        throw new Error("Missing transport build label");
+      }
+
+      const parseDurationMs = (value: string): number => {
+        const normalized = value.trim().toLowerCase();
+        if (normalized.endsWith("ms")) {
+          return Number.parseFloat(normalized.slice(0, -2));
+        }
+        if (normalized.endsWith("s")) {
+          return Number.parseFloat(normalized.slice(0, -1)) * 1000;
+        }
+        return Number.NaN;
+      };
+
+      const originalSetTimeout = window.setTimeout;
+      const originalClearTimeout = window.clearTimeout;
+
+      type TimerRecord = {
+        id: number;
+        delay: number;
+        cleared: boolean;
+        fn: () => void;
+      };
+
+      const timers: TimerRecord[] = [];
+      let nextTimerId = 1;
+
+      window.setTimeout = ((handler: TimerHandler, timeout?: number) => {
+        const timer: TimerRecord = {
+          id: nextTimerId++,
+          delay: typeof timeout === "number" ? timeout : 0,
+          cleared: false,
+          fn: () => {
+            if (timer.cleared || typeof handler !== "function") return;
+            handler();
+          },
+        };
+        timers.push(timer);
+        return timer.id;
+      }) as typeof window.setTimeout;
+
+      window.clearTimeout = ((timeoutId?: number) => {
+        const timer = timers.find((entry) => entry.id === timeoutId);
+        if (timer) timer.cleared = true;
+      }) as typeof window.clearTimeout;
+
+      const snapshot = () => ({
+        hidden: label.classList.contains("is-hidden"),
+        state: label.dataset.soundState ?? null,
+      });
+
+      try {
+        const initial = snapshot();
+
+        render.setTransportBuildLabelAudioPlaying("sample", true);
+        const duringSample = snapshot();
+
+        render.setTransportBuildLabelAudioPlaying("mix", true);
+        render.setTransportBuildLabelAudioPlaying("sample", false);
+        const whileMixStillPlaying = snapshot();
+        const timersWhileMixActive = timers.length;
+
+        render.setTransportBuildLabelAudioPlaying("mix", false);
+        const cooldown = snapshot();
+        const firstCooldownTimer = timers[timers.length - 1];
+
+        render.setTransportBuildLabelAudioPlaying("sample", true);
+        const duringReplay = snapshot();
+
+        render.setTransportBuildLabelAudioPlaying("sample", false);
+        const secondCooldownTimer = timers[timers.length - 1];
+        secondCooldownTimer.fn();
+        const afterCooldown = snapshot();
+
+        return {
+          initial,
+          duringSample,
+          whileMixStillPlaying,
+          timersWhileMixActive,
+          cooldown,
+          transitionDurationMs: parseDurationMs(getComputedStyle(label).transitionDuration),
+          globalEffectMs: render.GLOBAL_UI_1000MS_EFFECT_MS,
+          revealDelayMs: render.TRANSPORT_BUILD_LABEL_REVEAL_DELAY_MS,
+          firstCooldownDelay: firstCooldownTimer.delay,
+          firstCooldownCleared: firstCooldownTimer.cleared,
+          duringReplay,
+          secondCooldownDelay: secondCooldownTimer.delay,
+          afterCooldown,
+        };
+      } finally {
+        window.setTimeout = originalSetTimeout;
+        window.clearTimeout = originalClearTimeout;
+      }
+    }, RENDER_MOD);
+
+    expect(result.initial).toEqual({ hidden: false, state: "idle" });
+    expect(result.duringSample).toEqual({ hidden: true, state: "playing" });
+    expect(result.whileMixStillPlaying).toEqual({ hidden: true, state: "playing" });
+    expect(result.timersWhileMixActive).toBe(0);
+    expect(result.cooldown).toEqual({ hidden: true, state: "cooldown" });
+    expect(result.globalEffectMs).toBe(1000);
+    expect(result.transitionDurationMs).toBe(result.globalEffectMs);
+    expect(result.revealDelayMs).toBe(1000);
+    expect(result.firstCooldownDelay).toBe(result.revealDelayMs);
+    expect(result.firstCooldownCleared).toBe(true);
+    expect(result.duringReplay).toEqual({ hidden: true, state: "playing" });
+    expect(result.secondCooldownDelay).toBe(result.revealDelayMs);
+    expect(result.afterCooldown).toEqual({ hidden: false, state: "idle" });
   });
 
   test("renderHomePage and renderSpaShell wire buttons and shell slots", async ({ page }) => {
@@ -1517,7 +1693,7 @@ test.describe("main edge cases", () => {
 
       (document.querySelector("#subcategory-add") as HTMLButtonElement).click();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      window.dispatchEvent(new CustomEvent("category-config-updated"));
       await Promise.resolve();
       await Promise.resolve();
 
@@ -1590,11 +1766,79 @@ test.describe("main edge cases", () => {
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:misc"]')).toBeVisible();
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:snare"]')).toHaveCount(0);
 
-    await page.waitForTimeout(1100);
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("category-config-updated"));
+    });
 
-    expect(categoryFetches).toBeGreaterThan(1);
+    await expect.poll(() => categoryFetches).toBeGreaterThan(1);
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:snare"]')).toBeVisible();
     await expect(page.locator("#subcategory-tabs .subcategory-tab")).toHaveCount(3);
+  });
+
+  test("the real app coalesces config refreshes and falls back when the active category disappears", async ({ page }) => {
+    let categoryFetches = 0;
+    let releaseRefresh = (): void => {};
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = () => {
+        resolve();
+      };
+    });
+
+    await page.route("**/output/categories.json", async (route) => {
+      categoryFetches += 1;
+
+      if (categoryFetches === 2) {
+        await refreshGate;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            categories: [{ id: "Bass", name: "Bass", subcategories: ["riff"] }],
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"] }],
+        }),
+      });
+    });
+
+    await page.route("**/output/metadata.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          samples: [
+            { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+            { filename: "bass-riff.wav", alias: "Bass Riff", category: "Bass", subcategory: "riff", bpm: 140, beats: 4 },
+          ],
+        }),
+      });
+    });
+
+    await page.goto("/");
+    await expect(page.locator('.category-btn.is-active')).toHaveAttribute("data-category-id", "Drum");
+    await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:kick"]')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("category-config-updated"));
+      window.dispatchEvent(new CustomEvent("category-config-updated"));
+    });
+
+    await expect.poll(() => categoryFetches).toBe(2);
+    releaseRefresh();
+
+    await expect(page.locator('.category-btn.is-active')).toHaveAttribute("data-category-id", "Bass");
+    await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:riff"]')).toBeVisible();
+    await expect(page.locator('.subcategory-tab.is-active')).toHaveAttribute("data-tab-id", "subcategory:unsorted");
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:riff"]').click();
+    await expect(page.locator(".sample-grid")).toContainText("Bass Riff");
+    await expect.poll(() => categoryFetches).toBe(2);
   });
 
   test("the real app ignores unchanged category config refreshes and does not save cancelled, blank, or duplicate inline subcategory edits", async ({ page }) => {
@@ -1637,7 +1881,12 @@ test.describe("main edge cases", () => {
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:kick"]')).toBeVisible();
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:snare"]')).toBeVisible();
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:misc"]')).toBeVisible();
-    await page.waitForTimeout(1100);
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("category-config-updated"));
+    });
+
+    await expect.poll(() => categoryFetches).toBeGreaterThan(1);
     await expect(page.locator("#subcategory-tabs .subcategory-tab")).toHaveCount(3);
 
     await page.locator("#subcategory-add").click();
@@ -1659,7 +1908,7 @@ test.describe("main edge cases", () => {
 
     await page.locator("#subcategory-add").click();
     await page.locator("#subcategory-add-input").fill(" kick ");
-  await expect(page.locator("#subcategory-add-confirm")).toBeEnabled();
+    await expect(page.locator("#subcategory-add-confirm")).toBeEnabled();
     await page.locator("#subcategory-add-input").press("Enter");
     await expect(page.locator("#subcategory-add-input")).toHaveCount(0);
     await expect(page.locator('.subcategory-tab.is-active')).toHaveAttribute("data-tab-id", "subcategory:kick");
@@ -1729,6 +1978,10 @@ test.describe("main edge cases", () => {
     await page.locator('.subcategory-tab[data-tab-id="subcategory:fills"]').click({ button: "right" });
     await expect(page.locator("#subcategory-context-menu .subcategory-context-menu-item")).toHaveCount(1);
     await expect(page.locator("#subcategory-context-menu .subcategory-context-menu-item")).toHaveText("remove");
+    await page.evaluate(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    await expect(page.locator("#subcategory-context-menu .subcategory-context-menu-item")).toHaveCount(1);
     await page.locator("#subcategory-context-menu .subcategory-context-menu-item").click();
     await saveResponse;
 
@@ -1745,7 +1998,7 @@ test.describe("main edge cases", () => {
     await expect(page.locator(".sample-grid")).toContainText("Fill");
   });
 
-  test("the real app alerts when saving an inline subcategory fails", async ({ page }) => {
+  test("the real app shows a toast when saving an inline subcategory fails", async ({ page }) => {
     let saveCalls = 0;
 
     await page.route("**/output/categories.json", async (route) => {
@@ -1785,16 +2038,12 @@ test.describe("main edge cases", () => {
     await page.goto("/");
     await page.locator('.category-btn[data-category-id="Drum"]').click();
 
-    const dialogPromise = page.waitForEvent("dialog");
     await page.locator("#subcategory-add").click();
     await page.locator("#subcategory-add-input").fill("fills");
     await page.locator("#subcategory-add-confirm").click();
 
-    const dialog = await dialogPromise;
-    expect(dialog.message()).toBe("Could not save categories.json.");
-    await dialog.dismiss();
-
     expect(saveCalls).toBe(1);
+    await expect(page.locator("#error-toast")).toHaveText("Could not save categories.json.");
     await expect(page.locator("#subcategory-add-input")).toBeVisible();
   });
 
@@ -1953,6 +2202,7 @@ test.describe("main edge cases", () => {
         return [
           { filename: "bass-140.wav", alias: "Bass 140", category: "Bass", product: "Dance_eJay1", bpm: 140, beats: 8 },
           { filename: "bass-riff.wav", alias: "Bass Riff", category: "Bass", subcategory: "riff", product: "Rave", bpm: 140, beats: 4 },
+          { filename: "loose-fx.wav", alias: "Loose FX", category: "Unsorted", product: "Rave", bpm: 140, beats: 4 },
           { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", product: "Dance_eJay1", bpm: 140, beats: 4 },
           { filename: "drum-misc.wav", alias: "Drum Misc", category: "Drum", subcategory: "misc", product: "Rave", bpm: 140, beats: 4 },
           { filename: "drum-untagged.wav", alias: "Drum Untagged", category: "Drum", product: "Rave", bpm: 140, beats: 4 },
@@ -1970,11 +2220,20 @@ test.describe("main edge cases", () => {
     }, LIBRARY_MOD);
 
     await expect(page.locator(".category-btn")).toHaveCount(2);
+    await expect(page.locator(".category-system-btn")).toHaveCount(2);
+    await expect(page.locator('.category-system-btn[data-category-id="Unsorted"]')).toBeVisible();
     await expect(page.locator(".subcategory-tab")).toHaveCount(1);
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:unsorted"]')).toContainText("unsorted");
     await expect(page.locator(".sample-block")).toHaveCount(2);
     await expect(page.locator(".sample-grid")).toContainText("Bass 140");
     await expect(page.locator(".sample-grid")).toContainText("Bass Riff");
+
+    await page.locator('.category-system-btn[data-category-id="Unsorted"]').click();
+    await expect(page.locator('.category-system-btn[data-category-id="Unsorted"]')).toHaveClass(/is-active/);
+    await expect(page.locator(".subcategory-tab")).toHaveCount(1);
+    await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:unsorted"]')).toContainText("unsorted");
+    await expect(page.locator(".sample-block")).toHaveCount(1);
+    await expect(page.locator(".sample-grid")).toContainText("Loose FX");
 
     await page.locator('.category-btn[data-category-id="Drum"]').click();
     await expect(page.locator('.subcategory-tab[data-tab-id^="product:"]')).toHaveCount(0);
@@ -2107,15 +2366,13 @@ test.describe("main edge cases", () => {
     expect(warnings.some((message) => message.includes("Failed to load sample catalog"))).toBe(true);
   });
 
-  test("main warns on category refresh failures and alerts when saving categories fails", async ({ page }) => {
+  test("main warns on category refresh failures and shows a toast when saving categories fails", async ({ page }) => {
     await page.goto("/");
 
     const result = await page.evaluate(async (modPath) => {
       const library = await import(/* @vite-ignore */ modPath);
       const warnings: string[] = [];
-      const alerts: string[] = [];
       const originalWarn = console.warn;
-      const originalAlert = window.alert;
       let loadCategoryConfigCalls = 0;
 
       class FakeAudio {
@@ -2134,9 +2391,6 @@ test.describe("main edge cases", () => {
 
       console.warn = (...args: unknown[]) => {
         warnings.push(args.map(String).join(" "));
-      };
-      window.alert = (message?: string) => {
-        alerts.push(String(message ?? ""));
       };
       (window as unknown as { Audio: typeof Audio }).Audio = FakeAudio as unknown as typeof Audio;
       library.FetchLibrary.prototype.loadIndex = async function () {
@@ -2176,7 +2430,9 @@ test.describe("main edge cases", () => {
         await import(`/src/main.ts?scenario=refresh-failure-${Date.now()}`);
         await Promise.resolve();
         await Promise.resolve();
-        await new Promise((resolve) => setTimeout(resolve, 1100));
+        window.dispatchEvent(new CustomEvent("category-config-updated"));
+        await Promise.resolve();
+        await Promise.resolve();
         (document.querySelector("#subcategory-add") as HTMLButtonElement).click();
         await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
         (document.querySelector("#subcategory-add-input") as HTMLInputElement).value = "fills";
@@ -2187,14 +2443,16 @@ test.describe("main edge cases", () => {
         await Promise.resolve();
         await Promise.resolve();
 
-        return { warnings, alerts };
+        return {
+          warnings,
+          toastText: document.getElementById("error-toast")?.textContent ?? null,
+        };
       } finally {
         console.warn = originalWarn;
-        window.alert = originalAlert;
       }
     }, LIBRARY_MOD);
 
     expect(result.warnings.some((message) => message.includes("Failed to refresh category config."))).toBe(true);
-    expect(result.alerts).toContain("Could not save categories.json.");
+    expect(result.toastText).toBe("Could not save categories.json.");
   });
 });
