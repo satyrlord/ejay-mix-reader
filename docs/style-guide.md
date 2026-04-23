@@ -110,6 +110,27 @@ Two Google Fonts are loaded via `index.html`:
 
 ## Component Anatomy
 
+### Archive Sidebar and Sequencer Shell
+
+The top editor area is split into a left `Mix Archive` sidebar and a right
+sequencer placeholder.
+
+- The archive sidebar uses a near-black panel with a compact header and muted
+  placeholder copy.
+- The sequencer area uses a 32-beat ruler, a striped timeline background, and
+  disabled transport buttons until real mix-loading UI is wired.
+- Both panels share the same dense, metallic desktop feel as the browser area
+  below.
+
+### Context Strip
+
+A narrow strip sits between the editor shell and the sample browser.
+
+- The left side shows current mix status text.
+- The right side groups subcategory tabs, sample search, zoom controls, and
+  the BPM filter into a compact toolbar.
+- Controls use condensed small-caps styling rather than large card-like UI.
+
 ### Category Sidebar
 
 The left sidebar displays all top-level categories (Bass, Drum, Effect,
@@ -151,9 +172,18 @@ rectangular blocks, closely matching the original eJay UI.
 A dropdown control for filtering samples by tempo.
 
 - Positioned at the bottom-right of the home area and persists into the
-  main app view.
-- Uses `font-mono` for the BPM value and a DaisyUI `select` or
-  `dropdown` component.
+  main app view, where it lives inside the context strip.
+- Uses the default sans/small-caps styling from `app.css`, not `font-mono`.
+
+### Search and Zoom Controls
+
+The context strip also exposes lightweight browser controls for the sample
+grid.
+
+- Search is a compact inline input with an embedded clear button.
+- Focus expands the search field width to give more room for filtering.
+- Zoom uses paired magnifier buttons that adjust the CSS scale applied to
+  sample bubbles.
 
 ### Transport / Playback Bar
 
@@ -183,24 +213,27 @@ Inspired by the 16-channel mixer visible in the original eJay UI.
 - The app is a single-page application with a single HTML entry point.
 - **Home page**: centered hero with folder picker, BPM filter control at
   bottom-right.
-- **Main app view** (after loading a library): three-zone layout —
-  - **Left sidebar**: fixed-width category button grid (two columns).
-  - **Top tab bar**: horizontal subcategory tabs above the main grid.
-  - **Center**: sequencer-style sample block grid.
+- **Main app view** (after loading a library): four persistent layers —
+  - **Top editor area**: archive sidebar plus sequencer shell.
+  - **Context strip**: mix status, subcategory tabs, search, zoom, BPM.
+  - **Bottom browser area**: category sidebar plus sample-block grid.
+  - **Transport bar**: fixed footer for sample playback.
 - Transport bar remains fixed at the viewport bottom.
-- Main grid scrolls independently; sidebar, tab bar, and transport bar
-  remain fixed/sticky.
+- The sample grid scrolls independently. The archive sidebar and category
+  sidebar keep their own bounded regions within the shell.
 
 ## Responsive Behavior
 
-- On desktop (≥1024px): sidebar is visible alongside the sample grid;
-  subcategory tabs span the remaining width.
-- On tablet/mobile (<1024px): category sidebar collapses to a horizontal
-  scrollable pill strip above the subcategory tabs; sample grid stacks
-  vertically.
+- On desktop: the archive sidebar and category sidebar stay visible beside
+  their corresponding panels.
+- On narrower layouts (<= 1100px): both sidebars shrink but remain visible.
+- On mobile (<= 720px): the archive sidebar is hidden, the context strip stacks
+  into a single column, the browser area becomes a single-column layout, and
+  the category grid expands to three columns above the sample grid.
 - Transport bar adapts: full layout on desktop, condensed on mobile with
   essential controls only.
-- Subcategory tabs scroll horizontally when they overflow on any viewport.
+- Subcategory tabs still scroll horizontally when they overflow on any
+  viewport, and sample lanes reduce from 24 to 12 grid columns on mobile.
 
 ## Editing Guidance
 

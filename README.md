@@ -11,28 +11,35 @@ and packed archive bundles. This project reverse-engineers those formats and pro
 
 - **`scripts/pxd-parser.ts`** — Decodes PXD-compressed samples and packed archives to
   standard WAV files, and generates a JSON metadata catalog for each product.
-- **Sound Browser** — A Vite-powered web app with DaisyUI that lets you search, filter,
-  sort, and play extracted samples in the browser.
-- **MIX Library** — Product pages can list archived `.mix` files, fetch the
-  original project bytes through the local dev/build server, and parse format,
-  tempo, title, and track-count metadata in the browser.
+- **Sound Browser** — A Vite-powered web app with DaisyUI that lets you browse
+  extracted samples as beat-scaled blocks, filter by BPM, search across names
+  and metadata, zoom sample bubbles, and preview audio in the browser.
+- **Category Config** — The browser reads `output/categories.json` when present
+  to define subcategory tabs. In the dev-server library flow, user-created
+  subcategories can be written back to that file.
+- **MIX Runtime Foundation** — `data/index.json` inventories archived `.mix`
+  files, the Vite dev server exposes allow-listed `/mix/<product>/<filename>`
+  URLs, and browser-side parser/player modules live under `src/`. The current
+  UI shell still shows archive and sequencer placeholders rather than a full
+  mix browser/editor.
 
-## Sound Browser Notes
+## Current Browser UI
 
-- Product pages use the selected product name as the top-bar title instead of a
-  fixed app title.
-- The sample table uses five columns: play control, `Name`, `Category`,
-  `Beats`, and `Duration`.
-- The `Name` cell merges the sample category and display name as
-  `<Category> - <Name>` when a category is present.
-- `Name` and `Category` sort alphabetically; `Beats` and `Duration` sort
-  numerically with ascending/descending toggles.
-- The browser UI uses the term `Category` for sample-group classification.
-  This avoids confusion with audio channel count, where `channels` still means
-  mono/stereo metadata.
-- Product pages with archived `.mix` files expose a `Mix Library` panel.
-  Clicking a mix loads the original bytes from the local `/mix/` endpoint and
-  parses the project metadata in-browser.
+- The home page shows a centered hero, a `Choose output folder` picker, an
+  optional development-library shortcut in dev builds, and a BPM filter.
+- After loading a library, the app renders three stacked work areas:
+  a top editor shell (`Mix Archive` placeholder plus sequencer placeholder), a
+  middle context strip (mix status, subcategory tabs, search, zoom, BPM), and a
+  bottom browser area (category sidebar plus sample-block grid).
+- Samples render as lane-based blocks rather than a table. Block width reflects
+  beat length; block metadata can include product, BPM, beat count, and detail.
+- Sample search is term-based: whitespace-separated terms are matched against
+  the display name and the metadata line.
+- Sample blocks are ordered by descending beat length and then by display name.
+- Picked folders are read-only. Subcategory editing is only available in the
+  dev-server library flow where `output/categories.json` can be saved.
+- The `Load JSON` sidebar action is currently a placeholder; external JSON
+  library loading is not wired yet.
 
 ## Supported products
 
@@ -88,8 +95,9 @@ npm run serve   # opens http://127.0.0.1:3000
 ```
 
 Then click **Choose output folder** and point the picker at your `output/`
-directory. Products with archived MIX folders will expose their mix list
-automatically.
+directory. The browser reads `output/metadata.json` and optional
+`output/categories.json` when present, and otherwise falls back to scanning the
+category folders for WAV files.
 
 ## Requirements
 
@@ -131,16 +139,28 @@ npm install
 # Start the dev server
 npm run serve
 
-# Run tests
+# Run Playwright tests
 npm test
 
-# Run tests with coverage
+# Run Vitest unit tests
+npm run test:unit
+
+# Run tests with browser coverage
 npm run test:coverage
+
+# Run unit tests with coverage
+npm run test:unit:coverage
 
 # Type-check
 npm run typecheck
 
-# Build for production
+# Lint Markdown
+npm run lint:md
+
+# Run the combined validation step
+npm run validate
+
+# Build for production (also regenerates data/index.json)
 npm run build
 ```
 
