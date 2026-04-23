@@ -1,20 +1,16 @@
 import { readFileSync } from "node:fs";
 
 import { test, expect } from "./baseFixtures.js";
-import { readDisplayVersionSeries, readGitCommitCount } from "../scripts/version.js";
+import { buildDisplayVersion } from "../scripts/version.js";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")) as {
   version?: string;
 };
 
-const expectedTransportVersion = (() => {
-  const commitCount = readGitCommitCount(new URL("..", import.meta.url));
-  if (commitCount !== null) {
-    return `v${readDisplayVersionSeries(packageJson.version)}.${commitCount}`;
-  }
-
-  return `v${packageJson.version ?? "0.0.0"}`;
-})();
+const expectedTransportVersion = buildDisplayVersion(packageJson.version, {
+  cwd: new URL("..", import.meta.url),
+  deploymentCount: process.env.EJAY_GITHUB_DEPLOYMENT_COUNT,
+});
 
 test("page title is set", async ({ page }) => {
   await page.goto("/");

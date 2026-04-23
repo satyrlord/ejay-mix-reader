@@ -13,7 +13,7 @@ import istanbulPluginRaw, { type IstanbulPluginOptions } from "vite-plugin-istan
 const istanbulPlugin = istanbulPluginRaw as unknown as (opts?: IstanbulPluginOptions) => Plugin;
 
 import { ARCHIVE_MIX_DIRS } from "./scripts/build-index.js";
-import { readDisplayVersionSeries, readGitCommitCount } from "./scripts/version.js";
+import { buildDisplayVersion } from "./scripts/version.js";
 import { CATEGORY_CONFIG_FILENAME, CATEGORY_CONFIG_UPDATED_EVENT, normalizeCategoryConfig } from "./src/data.js";
 
 const COVERAGE_SOURCE_FILES = [
@@ -39,12 +39,9 @@ const APP_VERSION = (() => {
       version?: string;
     };
 
-    const commitCount = readGitCommitCount();
-    if (commitCount !== null) {
-      return `v${readDisplayVersionSeries(parsed.version)}.${commitCount}`;
-    }
-
-    return `v${parsed.version ?? "0.0.0"}`;
+    return buildDisplayVersion(parsed.version, {
+      deploymentCount: process.env.EJAY_GITHUB_DEPLOYMENT_COUNT,
+    });
   } catch {
     return "v0.0.0";
   }
