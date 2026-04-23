@@ -68,7 +68,7 @@ export const FA_ZERO_GAP     = 32;
 /** Implicit BPM per Gen 1 product (not stored in the file). */
 const IMPLICIT_BPM: Record<number, number> = {
   [APP_SIG_DANCE1]:  140,
-  [APP_SIG_RAVE]:    140,
+  [APP_SIG_RAVE]:    180,
   [APP_SIG_HIPHOP1]: 90,
 };
 

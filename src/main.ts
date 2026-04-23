@@ -12,6 +12,7 @@ import {
   normalizeCategoryLabel,
   removeSubcategoryFromCategoryConfig,
   sampleCategory,
+  sampleMatchesSearchQuery,
   sortSamplesForGrid,
   UNSORTED_CATEGORY_ID,
   UNSORTED_SUBCATEGORY_ID,
@@ -56,6 +57,7 @@ interface AppState {
   sampleBubbleZoomScale: number;
   isAddingSubcategory: boolean;
   subcategoryDraft: string;
+  searchQuery: string;
 }
 
 const state: AppState = {
@@ -70,6 +72,7 @@ const state: AppState = {
   sampleBubbleZoomScale: 1,
   isAddingSubcategory: false,
   subcategoryDraft: "",
+  searchQuery: "",
 };
 
 const SAMPLE_BUBBLE_ZOOM_CSS_VAR = "--sample-bubble-zoom-scale";
@@ -199,6 +202,20 @@ async function startBrowser(library: Library): Promise<void> {
     adjustSampleBubbleZoom(SAMPLE_BUBBLE_ZOOM_STEP);
   });
 
+  currentSlots.searchInput.addEventListener("input", () => {
+    state.searchQuery = currentSlots.searchInput.value;
+    currentSlots.searchClear.classList.toggle("is-hidden", state.searchQuery === "");
+    refreshSamples();
+  });
+
+  currentSlots.searchClear.addEventListener("click", () => {
+    state.searchQuery = "";
+    currentSlots.searchInput.value = "";
+    currentSlots.searchClear.classList.add("is-hidden");
+    currentSlots.searchInput.focus();
+    refreshSamples();
+  });
+
   currentSlots.tabs.addEventListener("contextmenu", (event) => {
     handleSubcategoryTabContextMenu(event);
   });
@@ -291,7 +308,10 @@ function refreshSamples(): void {
       .filter((value): value is string => typeof value === "string" && value.length > 0),
   };
 
-  const filtered = sortSamplesForGrid(filterSamples(state.samples, filters));
+  let filtered = sortSamplesForGrid(filterSamples(state.samples, filters));
+  if (state.searchQuery.trim()) {
+    filtered = filtered.filter((sample) => sampleMatchesSearchQuery(sample, state.searchQuery));
+  }
   renderSampleGrid(currentSlots.grid, filtered, player, currentLibrary);
   updatePlayingBlock(player.activePath);
 }

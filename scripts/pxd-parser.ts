@@ -17,6 +17,8 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rea
 import { basename, dirname, extname, join, relative, resolve } from "path";
 import { parseArgs } from "util";
 
+import { readWavInfo } from "./wav-decode.js";
+
 // --- PXD Format Constants ---
 
 export const PXD_MAGIC = Buffer.from("tPxD", "ascii");
@@ -39,7 +41,7 @@ const PRODUCT_BPM: Record<string, number> = {
   dance_ejay4: 140,
   dance_superpack: 140,
   generationpack1_dance: 140,
-  generationpack1_rave: 140,
+  generationpack1_rave: 180,
   generationpack1_hiphop: 90,
   hiphop_2: 90,
   hiphop_3: 90,
@@ -48,7 +50,7 @@ const PRODUCT_BPM: Record<string, number> = {
   hiphop_ejay3: 90,
   hiphop_ejay4: 90,
   house_ejay: 125,
-  rave: 140,
+  rave: 180,
   samplekit_dmkit1: 140,
   samplekit_dmkit2: 140,
   samplekit_dmkit3: 140,
@@ -657,13 +659,28 @@ export function extractIndividualPxds(
       mkdirSync(dirname(wavOut), { recursive: true });
       writeFileSync(wavOut, data);
       wavCount++;
-      catalog.push({
+
+      const entry: CatalogEntry = {
         filename: wavName,
         source: relPath,
         bank,
         alias: stem,
         format: "wav",
-      });
+      };
+
+      try {
+        const info = readWavInfo(data);
+        entry.sample_rate = info.sampleRate;
+        entry.channels = info.channels;
+        entry.bit_depth = info.bitDepth;
+        entry.decoded_size = info.dataSize;
+        entry.duration_sec = Math.round(info.duration * 10000) / 10000;
+        entry.beats = beatsFromDuration(info.duration, bpm);
+      } catch {
+        // WAV header unreadable — leave audio fields unpopulated
+      }
+
+      catalog.push(entry);
       continue;
     }
 

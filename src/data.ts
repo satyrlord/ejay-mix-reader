@@ -490,6 +490,20 @@ function orderedSubcategories(categoryId: string, configured: readonly string[])
   return ordered;
 }
 
+/**
+ * Returns true when every whitespace-separated term in `query` appears
+ * (case-insensitively) in either the sample's display name or its
+ * metadata line (product · BPM · beats · detail).
+ *
+ * An empty or blank query always returns true.
+ */
+export function sampleMatchesSearchQuery(sample: Sample, query: string): boolean {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const haystack = `${sampleDisplayName(sample)} ${sampleMetadataLine(sample)}`.toLowerCase();
+  return terms.every((term) => haystack.includes(term));
+}
+
 export function filterSamples(samples: Sample[], filters: SampleFilterOptions): Sample[] {
   const category = normalizeLower(filters.category);
   const subcategory = normalizeLower(filters.subcategory ?? null);

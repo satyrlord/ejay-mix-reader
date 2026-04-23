@@ -2,9 +2,12 @@ import { defineConfig } from "@playwright/test";
 
 const HOST = "127.0.0.1";
 const coverageEnabled = process.env.VITE_COVERAGE === "true";
-const PORT = coverageEnabled ? 3001 : 3000;
+const defaultPort = coverageEnabled ? 3001 : 3002;
+const parsedPort = process.env.PLAYWRIGHT_PORT ? parseInt(process.env.PLAYWRIGHT_PORT, 10) : NaN;
+const PORT = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaultPort;
 const BASE_URL = `http://${HOST}:${PORT}`;
 const isCI = process.env.CI === "true";
+const allowServerReuse = process.env.PLAYWRIGHT_REUSE_SERVER === "true";
 // PLAYWRIGHT_WORKERS lets CI/local environments tune parallelism without code changes.
 const parsedWorkers = process.env.PLAYWRIGHT_WORKERS ? parseInt(process.env.PLAYWRIGHT_WORKERS, 10) : 4;
 const workers = !isNaN(parsedWorkers) && parsedWorkers > 0 ? parsedWorkers : 4;
@@ -33,10 +36,10 @@ export default defineConfig({
       VITE_COVERAGE: coverageEnabled ? "true" : "false",
       VITE_DEV_SERVER_PORT: String(PORT),
     },
-    // Always start a fresh server when coverage is enabled to ensure
-    // clean Istanbul instrumentation. Coverage uses an isolated port so a
-    // user-owned dev server can keep running on 3000.
-    reuseExistingServer: !coverageEnabled,
+    // Prefer deterministic runs: start a fresh Vite server by default so
+    // build/version assertions cannot read stale state from an existing server.
+    // Opt in to reuse with PLAYWRIGHT_REUSE_SERVER=true for local debugging.
+    reuseExistingServer: !coverageEnabled && allowServerReuse,
     timeout: 60_000,
   },
 });

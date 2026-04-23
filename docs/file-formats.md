@@ -69,6 +69,18 @@ tsx scripts/pxd-parser.ts path/to/file.pxd --output output/test
 | `--format`, `-f` | Rename template with placeholders: `{category}`, `{alias}`, `{detail}`, `{bank}`, `{stereo_channel}`, `{beats}` |
 | `--8bit` | Output raw 8-bit unsigned DPCM delta codes (default: 16-bit signed PCM via DPCM reconstruction) |
 
+### Beat Normalization Notes
+
+- Product BPM is not always stored in the source files. The enrichment step
+  therefore applies product-specific implicit BPM values when it backfills
+  `bpm` and recomputes `beats`.
+- Gen 1 Rave eJay and Generation Pack 1 Rave both use an implicit BPM of 180,
+  not 140. This affects beat counts, one-shot detection, and any downstream
+  analysis that derives timing from `duration_sec`.
+- In the normalized metadata, `beats = 0` is a deliberate one-shot sentinel.
+  Enrichment should preserve that value instead of recomputing it to a
+  non-zero loop length.
+
 ## File Type Inventory
 
 | Extension | Count | Description |

@@ -15,7 +15,7 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { basename, extname, join, relative } from "path";
 import { parseArgs } from "util";
-import { cleanName, type ProductMetadata, type SampleEntry } from "./rename-samples.js";
+import { cleanName, type ConsolidatedMetadata, type SampleEntry } from "./rename-samples.js";
 
 export interface ReconstructionResult {
   productDir: string;
@@ -72,7 +72,7 @@ function buildSampleEntry(productDir: string, wavPath: string): SampleEntry {
   };
 }
 
-export function buildTemporaryMetadata(productDir: string): ProductMetadata {
+export function buildTemporaryMetadata(productDir: string): ConsolidatedMetadata {
   const samples: SampleEntry[] = [];
   for (const wavPath of findWavFiles(productDir)) {
     try {
@@ -83,8 +83,6 @@ export function buildTemporaryMetadata(productDir: string): ProductMetadata {
   }
   return {
     samples,
-    total_samples: samples.length,
-    alias_mode: "preserve-stem",
   };
 }
 
@@ -97,9 +95,9 @@ export function reconstructTopLevelMetadata(
   const overwrite = options.overwrite ?? false;
 
   if (existsSync(metadataPath) && !overwrite) {
-    let existing: ProductMetadata;
+    let existing: ConsolidatedMetadata;
     try {
-      existing = JSON.parse(readFileSync(metadataPath, "utf-8")) as ProductMetadata;
+      existing = JSON.parse(readFileSync(metadataPath, "utf-8")) as ConsolidatedMetadata;
     } catch (err) {
       return {
         productDir,

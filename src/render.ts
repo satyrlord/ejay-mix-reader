@@ -5,7 +5,7 @@ import { sampleCategory, sampleDisplayName, sampleMetadataLine, UNSORTED_CATEGOR
 import type { Library } from "./library.js";
 import type { Player } from "./player.js";
 
-export const BPM_VALUES = [90, 125, 140, 160] as const;
+export const BPM_VALUES = [90, 125, 135, 140, 160, 180] as const;
 
 export interface UiTab {
   id: string;
@@ -130,6 +130,8 @@ export interface SpaShellSlots {
   sidebar: HTMLElement;
   tabs: HTMLElement;
   grid: HTMLElement;
+  searchInput: HTMLInputElement;
+  searchClear: HTMLButtonElement;
   zoomOut: HTMLButtonElement;
   zoomIn: HTMLButtonElement;
   bpm: HTMLSelectElement;
@@ -299,6 +301,45 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
   tabs.setAttribute("role", "tablist");
   tabs.setAttribute("aria-label", "Subcategories");
 
+  const searchWrap = document.createElement("div");
+  searchWrap.className = "spa-search";
+
+  const searchInput = document.createElement("input");
+  searchInput.type = "text";
+  searchInput.id = "sample-search";
+  searchInput.className = "spa-search-input";
+  searchInput.placeholder = "Search\u2026";
+  searchInput.setAttribute("aria-label", "Search samples in category");
+  searchInput.autocomplete = "off";
+
+  const searchClear = document.createElement("button");
+  searchClear.type = "button";
+  searchClear.id = "sample-search-clear";
+  searchClear.className = "spa-search-clear is-hidden";
+  searchClear.setAttribute("aria-label", "Clear search");
+  searchClear.title = "Clear search";
+
+  const clearIcon = document.createElementNS(SVG_NS, "svg");
+  clearIcon.setAttribute("viewBox", "0 0 16 16");
+  clearIcon.setAttribute("fill", "none");
+  clearIcon.setAttribute("aria-hidden", "true");
+  clearIcon.setAttribute("focusable", "false");
+  clearIcon.style.cssText = "width:0.8rem;height:0.8rem;flex:0 0 auto;pointer-events:none;";
+  const clearLine1 = document.createElementNS(SVG_NS, "path");
+  clearLine1.setAttribute("d", "M4 4 L12 12");
+  clearLine1.setAttribute("stroke", "currentColor");
+  clearLine1.setAttribute("stroke-width", "2");
+  clearLine1.setAttribute("stroke-linecap", "round");
+  const clearLine2 = document.createElementNS(SVG_NS, "path");
+  clearLine2.setAttribute("d", "M12 4 L4 12");
+  clearLine2.setAttribute("stroke", "currentColor");
+  clearLine2.setAttribute("stroke-width", "2");
+  clearLine2.setAttribute("stroke-linecap", "round");
+  clearIcon.append(clearLine1, clearLine2);
+  searchClear.appendChild(clearIcon);
+
+  searchWrap.append(searchInput, searchClear);
+
   const zoomWrap = document.createElement("div");
   zoomWrap.className = "spa-zoom-controls";
   zoomWrap.setAttribute("aria-label", "Sample zoom controls");
@@ -329,7 +370,7 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
   const bpm = createBpmSelect("bpm-filter", "BPM filter");
   bpmWrap.append(bpmLabel, bpm);
 
-  contextControls.append(tabs, zoomWrap, bpmWrap);
+  contextControls.append(tabs, searchWrap, zoomWrap, bpmWrap);
   contextStrip.append(contextStatus, contextControls);
 
   // ── Browser area (bottom): category sidebar + sample grid ─
@@ -365,6 +406,8 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
     sidebar,
     tabs,
     grid,
+    searchInput,
+    searchClear,
     zoomOut,
     zoomIn,
     bpm,

@@ -70,7 +70,7 @@ offset.
 | Product | App ID | File Size | U32@04 | BPM1 | BPM2 | SKKENNUNG |
 |---------|--------|-----------|--------|------|------|-----------|
 | Dance 1 | `0x00000A06` | 11,234 | (grid data) | (implicit 140) | — | No |
-| Rave | `0x00000A07` | 11,276 | (grid data) | (implicit 140) | — | No |
+| Rave | `0x00000A07` | 11,276 | (grid data) | (implicit 180) | — | No |
 | HipHop 1 | `0x00000A08` | 12,692 | (grid data) | (implicit 90) | — | No |
 | Dance 2 | `0x00000A19` | 6,124 | 219 | 140 | 140 | Yes |
 | Techno | `0x00000889` | 5,224 | 216 | 140 | 140 | Yes |

@@ -4,7 +4,8 @@
  * Decodes 8-bit PCM, 16-bit PCM, and 24-bit PCM WAV files into a mono
  * float array in [-1, 1]. Stereo input is downmixed by averaging the
  * left and right channels. Non-PCM (compressed) WAV files throw, since
- * none of the eJay output samples use them.
+ * none of the eJay output samples use them. Use `readWavInfo` when callers
+ * only need header metadata such as duration or format details.
  */
 
 import { readFileSync } from "fs";
@@ -95,6 +96,68 @@ export function decodeWavBuffer(buf: Buffer): DecodedWav {
 
 export function decodeWavFile(path: string): DecodedWav {
   return decodeWavBuffer(readFileSync(path));
+}
+
+export interface WavInfo {
+  sampleRate: number;
+  channels: number;
+  bitDepth: number;
+  /** Raw PCM data size in bytes. */
+  dataSize: number;
+  /** Duration in seconds. */
+  duration: number;
+}
+
+/**
+ * Read WAV header metadata without decoding PCM samples.
+ *
+ * @param buf RIFF/WAVE file contents.
+ * @returns Parsed sample rate, channels, bit depth, data size, and duration.
+ */
+export function readWavInfo(buf: Buffer): WavInfo {
+  if (buf.length < 44) {
+    throw new Error(`wav-decode: buffer too small (${buf.length} bytes)`);
+  }
+  if (buf.readUInt32LE(0) !== RIFF || buf.readUInt32LE(8) !== WAVE) {
+    throw new Error("wav-decode: not a RIFF/WAVE file");
+  }
+
+  let offset = 12;
+  let channels = 0;
+  let sampleRate = 0;
+  let bitDepth = 0;
+  let dataSize = 0;
+  let foundFmt = false;
+  let foundData = false;
+
+  while (offset + 8 <= buf.length) {
+    const chunkId = buf.readUInt32LE(offset);
+    const chunkSize = buf.readUInt32LE(offset + 4);
+    const chunkBody = offset + 8;
+
+    if (chunkId === FMT_) {
+      channels = buf.readUInt16LE(chunkBody + 2);
+      sampleRate = buf.readUInt32LE(chunkBody + 4);
+      bitDepth = buf.readUInt16LE(chunkBody + 14);
+      foundFmt = true;
+    } else if (chunkId === DATA) {
+      dataSize = Math.min(chunkSize, buf.length - chunkBody);
+      foundData = true;
+      break;
+    }
+
+    offset = chunkBody + chunkSize + (chunkSize % 2);
+  }
+
+  if (!foundFmt) throw new Error("wav-decode: no fmt chunk");
+  if (!foundData) throw new Error("wav-decode: no data chunk");
+
+  const bytesPerSample = bitDepth / 8;
+  const frameSize = bytesPerSample * channels;
+  const frameCount = frameSize > 0 ? Math.floor(dataSize / frameSize) : 0;
+  const duration = sampleRate > 0 ? frameCount / sampleRate : 0;
+
+  return { sampleRate, channels, bitDepth, dataSize, duration };
 }
 
 function readSample(buf: Buffer, offset: number, bitDepth: number): number {

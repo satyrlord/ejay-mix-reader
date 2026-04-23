@@ -11,44 +11,10 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { migrate } from "../sequence-migrate.js";
+import { buildPcmWav } from "./wav-test-utils.js";
 
 function tmpRoot(): string {
   return mkdtempSync(join(tmpdir(), "ejay-seqmig-"));
-}
-
-function buildPcmWav({
-  sampleRate,
-  channels,
-  bitDepth,
-  samples,
-}: {
-  sampleRate: number;
-  channels: number;
-  bitDepth: 8 | 16;
-  samples: number[];
-}): Buffer {
-  const bytesPerSample = bitDepth / 8;
-  const dataSize = samples.length * bytesPerSample;
-  const buf = Buffer.alloc(44 + dataSize);
-  buf.write("RIFF", 0, "ascii");
-  buf.writeUInt32LE(36 + dataSize, 4);
-  buf.write("WAVE", 8, "ascii");
-  buf.write("fmt ", 12, "ascii");
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20);
-  buf.writeUInt16LE(channels, 22);
-  buf.writeUInt32LE(sampleRate, 24);
-  buf.writeUInt32LE(sampleRate * channels * bytesPerSample, 28);
-  buf.writeUInt16LE(channels * bytesPerSample, 32);
-  buf.writeUInt16LE(bitDepth, 34);
-  buf.write("data", 36, "ascii");
-  buf.writeUInt32LE(dataSize, 40);
-  for (let i = 0; i < samples.length; i++) {
-    const offset = 44 + i * bytesPerSample;
-    if (bitDepth === 8) buf.writeUInt8(samples[i] & 0xff, offset);
-    else buf.writeInt16LE(samples[i], offset);
-  }
-  return buf;
 }
 
 function pulsesPcm(sampleRate: number, pulses: number, gapSec: number): number[] {

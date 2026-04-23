@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
-@plugin "daisyui" {
+@plugin "daisyui/index.js" {
   themes: dark --default --prefersdark;
 }
 
-@plugin "daisyui/theme" {
+@plugin "daisyui/theme/index.js" {
   name: "dark";
   default: true;
   prefersdark: true;
@@ -375,11 +375,68 @@ body {
 
 .context-browser-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 0.55rem;
   min-width: 0;
   padding: 0 0.45rem 0 0.5rem;
+}
+
+.spa-search {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.spa-search-input {
+  width: 9rem;
+  height: 1.5rem;
+  padding: 0 1.8rem 0 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.28rem;
+  background: rgba(10, 12, 18, 0.88);
+  color: rgba(242, 241, 236, 0.88);
+  font-family: var(--font-sans);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.03em;
+  font-size: 0.82rem;
+  outline: none;
+  transition: border-color 120ms ease, width 180ms ease;
+}
+
+.spa-search-input::placeholder {
+  color: rgba(242, 241, 236, 0.35);
+}
+
+.spa-search-input:focus {
+  border-color: rgba(61, 255, 137, 0.58);
+  width: 13rem;
+}
+
+.spa-search-clear {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 1.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: rgba(242, 241, 236, 0.55);
+  cursor: pointer;
+  border-radius: 0 0.28rem 0.28rem 0;
+  transition: color 100ms ease;
+  padding: 0;
+}
+
+.spa-search-clear:hover,
+.spa-search-clear:focus-visible {
+  color: rgba(242, 241, 236, 0.9);
+  outline: none;
+}
+
+.spa-search-clear.is-hidden {
+  display: none;
 }
 
 .spa-zoom-controls {
@@ -949,6 +1006,14 @@ body {
 
   .spa-zoom-controls {
     margin-left: auto;
+  }
+
+  .spa-search-input {
+    width: 6rem;
+  }
+
+  .spa-search-input:focus {
+    width: 9rem;
   }
 
   .sample-lane {

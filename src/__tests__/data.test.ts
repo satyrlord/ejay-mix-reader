@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { categoryConfigsEqual, humanizeIdentifier, sampleAudioPath, sampleMetadataLine } from "../data.js";
+import {
+  categoryConfigsEqual,
+  humanizeIdentifier,
+  sampleAudioPath,
+  sampleMatchesSearchQuery,
+  sampleMetadataLine,
+} from "../data.js";
 
 describe("sampleAudioPath", () => {
   it("encodes category, subcategory, and filename segments", () => {
@@ -9,6 +15,13 @@ describe("sampleAudioPath", () => {
       category: "Voice",
       subcategory: "rap male",
     })).toBe("output/Voice/rap%20male/Come%20on!.wav");
+  });
+
+  it("encodes & and + in path segments", () => {
+    expect(sampleAudioPath({
+      filename: "Drum&Bass_160bpm_SNTHBASS001_D+B_160_C_ST.wav",
+      category: "Bass",
+    })).toBe("output/Bass/Drum%26Bass_160bpm_SNTHBASS001_D%2BB_160_C_ST.wav");
   });
 
   it("rejects traversal-like file paths", () => {
@@ -107,5 +120,40 @@ describe("sampleMetadataLine", () => {
 
   it("replaces underscores with spaces in product name", () => {
     expect(sampleMetadataLine({ product: "Dance_eJay1" })).toBe("Dance eJay1");
+  });
+});
+
+describe("sampleMatchesSearchQuery", () => {
+  const sample = {
+    filename: "bass-loop.wav",
+    alias: "D+B Bass Loop",
+    category: "Bass",
+    product: "GenerationPack1_Rave",
+    bpm: 180,
+    beats: 4,
+    detail: "Drum&Bass",
+  };
+
+  it("returns true for empty and blank queries", () => {
+    expect(sampleMatchesSearchQuery(sample, "")).toBe(true);
+    expect(sampleMatchesSearchQuery(sample, "   ")).toBe(true);
+  });
+
+  it("matches a single term against the display name", () => {
+    expect(sampleMatchesSearchQuery(sample, "loop")).toBe(true);
+  });
+
+  it("matches multiple terms across the display name and metadata", () => {
+    expect(sampleMatchesSearchQuery(sample, "bass 180")).toBe(true);
+    expect(sampleMatchesSearchQuery(sample, "drum&bass generationpack1")).toBe(true);
+  });
+
+  it("matches case-insensitively", () => {
+    expect(sampleMatchesSearchQuery(sample, "D+B RAVE")).toBe(true);
+  });
+
+  it("handles special characters and rejects missing terms", () => {
+    expect(sampleMatchesSearchQuery(sample, "d+b")).toBe(true);
+    expect(sampleMatchesSearchQuery(sample, "d+b techno")).toBe(false);
   });
 });

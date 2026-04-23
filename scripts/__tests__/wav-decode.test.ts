@@ -3,49 +3,8 @@ import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-import { decodeWavBuffer, decodeWavFile } from "../wav-decode.js";
-
-function buildPcmWav({
-  sampleRate,
-  channels,
-  bitDepth,
-  samples,
-}: {
-  sampleRate: number;
-  channels: number;
-  bitDepth: 8 | 16 | 24;
-  samples: number[];
-}): Buffer {
-  const bytesPerSample = bitDepth / 8;
-  const dataSize = samples.length * bytesPerSample;
-  const buf = Buffer.alloc(44 + dataSize);
-  buf.write("RIFF", 0, "ascii");
-  buf.writeUInt32LE(36 + dataSize, 4);
-  buf.write("WAVE", 8, "ascii");
-  buf.write("fmt ", 12, "ascii");
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20); // PCM
-  buf.writeUInt16LE(channels, 22);
-  buf.writeUInt32LE(sampleRate, 24);
-  buf.writeUInt32LE(sampleRate * channels * bytesPerSample, 28);
-  buf.writeUInt16LE(channels * bytesPerSample, 32);
-  buf.writeUInt16LE(bitDepth, 34);
-  buf.write("data", 36, "ascii");
-  buf.writeUInt32LE(dataSize, 40);
-
-  for (let i = 0; i < samples.length; i++) {
-    const offset = 44 + i * bytesPerSample;
-    if (bitDepth === 8) buf.writeUInt8(samples[i] & 0xff, offset);
-    else if (bitDepth === 16) buf.writeInt16LE(samples[i], offset);
-    else {
-      const v = samples[i] & 0xffffff;
-      buf.writeUInt8(v & 0xff, offset);
-      buf.writeUInt8((v >> 8) & 0xff, offset + 1);
-      buf.writeUInt8((v >> 16) & 0xff, offset + 2);
-    }
-  }
-  return buf;
-}
+import { decodeWavBuffer, decodeWavFile, readWavInfo } from "../wav-decode.js";
+import { buildPcmWav } from "./wav-test-utils.js";
 
 describe("decodeWavBuffer", () => {
   it("decodes 16-bit mono PCM into [-1, 1]", () => {
@@ -188,5 +147,50 @@ describe("decodeWavFile", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("readWavInfo", () => {
+  it("returns header info without decoding PCM", () => {
+    const buf = buildPcmWav({ sampleRate: 44100, channels: 1, bitDepth: 16, samples: new Array(44100).fill(0) });
+    const info = readWavInfo(buf);
+    expect(info.sampleRate).toBe(44100);
+    expect(info.channels).toBe(1);
+    expect(info.bitDepth).toBe(16);
+    expect(info.dataSize).toBe(88200);
+    expect(info.duration).toBeCloseTo(1.0, 4);
+  });
+
+  it("handles stereo files", () => {
+    const buf = buildPcmWav({ sampleRate: 22050, channels: 2, bitDepth: 16, samples: new Array(44100).fill(0) });
+    const info = readWavInfo(buf);
+    expect(info.channels).toBe(2);
+    expect(info.duration).toBeCloseTo(1.0, 4);
+  });
+
+  it("throws for buffers too small", () => {
+    expect(() => readWavInfo(Buffer.alloc(20))).toThrow("buffer too small");
+  });
+
+  it("throws for non-RIFF files", () => {
+    const buf = Buffer.alloc(44);
+    expect(() => readWavInfo(buf)).toThrow("not a RIFF/WAVE");
+  });
+
+  it("throws when no data chunk exists", () => {
+    const buf = Buffer.alloc(44);
+    buf.write("RIFF", 0, "ascii");
+    buf.writeUInt32LE(36, 4);
+    buf.write("WAVE", 8, "ascii");
+    buf.write("fmt ", 12, "ascii");
+    buf.writeUInt32LE(16, 16);
+    buf.writeUInt16LE(1, 20);
+    buf.writeUInt16LE(1, 22);
+    buf.writeUInt32LE(44100, 24);
+    buf.writeUInt32LE(88200, 28);
+    buf.writeUInt16LE(2, 32);
+    buf.writeUInt16LE(16, 34);
+    // No "data" chunk follows
+    expect(() => readWavInfo(buf)).toThrow("no data chunk");
   });
 });

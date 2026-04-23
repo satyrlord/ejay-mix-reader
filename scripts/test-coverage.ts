@@ -4,6 +4,9 @@ import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, rmSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import libCoverage from "istanbul-lib-coverage";
+import libReport from "istanbul-lib-report";
+import reports from "istanbul-reports";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const NYC_OUTPUT_DIR = join(ROOT, ".nyc_output");
@@ -38,6 +41,27 @@ function ensureCoverageFiles(): void {
   if (files.length === 0) {
     throw new Error("Coverage collection finished without writing any Istanbul JSON files.");
   }
+}
+
+function writeCoverageReports(): void {
+  const files = readdirSync(NYC_OUTPUT_DIR).filter(fileName => fileName.endsWith(".json"));
+  const coverageMap = libCoverage.createCoverageMap({});
+
+  files.forEach(fileName => {
+    const reportPath = join(NYC_OUTPUT_DIR, fileName);
+    const rawReport = JSON.parse(readFileSync(reportPath, "utf-8")) as object;
+    coverageMap.merge(rawReport);
+  });
+
+  const context = libReport.createContext({
+    dir: COVERAGE_DIR,
+    coverageMap,
+  });
+
+  reports.create("text").execute(context);
+  reports.create("html").execute(context);
+  reports.create("lcov").execute(context);
+  reports.create("json-summary").execute(context);
 }
 
 function ensureCoverageThresholds(): void {
@@ -84,10 +108,7 @@ try {
 
   ensureCoverageFiles();
 
-  execSync("npx nyc report --reporter=text --reporter=html --reporter=lcov --reporter=json-summary", {
-    cwd: ROOT,
-    stdio: "inherit",
-  });
+  writeCoverageReports();
 
   ensureCoverageThresholds();
 

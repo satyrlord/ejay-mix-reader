@@ -1,22 +1,22 @@
 #!/usr/bin/env tsx
 
 /**
- * rename-samples.ts — Rename and normalise eJay sample filenames and metadata.
+ * rename-samples.ts — Normalise filenames in the flat output structure.
  *
- * Operations:
+ * Reads the consolidated output/metadata.json and renames sample files:
  * 1. Filenames: lowercase, keep only [a-z0-9-], collapse dashes.
  * 2. Group by base name (trailing -N segments stripped), renumber
  *    consecutively with consistent zero-padding. Singletons keep bare base.
- * 3. Metadata: update filename, alias, category, detail.
+ * 3. Only the filename field is updated — alias, detail, category,
+ *    subcategory, and all other metadata fields are preserved as-is.
  *
  * Usage:
- *   tsx scripts/rename-samples.ts --output-dir output
- *   tsx scripts/rename-samples.ts --output-dir output --apply
- *   tsx scripts/rename-samples.ts --output-dir output --product Dance_eJay1 --apply
+ *   tsx scripts/rename-samples.ts
+ *   tsx scripts/rename-samples.ts --apply
+ *   tsx scripts/rename-samples.ts --product eJay_Studio --apply
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
-import { readdirSync, statSync } from "fs";
 import { basename, dirname, extname, join, relative } from "path";
 import { parseArgs } from "util";
 import { randomUUID } from "crypto";
@@ -27,30 +27,24 @@ export interface SampleEntry {
   filename: string;
   alias?: string;
   category?: string;
+  subcategory?: string | null;
   channel?: string;
   detail?: string;
+  product?: string;
   [key: string]: unknown;
 }
 
-export interface ProductMetadata {
+export interface ConsolidatedMetadata {
   samples: SampleEntry[];
-  total_samples?: number;
-  alias_mode?: "derive-from-category" | "preserve-stem";
   [key: string]: unknown;
 }
 
 export interface RenameEntry {
-  index: string;
+  index: number;
   old_path: string;
   new_path: string;
   old_filename: string;
   new_filename: string;
-  old_alias: string;
-  new_alias: string;
-  old_category: string;
-  new_category: string;
-  old_detail: string;
-  new_detail: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -65,28 +59,19 @@ export function cleanName(name: string): string {
 }
 
 /** Return the absolute path to a sample's WAV file on disk. */
-function physicalPath(productDir: string, sample: SampleEntry): string {
-  const fn = sample.filename;
-  if (/[\\/]/.test(fn)) {
-    return join(productDir, ...fn.split(/[\\/]+/));
+function physicalPath(outputRoot: string, sample: SampleEntry): string {
+  const cat = sample.category ?? "Unsorted";
+  const parts = [outputRoot, cat];
+  if (sample.subcategory) {
+    parts.push(sample.subcategory);
   }
-  const channel = String(sample.channel ?? sample.category ?? "unknown");
-  return join(productDir, channel, fn);
-}
-
-/** Build the metadata `filename` value for a new stem. */
-function newMetadataFilename(sample: SampleEntry, newStem: string): string {
-  const fn = sample.filename;
-  if (fn.includes("/")) {
-    const prefix = fn.substring(0, fn.lastIndexOf("/"));
-    return `${prefix}/${newStem}.wav`;
-  }
-  return `${newStem}.wav`;
+  parts.push(sample.filename);
+  return join(...parts);
 }
 
 /** Get file stem (basename without extension). */
-function stemOf(filePath: string): string {
-  const base = basename(filePath);
+function stemOf(filename: string): string {
+  const base = basename(filename);
   const ext = extname(base);
   return ext ? base.slice(0, -ext.length) : base;
 }
@@ -117,36 +102,27 @@ export function numericSortKey(stem: string): number[] {
   return matches ? matches.map(Number) : [];
 }
 
-/** Derive a clean alias by stripping the category prefix from the stem. */
-export function deriveAlias(cleanStem: string, cleanCat: string): string {
-  if (cleanCat && cleanStem.startsWith(cleanCat + "-")) {
-    const candidate = cleanStem.slice(cleanCat.length + 1);
-    if (candidate && candidate !== cleanCat) {
-      return candidate;
-    }
-  }
-  return cleanStem;
-}
-
-function resolveAlias(mode: ProductMetadata["alias_mode"], cleanStem: string, cleanCat: string): string {
-  if (mode === "preserve-stem") {
-    return cleanStem;
-  }
-  return deriveAlias(cleanStem, cleanCat);
-}
-
 // ── Core logic ───────────────────────────────────────────────
 
 /**
- * Compute renames for every sample in meta.
+ * Compute renames for every sample in the consolidated metadata.
  *
- * Returns only entries where something actually changes.
+ * Only changes filenames on disk — alias, detail, category, subcategory,
+ * and all other metadata fields are preserved as-is.
+ *
+ * Pass `options.product` to limit processing to a single product.
+ *
+ * Returns only entries where the filename actually changes.
+ * Throws if two samples would collide after cleaning. Collision checks include
+ * skipped files and compare case-insensitively to match Windows filesystem behavior.
  */
-export function planRenames(productDir: string, meta: ProductMetadata): RenameEntry[] {
+export function planRenames(
+  outputRoot: string,
+  meta: ConsolidatedMetadata,
+  options?: { product?: string },
+): RenameEntry[] {
   const samples = meta.samples;
-  const aliasMode = meta.alias_mode;
 
-  // Step 1 — compute clean stems, extract base names
   interface EntryInfo {
     i: number;
     oldPath: string;
@@ -154,21 +130,24 @@ export function planRenames(productDir: string, meta: ProductMetadata): RenameEn
     cleanStem: string;
     base: string;
     sample: SampleEntry;
+    skip: boolean;
   }
 
   const entries: EntryInfo[] = [];
   for (let i = 0; i < samples.length; i++) {
     const sample = samples[i];
-    const oldPath = physicalPath(productDir, sample);
+    const skip = options?.product ? sample.product !== options.product : false;
+    const oldPath = physicalPath(outputRoot, sample);
     const dirPath = dirname(oldPath);
-    const stem = cleanName(stemOf(oldPath));
+    const stem = cleanName(stemOf(sample.filename));
     const base = extractBase(stem);
-    entries.push({ i, oldPath, dirPath, cleanStem: stem, base, sample });
+    entries.push({ i, oldPath, dirPath, cleanStem: stem, base, sample, skip });
   }
 
-  // Step 2 — group by (directory, base) and assign consecutive numbers
+  // Group by (directory, base) — only non-skipped entries participate
   const dirBaseGroups = new Map<string, number[]>();
   for (let idx = 0; idx < entries.length; idx++) {
+    if (entries[idx].skip) continue;
     const { dirPath, base } = entries[idx];
     const key = `${dirPath}\0${base}`;
     const list = dirBaseGroups.get(key) ?? [];
@@ -190,7 +169,7 @@ export function planRenames(productDir: string, meta: ProductMetadata): RenameEn
           const vb = kb[i] ?? 0;
           if (va !== vb) return va - vb;
         }
-        return String(entries[a].sample.filename).localeCompare(String(entries[b].sample.filename));
+        return entries[a].sample.filename.localeCompare(entries[b].sample.filename);
       });
 
       const width = Math.max(2, String(indices.length).length);
@@ -201,45 +180,48 @@ export function planRenames(productDir: string, meta: ProductMetadata): RenameEn
     }
   }
 
-  // Step 3 — build rename plan
+  // Collision check: ensure no two samples end up with the same filename
+  // in the same directory. Compare case-insensitively for Windows safety.
+  const occupied = new Map<string, number>();
+
+  // Register skipped files (not being renamed — keep original filenames)
+  for (let idx = 0; idx < entries.length; idx++) {
+    if (entries[idx].skip) {
+      const key = `${entries[idx].dirPath}\0${entries[idx].sample.filename.toLowerCase()}`;
+      occupied.set(key, idx);
+    }
+  }
+
+  // Register and check all planned final filenames
+  for (const [idx, stem] of finalStems) {
+    const newFilename = `${stem}.wav`;
+    const key = `${entries[idx].dirPath}\0${newFilename}`;
+    const prev = occupied.get(key);
+    if (prev !== undefined) {
+      throw new Error(
+        `Filename collision: "${entries[prev].sample.filename}" and ` +
+        `"${entries[idx].sample.filename}" both map to "${newFilename}"`,
+      );
+    }
+    occupied.set(key, idx);
+  }
+
+  // Build plan — only include entries where filename actually changes
   const plan: RenameEntry[] = [];
 
-  for (let idx = 0; idx < entries.length; idx++) {
+  for (const [idx, stem] of finalStems) {
     const { i, oldPath, sample } = entries[idx];
-    const newStem = finalStems.get(idx)!;
-    const newPath = join(dirname(oldPath), `${newStem}.wav`);
-    const newFilename = newMetadataFilename(sample, newStem);
+    const newFilename = `${stem}.wav`;
+    const newPath = join(dirname(oldPath), newFilename);
 
-    const oldAlias = String(sample.alias ?? "");
-    const oldCat = String(sample.category ?? "");
-    const oldDetail = String(sample.detail ?? "");
-    const oldFilename = sample.filename;
-
-    const newCat = oldCat ? cleanName(oldCat) : "";
-    const newDetail = oldDetail ? cleanName(oldDetail) : "";
-    const newAlias = resolveAlias(aliasMode, newStem, newCat);
-
-    const changed =
-      oldPath !== newPath ||
-      oldFilename !== newFilename ||
-      oldAlias !== newAlias ||
-      oldCat !== newCat ||
-      oldDetail !== newDetail;
-
-    if (!changed) continue;
+    if (sample.filename === newFilename) continue;
 
     plan.push({
-      index: String(i),
+      index: i,
       old_path: oldPath,
       new_path: newPath,
-      old_filename: oldFilename,
+      old_filename: sample.filename,
       new_filename: newFilename,
-      old_alias: oldAlias,
-      new_alias: newAlias,
-      old_category: oldCat,
-      new_category: newCat,
-      old_detail: oldDetail,
-      new_detail: newDetail,
     });
   }
 
@@ -247,35 +229,33 @@ export function planRenames(productDir: string, meta: ProductMetadata): RenameEn
 }
 
 /**
- * Execute renames on disk and update meta in-place.
+ * Execute renames on disk and update meta.samples[].filename in-place.
+ * Only the filename field is modified — all other metadata is preserved.
  *
  * Uses temporary file names to avoid conflicts when two files swap names.
  * Returns the number of files renamed on disk.
  */
-export function applyRenames(_productDir: string, meta: ProductMetadata, plan: RenameEntry[]): number {
+export function applyRenames(_outputRoot: string, meta: ConsolidatedMetadata, plan: RenameEntry[]): number {
   const samples = meta.samples;
 
   // Phase 1 — rename files to temp names
-  const tempMap = new Map<string, { originalPath: string; tempPath: string; finalPath: string }>();
-  let diskRenames = 0;
+  const tempMap = new Map<number, { originalPath: string; tempPath: string; finalPath: string }>();
 
   for (const entry of plan) {
-    const oldPath = entry.old_path;
-    const newPath = entry.new_path;
-
-    if (oldPath !== newPath && existsSync(oldPath)) {
+    if (entry.old_path !== entry.new_path && existsSync(entry.old_path)) {
       let tempPath: string;
       for (;;) {
         const tempName = `.tmp_${randomUUID().replace(/-/g, "").slice(0, 12)}.wav`;
-        tempPath = join(dirname(oldPath), tempName);
+        tempPath = join(dirname(entry.old_path), tempName);
         if (!existsSync(tempPath)) break;
       }
-      renameSync(oldPath, tempPath);
-      tempMap.set(entry.index, { originalPath: oldPath, tempPath, finalPath: newPath });
+      renameSync(entry.old_path, tempPath);
+      tempMap.set(entry.index, { originalPath: entry.old_path, tempPath, finalPath: entry.new_path });
     }
   }
 
   // Phase 2 — rename temp files to final names
+  let diskRenames = 0;
   const finalizedEntries: Array<{ originalPath: string; finalPath: string }> = [];
   try {
     for (const [, { originalPath, tempPath, finalPath }] of tempMap) {
@@ -308,18 +288,9 @@ export function applyRenames(_productDir: string, meta: ProductMetadata, plan: R
     throw err;
   }
 
-  // Phase 3 — update metadata in-place
+  // Phase 3 — update metadata in-place (filename only)
   for (const entry of plan) {
-    const i = parseInt(entry.index, 10);
-    const sample = samples[i];
-    sample.filename = entry.new_filename;
-    sample.alias = entry.new_alias;
-    if (entry.new_category) {
-      sample.category = entry.new_category;
-    }
-    if ("detail" in sample) {
-      sample.detail = entry.new_detail;
-    }
+    samples[entry.index].filename = entry.new_filename;
   }
 
   return diskRenames;
@@ -340,77 +311,45 @@ function main(): void {
   });
 
   const outputDir = values["output-dir"] ?? "output";
-  if (!statSync(outputDir, { throwIfNoEntry: false })?.isDirectory()) {
-    console.error(`ERROR: Output directory not found: ${outputDir}`);
+  const metaPath = join(outputDir, "metadata.json");
+
+  if (!existsSync(metaPath)) {
+    console.error(`ERROR: metadata.json not found at: ${metaPath}`);
     process.exit(1);
   }
 
-  let products: string[];
-  if (values.product) {
-    const p = join(outputDir, values.product);
-    if (!statSync(p, { throwIfNoEntry: false })?.isDirectory()) {
-      console.error(`ERROR: Product directory not found: ${p}`);
-      process.exit(1);
-    }
-    products = [p];
-  } else {
-    products = readdirSync(outputDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && existsSync(join(outputDir, d.name, "metadata.json")))
-      .map((d) => join(outputDir, d.name))
-      .sort();
+  let meta: ConsolidatedMetadata;
+  try {
+    meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+  } catch (err) {
+    console.error(`ERROR: cannot parse metadata.json — ${(err as Error).message}`);
+    process.exit(1);
   }
 
-  let totalDisk = 0;
-  let totalMeta = 0;
+  const plan = planRenames(outputDir, meta, { product: values.product });
 
-  for (const productDir of products) {
-    const metaPath = join(productDir, "metadata.json");
-    let meta: ProductMetadata;
-    try {
-      meta = JSON.parse(readFileSync(metaPath, "utf-8"));
-    } catch (err) {
-      console.warn(
-        `\n${basename(productDir)}: cannot parse metadata.json — skipping (${(err as Error).message})`,
-      );
-      continue;
-    }
+  if (!plan.length) {
+    console.log("No renames needed.");
+    return;
+  }
 
-    const plan = planRenames(productDir, meta);
-    if (!plan.length) continue;
+  const diskChanges = plan.filter((e) => e.old_path !== e.new_path).length;
+  console.log(`${plan.length} changes planned (${diskChanges} file renames)`);
 
-    const diskChanges = plan.filter((e) => e.old_path !== e.new_path).length;
-    console.log(`\n${basename(productDir)}: ${plan.length} changes (${diskChanges} file renames)`);
-
-    for (const entry of plan.slice(0, 5)) {
-      if (entry.old_path !== entry.new_path) {
-        const oldRel = relative(outputDir, entry.old_path).replace(/\\/g, "/");
-        const newRel = relative(outputDir, entry.new_path).replace(/\\/g, "/");
-        console.log(`  ${oldRel} -> ${newRel}`);
-      } else {
-        console.log(`  meta-only: ${entry.old_filename}`);
-      }
-      if (entry.old_alias !== entry.new_alias) {
-        console.log(`    alias: '${entry.old_alias}' -> '${entry.new_alias}'`);
-      }
-    }
-    if (plan.length > 5) {
-      console.log(`  ... and ${plan.length - 5} more`);
-    }
-
-    if (values.apply) {
-      const renamed = applyRenames(productDir, meta, plan);
-      if (meta.total_samples !== undefined) {
-        meta.total_samples = meta.samples.length;
-      }
-      writeFileSync(metaPath, JSON.stringify(meta, null, 2) + "\n", "utf-8");
-      totalDisk += renamed;
-      totalMeta += plan.length;
-      console.log(`  Applied: ${renamed} files renamed, ${plan.length} metadata entries updated`);
-    }
+  for (const entry of plan.slice(0, 10)) {
+    const oldRel = relative(outputDir, entry.old_path).replace(/\\/g, "/");
+    const newRel = relative(outputDir, entry.new_path).replace(/\\/g, "/");
+    console.log(`  ${oldRel} -> ${newRel}`);
+  }
+  if (plan.length > 10) {
+    console.log(`  ... and ${plan.length - 10} more`);
   }
 
   if (values.apply) {
-    console.log(`\nTotal: ${totalDisk} files renamed, ${totalMeta} metadata entries updated`);
+    const renamed = applyRenames(outputDir, meta, plan);
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2) + "\n", "utf-8");
+    console.log(`Applied: ${renamed} files renamed, ${plan.length} metadata entries updated`);
+    console.log("Run `npm run build` to rebuild data/index.json");
   } else {
     console.log("\nDry run — no changes made. Use --apply to execute.");
   }

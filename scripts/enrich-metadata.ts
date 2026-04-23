@@ -21,6 +21,8 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { basename, join, resolve } from "path";
 import { parseArgs } from "util";
 
+import { readWavInfo } from "./wav-decode.js";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -68,13 +70,13 @@ const PRODUCT_BPM: Record<string, number> = {
   Dance_eJay4: 140,
   Dance_SuperPack: 140,
   GenerationPack1_Dance: 140,
-  GenerationPack1_Rave: 140,
+  GenerationPack1_Rave: 180,
   GenerationPack1_HipHop: 90,
   HipHop_eJay2: 90,
   HipHop_eJay3: 90,
   HipHop_eJay4: 90,
   House_eJay: 125,
-  Rave: 140,
+  Rave: 180,
   SampleKit_DMKIT1: 140,
   SampleKit_DMKIT2: 140,
   SampleKit_DMKIT3: 140,
@@ -182,6 +184,231 @@ export function studioCategoryFromSource(source: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Duration backfill from WAV headers
+// ---------------------------------------------------------------------------
+
+export interface DurationBackfillStats {
+  totalSamples: number;
+  durationAdded: number;
+  beatsAdded: number;
+  errors: number;
+}
+
+/**
+ * Backfill missing `duration_sec` and `beats` in the consolidated
+ * `output/metadata.json` by reading the actual WAV file headers.
+ *
+ * Constructs the audio file path from category/subcategory/filename,
+ * reads the WAV header to get duration, and computes beats from BPM.
+ */
+export function backfillWavDuration(
+  outputRoot: string,
+  dryRun: boolean,
+): DurationBackfillStats {
+  const stats: DurationBackfillStats = {
+    totalSamples: 0,
+    durationAdded: 0,
+    beatsAdded: 0,
+    errors: 0,
+  };
+
+  const metadataPath = join(outputRoot, "metadata.json");
+  if (!existsSync(metadataPath)) return stats;
+
+  let manifest: Manifest;
+  try {
+    manifest = JSON.parse(readFileSync(metadataPath, "utf8"));
+  } catch {
+    return stats;
+  }
+
+  let changed = false;
+
+  for (const s of manifest.samples) {
+    stats.totalSamples++;
+
+    if (typeof s.duration_sec === "number") continue;
+
+    // Build path: output/<category>/<subcategory?>/<filename>
+    const category = typeof s.category === "string" && s.category ? s.category : "Unsorted";
+    const subcat = typeof s.subcategory === "string" && s.subcategory ? s.subcategory : null;
+    const pathParts = subcat
+      ? [outputRoot, category, subcat, s.filename]
+      : [outputRoot, category, s.filename];
+    const wavPath = join(...pathParts);
+
+    if (!existsSync(wavPath)) {
+      stats.errors++;
+      continue;
+    }
+
+    try {
+      const buf = readFileSync(wavPath);
+      const info = readWavInfo(buf);
+      s.duration_sec = Math.round(info.duration * 10000) / 10000;
+      stats.durationAdded++;
+      changed = true;
+
+      if (typeof s.bpm === "number" && s.bpm > 0) {
+        s.beats = Math.round((info.duration * s.bpm) / 60);
+        stats.beatsAdded++;
+      }
+    } catch {
+      stats.errors++;
+    }
+  }
+
+  if (changed && !dryRun) {
+    manifest.total_samples = manifest.samples.length;
+    writeFileSync(metadataPath, JSON.stringify(manifest, null, 2) + "\n");
+  }
+
+  return stats;
+}
+
+// ---------------------------------------------------------------------------
+// eJay Studio filename reconstruction
+// ---------------------------------------------------------------------------
+
+export interface StudioReconstructStats {
+  totalStudio: number;
+  detailAdded: number;
+  internalNameAdded: number;
+  sampleRateAdded: number;
+  errors: number;
+}
+
+/**
+ * BPM-style filename: Genre_BPMbpm_CODE_SHORTCODE_BPM2_LETTER_ST(LR)?.wav
+ * e.g. Drum&Bass_160bpm_SNTHBASS001_D+B_160_C_ST.wav
+ *      Trance_140bpm_SYNTH001_TRNCE_125_A_ST(L).wav
+ *      HipHop_90bpm_STRING006_HPHOP_90_A ST.wav   (space edge case)
+ */
+const BPM_FILENAME_RE =
+  /^(.+?)_(\d+)bpm_([A-Z]+\d+)_([^_]+)_(\d+)_([A-Z])[ _]ST(?:\([LR]\))?\.wav$/i;
+
+/**
+ * DrumSpezial filename: DrumSpezial_TYPE###_ST.wav
+ * e.g. DrumSpezial_KICK042_ST.wav
+ */
+const DRUM_SPEZIAL_RE = /^DrumSpezial_([A-Z]+\d+)_ST\.wav$/i;
+
+/**
+ * Parse an eJay Studio filename and return the reconstructed fields.
+ */
+export function parseStudioFilename(
+  filename: string,
+): { detail: string; internalName: string } | null {
+  const bpmMatch = filename.match(BPM_FILENAME_RE);
+  if (bpmMatch) {
+    return {
+      detail: bpmMatch[1],
+      internalName: bpmMatch[3],
+    };
+  }
+
+  const drumMatch = filename.match(DRUM_SPEZIAL_RE);
+  if (drumMatch) {
+    return {
+      detail: "DrumSpezial",
+      internalName: drumMatch[1],
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Backfill missing `detail`, `internal_name`, `sample_rate`, `channels`,
+ * and `bit_depth` for eJay Studio samples in the consolidated
+ * `output/metadata.json` by parsing filenames and reading WAV headers.
+ */
+export function reconstructStudioMetadata(
+  outputRoot: string,
+  dryRun: boolean,
+): StudioReconstructStats {
+  const stats: StudioReconstructStats = {
+    totalStudio: 0,
+    detailAdded: 0,
+    internalNameAdded: 0,
+    sampleRateAdded: 0,
+    errors: 0,
+  };
+
+  const metadataPath = join(outputRoot, "metadata.json");
+  if (!existsSync(metadataPath)) return stats;
+
+  let manifest: Manifest;
+  try {
+    manifest = JSON.parse(readFileSync(metadataPath, "utf8"));
+  } catch {
+    return stats;
+  }
+
+  let changed = false;
+
+  for (const s of manifest.samples) {
+    if (s.product !== "eJay_Studio") continue;
+    stats.totalStudio++;
+
+    // --- detail + internal_name from filename ---
+    const needsDetail = !s.detail;
+    const needsInternalName = !s.internal_name;
+
+    if (needsDetail || needsInternalName) {
+      const parsed = parseStudioFilename(s.filename);
+      if (parsed) {
+        if (needsDetail) {
+          s.detail = parsed.detail;
+          stats.detailAdded++;
+          changed = true;
+        }
+        if (needsInternalName) {
+          s.internal_name = parsed.internalName;
+          stats.internalNameAdded++;
+          changed = true;
+        }
+      }
+    }
+
+    // --- sample_rate, channels, bit_depth from WAV header ---
+    if (!s.sample_rate) {
+      const category = typeof s.category === "string" && s.category
+        ? s.category : "Unsorted";
+      const subcat = typeof s.subcategory === "string" && s.subcategory
+        ? s.subcategory : null;
+      const pathParts = subcat
+        ? [outputRoot, category, subcat, s.filename]
+        : [outputRoot, category, s.filename];
+      const wavPath = join(...pathParts);
+
+      if (existsSync(wavPath)) {
+        try {
+          const buf = readFileSync(wavPath);
+          const info = readWavInfo(buf);
+          s.sample_rate = info.sampleRate;
+          s.channels = info.channels;
+          s.bit_depth = info.bitDepth;
+          stats.sampleRateAdded++;
+          changed = true;
+        } catch {
+          stats.errors++;
+        }
+      } else {
+        stats.errors++;
+      }
+    }
+  }
+
+  if (changed && !dryRun) {
+    manifest.total_samples = manifest.samples.length;
+    writeFileSync(metadataPath, JSON.stringify(manifest, null, 2) + "\n");
+  }
+
+  return stats;
+}
+
+// ---------------------------------------------------------------------------
 // Core enrichment
 // ---------------------------------------------------------------------------
 
@@ -286,17 +513,35 @@ export function enrichProduct(
       }
 
       // --- Beats recomputation ---
-      // Only recompute if we have both duration and BPM, and the current
-      // beats value was computed at the wrong BPM (140 hardcoded).
+      // Recompute if we have both duration and BPM, and the current beats
+      // value was computed at a stale BPM (e.g. 140 before Rave was
+      // corrected to 180). A zero beat count is preserved because the
+      // normalized catalog uses beats=0 as the one-shot sentinel.
       if (
         s.bpm !== undefined &&
-        s.bpm !== 140 &&
         s.duration_sec !== undefined &&
         s.beats !== undefined
       ) {
-        const expectedAtOldBpm = Math.round((s.duration_sec * 140) / 60);
-        if (s.beats === expectedAtOldBpm) {
-          s.beats = Math.round((s.duration_sec * s.bpm) / 60);
+        const correctBeats = Math.round((s.duration_sec * s.bpm) / 60);
+        if (s.beats !== correctBeats && s.beats !== 0) {
+          s.beats = correctBeats;
+          stats.beatsRecomputed++;
+          changed = true;
+        }
+      }
+
+      // --- One-shot detection for Rave ---
+      // At 180 BPM a bar is 4 beats; samples shorter than one bar (≤ 2
+      // beats) are one-shot hits, not loopable patterns.
+      if (
+        (productName === "Rave" || productName === "GenerationPack1_Rave") &&
+        typeof s.beats === "number" &&
+        s.beats > 0 &&
+        typeof s.duration_sec === "number"
+      ) {
+        const beatsAt180 = Math.round((s.duration_sec * 180) / 60);
+        if (beatsAt180 <= 2) {
+          s.beats = 0;
           stats.beatsRecomputed++;
           changed = true;
         }
@@ -476,6 +721,26 @@ function main(): void {
   console.log(
     `\nTotal: ${totals.samples} samples — bpm=${totals.bpm} cat=${totals.cat} beats=${totals.beats}`,
   );
+
+  // Backfill missing duration/beats from WAV headers (consolidated catalog)
+  const durStats = backfillWavDuration(outputRoot, dryRun);
+  if (durStats.durationAdded > 0 || durStats.errors > 0) {
+    console.log(
+      `\nDuration backfill: ${durStats.durationAdded} durations added, ` +
+      `${durStats.beatsAdded} beats computed, ${durStats.errors} errors`,
+    );
+  }
+
+  // Reconstruct missing eJay Studio metadata from filenames + WAV headers
+  const studioStats = reconstructStudioMetadata(outputRoot, dryRun);
+  if (studioStats.totalStudio > 0) {
+    console.log(
+      `\neJay Studio reconstruction: ${studioStats.detailAdded} detail, ` +
+      `${studioStats.internalNameAdded} internal_name, ` +
+      `${studioStats.sampleRateAdded} audio props, ` +
+      `${studioStats.errors} errors`,
+    );
+  }
 }
 
 const isDirectRun = process.argv[1] &&

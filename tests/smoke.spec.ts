@@ -127,3 +127,156 @@ test("transport bar shows the configured app version", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".transport-version")).toHaveText(expectedTransportVersion);
 });
+
+test("search filters the sample grid and clear restores the category view", async ({ page }) => {
+  await page.route("**/data/index.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        categories: [{ id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 2 }],
+        mixLibrary: [],
+      }),
+    });
+  });
+
+  await page.route("**/output/categories.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        categories: [{ id: "Bass", name: "Bass", subcategories: ["unsorted"] }],
+      }),
+    });
+  });
+
+  await page.route("**/output/metadata.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        samples: [
+          {
+            filename: "bass-loop.wav",
+            alias: "Bass Loop",
+            category: "Bass",
+            product: "Rave",
+            bpm: 140,
+            beats: 4,
+            detail: "Drum&Bass",
+          },
+          {
+            filename: "bass-hit.wav",
+            alias: "Bass Hit",
+            category: "Bass",
+            product: "Rave",
+            bpm: 140,
+            beats: 0,
+            detail: "One Shot",
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/");
+
+  const searchInput = page.locator("#sample-search");
+  const searchClear = page.locator("#sample-search-clear");
+  const labels = page.locator(".sample-block-label");
+
+  await expect(labels.filter({ hasText: "Bass Loop" })).toHaveCount(1);
+  await expect(labels.filter({ hasText: "Bass Hit" })).toHaveCount(1);
+  await expect(searchClear).toHaveClass(/is-hidden/);
+
+  await searchInput.fill("drum&bass rave");
+  await expect(searchClear).not.toHaveClass(/is-hidden/);
+  await expect(labels.filter({ hasText: "Bass Loop" })).toHaveCount(1);
+  await expect(labels.filter({ hasText: "Bass Hit" })).toHaveCount(0);
+
+  await searchInput.fill("hit");
+  await expect(labels.filter({ hasText: "Bass Loop" })).toHaveCount(0);
+  await expect(labels.filter({ hasText: "Bass Hit" })).toHaveCount(1);
+
+  await searchClear.click();
+  await expect(searchInput).toHaveValue("");
+  await expect(searchClear).toHaveClass(/is-hidden/);
+  await expect(labels.filter({ hasText: "Bass Loop" })).toHaveCount(1);
+  await expect(labels.filter({ hasText: "Bass Hit" })).toHaveCount(1);
+});
+
+test("search query persists when switching categories", async ({ page }) => {
+  await page.route("**/data/index.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        categories: [
+          { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          { id: "Voice", name: "Voice", subcategories: ["unsorted"], sampleCount: 1 },
+        ],
+        mixLibrary: [],
+      }),
+    });
+  });
+
+  await page.route("**/output/categories.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        categories: [
+          { id: "Bass", name: "Bass", subcategories: ["unsorted"] },
+          { id: "Voice", name: "Voice", subcategories: ["unsorted"] },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/output/metadata.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        samples: [
+          {
+            filename: "deep-tone.wav",
+            alias: "Deep Tone",
+            category: "Bass",
+            product: "Rave",
+            bpm: 140,
+            beats: 4,
+          },
+          {
+            filename: "robot-vox.wav",
+            alias: "Robot Vox",
+            category: "Voice",
+            product: "Rave",
+            bpm: 140,
+            beats: 4,
+            detail: "Robot",
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/");
+
+  const searchInput = page.locator("#sample-search");
+  await searchInput.fill("robot");
+
+  await expect(searchInput).toHaveValue("robot");
+  await expect(page.locator(".sample-grid-empty")).toHaveText("No samples in this selection.");
+
+  await page.locator('.category-btn[data-category-id="Voice"]').click();
+
+  await expect(searchInput).toHaveValue("robot");
+  await expect(page.locator('.sample-block-label').filter({ hasText: "Robot Vox" })).toHaveCount(1);
+  await expect(page.locator('.sample-block-label').filter({ hasText: "Deep Tone" })).toHaveCount(0);
+
+  await page.locator('.category-btn[data-category-id="Bass"]').click();
+
+  await expect(searchInput).toHaveValue("robot");
+  await expect(page.locator(".sample-grid-empty")).toHaveText("No samples in this selection.");
+});

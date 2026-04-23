@@ -748,15 +748,55 @@ describe("extractIndividualPxds", () => {
     const outDir = join(tmpDir, "out");
     mkdirSync(srcDir, { recursive: true });
 
-    const wavData = Buffer.alloc(44);
-    wavData.write("RIFF", 0, "ascii");
-    wavData.write("WAVE", 8, "ascii");
-    writeFileSync(join(srcDir, "test.pxd"), wavData);
+    // Build a valid 16-bit mono WAV (44100 Hz, 1 second = 44100 frames = 88200 bytes)
+    const numFrames = 44100;
+    const dataSize = numFrames * 2; // 16-bit = 2 bytes/frame
+    const wavBuf = Buffer.alloc(44 + dataSize);
+    wavBuf.write("RIFF", 0, "ascii");
+    wavBuf.writeUInt32LE(36 + dataSize, 4);
+    wavBuf.write("WAVE", 8, "ascii");
+    wavBuf.write("fmt ", 12, "ascii");
+    wavBuf.writeUInt32LE(16, 16); // fmt chunk size
+    wavBuf.writeUInt16LE(1, 20);  // PCM
+    wavBuf.writeUInt16LE(1, 22);  // mono
+    wavBuf.writeUInt32LE(44100, 24); // sample rate
+    wavBuf.writeUInt32LE(88200, 28); // byte rate
+    wavBuf.writeUInt16LE(2, 32);  // block align
+    wavBuf.writeUInt16LE(16, 34); // bits per sample
+    wavBuf.write("data", 36, "ascii");
+    wavBuf.writeUInt32LE(dataSize, 40);
+    writeFileSync(join(srcDir, "test.pxd"), wavBuf);
 
     const catalog = extractIndividualPxds(srcDir, outDir, false);
     expect(catalog.length).toBe(1);
     expect(catalog[0].format).toBe("wav");
+    expect(catalog[0].sample_rate).toBe(44100);
+    expect(catalog[0].channels).toBe(1);
+    expect(catalog[0].bit_depth).toBe(16);
+    expect(catalog[0].duration_sec).toBeCloseTo(1.0, 2);
+    expect(catalog[0].beats).toBe(Math.round(140 / 60));
     expect(existsSync(join(outDir, "test.wav"))).toBe(true);
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it("copies plain WAV with unreadable header without crashing", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "ext-"));
+    const srcDir = join(tmpDir, "src");
+    const outDir = join(tmpDir, "out");
+    mkdirSync(srcDir, { recursive: true });
+
+    // Minimal buffer: valid RIFF/WAVE magic but no fmt/data chunks
+    const wavData = Buffer.alloc(44);
+    wavData.write("RIFF", 0, "ascii");
+    wavData.write("WAVE", 8, "ascii");
+    writeFileSync(join(srcDir, "bad.pxd"), wavData);
+
+    const catalog = extractIndividualPxds(srcDir, outDir, false);
+    expect(catalog.length).toBe(1);
+    expect(catalog[0].format).toBe("wav");
+    expect(catalog[0].duration_sec).toBeUndefined();
+    expect(catalog[0].beats).toBeUndefined();
+    expect(existsSync(join(outDir, "bad.wav"))).toBe(true);
     rmSync(tmpDir, { recursive: true });
   });
 

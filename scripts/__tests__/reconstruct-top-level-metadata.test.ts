@@ -6,7 +6,7 @@ import {
   buildTemporaryMetadata,
   reconstructTopLevelMetadata,
 } from "../reconstruct-top-level-metadata.js";
-import { applyRenames, planRenames, type ProductMetadata } from "../rename-samples.js";
+import { type ConsolidatedMetadata } from "../rename-samples.js";
 
 function createTempDir(): string {
   return mkdtempSync(join(tmpdir(), "ejay-rebuild-meta-"));
@@ -24,8 +24,7 @@ describe("buildTemporaryMetadata", () => {
       writeFileSync(join(voiceDir, "Shout!.wav"), "voice");
 
       const meta = buildTemporaryMetadata(tmp);
-      expect(meta.total_samples).toBe(2);
-      expect(meta.alias_mode).toBe("preserve-stem");
+      expect(meta.samples).toHaveLength(2);
       expect(meta.samples).toEqual([
         {
           filename: "Bass/Warm Line.wav",
@@ -81,9 +80,8 @@ describe("reconstructTopLevelMetadata", () => {
       expect(result.sampleCount).toBe(1);
       expect(existsSync(join(tmp, "metadata.json"))).toBe(true);
 
-      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8")) as ProductMetadata;
-      expect(meta.alias_mode).toBe("preserve-stem");
-      expect(meta.total_samples).toBe(1);
+      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8")) as ConsolidatedMetadata;
+      expect(meta.samples).toHaveLength(1);
       expect(meta.samples[0]).toMatchObject({
         filename: "Drum/KICK 01.wav",
         alias: "KICK 01",
@@ -125,7 +123,7 @@ describe("reconstructTopLevelMetadata", () => {
       const result = reconstructTopLevelMetadata(tmp, { apply: true });
       expect(result.status).toBe("skipped-existing");
 
-      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8")) as ProductMetadata;
+      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8")) as ConsolidatedMetadata;
       expect(meta.samples[0].filename).toBe("Bass/existing.wav");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -146,8 +144,7 @@ describe("reconstructTopLevelMetadata", () => {
       const result = reconstructTopLevelMetadata(tmp, { apply: true, overwrite: true });
       expect(result.status).toBe("written");
 
-      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8")) as ProductMetadata;
-      expect(meta.alias_mode).toBe("preserve-stem");
+      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8")) as ConsolidatedMetadata;
       expect(meta.samples).toEqual([
         {
           filename: "Bass/One.wav",
@@ -156,13 +153,12 @@ describe("reconstructTopLevelMetadata", () => {
           channel: "Bass",
         },
       ]);
-      expect(meta.total_samples).toBe(1);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
 
-  it("produces metadata that the current rename script can consume unchanged", () => {
+  it("produces valid metadata structure with samples array", () => {
     const tmp = createTempDir();
     try {
       const bassDir = join(tmp, "Bass");
@@ -173,22 +169,12 @@ describe("reconstructTopLevelMetadata", () => {
       writeFileSync(join(voiceDir, "Shout!.wav"), "voice");
 
       reconstructTopLevelMetadata(tmp, { apply: true });
-      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8")) as ProductMetadata;
-      const plan = planRenames(tmp, meta);
+      const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8")) as ConsolidatedMetadata;
 
-      expect(plan.map((entry) => entry.new_filename)).toEqual([
-        "Bass/warm-line.wav",
-        "Voice/shout.wav",
-      ]);
-
-      const renamed = applyRenames(tmp, meta, plan);
-      expect(renamed).toBe(2);
-      expect(existsSync(join(bassDir, "warm-line.wav"))).toBe(true);
-      expect(existsSync(join(voiceDir, "shout.wav"))).toBe(true);
-      expect(meta.samples.map((sample) => sample.filename)).toEqual([
-        "Bass/warm-line.wav",
-        "Voice/shout.wav",
-      ]);
+      expect(meta.samples).toHaveLength(2);
+      expect(meta.samples[0]).toMatchObject({ category: "bass", channel: "Bass" });
+      expect(meta.samples[1]).toMatchObject({ category: "voice", channel: "Voice" });
+      expect(meta.samples.every((s) => s.filename && s.alias)).toBe(true);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
