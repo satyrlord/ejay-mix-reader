@@ -4,8 +4,10 @@ import {
   categoryConfigsEqual,
   humanizeIdentifier,
   sampleAudioPath,
+  sampleDisambiguationLine,
   sampleMatchesSearchQuery,
   sampleMetadataLine,
+  sampleTooltip,
 } from "../data.js";
 
 describe("sampleAudioPath", () => {
@@ -120,6 +122,38 @@ describe("sampleMetadataLine", () => {
 
   it("replaces underscores with spaces in product name", () => {
     expect(sampleMetadataLine({ product: "Dance_eJay1" })).toBe("Dance eJay1");
+  });
+});
+
+describe("sampleDisambiguationLine", () => {
+  it("joins internal name and sample id for duplicate-name disambiguation", () => {
+    expect(sampleDisambiguationLine({ internal_name: "D5MA060", sample_id: 1512 })).toBe("D5MA060 \u00B7 #1512");
+  });
+
+  it("omits missing provenance fields", () => {
+    expect(sampleDisambiguationLine({ sample_id: 42 })).toBe("#42");
+  });
+});
+
+describe("sampleTooltip", () => {
+  it("includes provenance lines after the main metadata summary", () => {
+    expect(sampleTooltip({
+      filename: "D5MA060.wav",
+      alias: "Kick 3",
+      product: "Dance_eJay2",
+      bpm: 140,
+      beats: 4,
+      detail: "euro",
+      internal_name: "D5MA060",
+      sample_id: 1512,
+      source: "DANCE20/D5MA060",
+    })).toBe([
+      "Kick 3",
+      "Dance eJay2 \u00B7 140 BPM \u00B7 4b \u00B7 euro",
+      "Internal: D5MA060",
+      "Sample ID: 1512",
+      "Source: DANCE20/D5MA060",
+    ].join("\n"));
   });
 });
 

@@ -201,6 +201,82 @@ test("search filters the sample grid and clear restores the category view", asyn
   await expect(labels.filter({ hasText: "Bass Hit" })).toHaveCount(1);
 });
 
+test("duplicate sample names surface provenance in the grid", async ({ page }) => {
+  await page.route("**/data/index.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"], sampleCount: 2 }],
+        mixLibrary: [],
+      }),
+    });
+  });
+
+  await page.route("**/output/categories.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"] }],
+      }),
+    });
+  });
+
+  await page.route("**/output/metadata.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        samples: [
+          {
+            filename: "kick-1.wav",
+            alias: "Kick 3",
+            category: "Drum",
+            subcategory: "kick",
+            product: "Dance_eJay2",
+            bpm: 140,
+            beats: 4,
+            detail: "euro",
+            internal_name: "D5MA060",
+            sample_id: 1512,
+          },
+          {
+            filename: "kick-2.wav",
+            alias: "Kick 3",
+            category: "Drum",
+            subcategory: "kick",
+            product: "Dance_eJay2",
+            bpm: 140,
+            beats: 4,
+            detail: "trance",
+            internal_name: "D5MA061",
+            sample_id: 1513,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/");
+
+  const blocks = page.locator(".sample-block");
+  const labels = page.locator(".sample-block-label");
+  const metas = page.locator(".sample-block-meta");
+
+  await expect(labels.filter({ hasText: "Kick 3 - euro" })).toHaveCount(1);
+  await expect(labels.filter({ hasText: "Kick 3 - trance" })).toHaveCount(1);
+  await expect(metas.nth(0)).toContainText("Dance eJay2");
+  await expect(metas.nth(0)).toContainText("D5MA060");
+  await expect(metas.nth(0)).toContainText("#1512");
+  await expect(metas.nth(0)).not.toContainText("euro");
+  await expect(metas.nth(1)).toContainText("D5MA061");
+  await expect(metas.nth(1)).toContainText("#1513");
+  await expect(metas.nth(1)).not.toContainText("trance");
+  await expect(blocks.nth(0)).toHaveAttribute("title", /^Kick 3 - euro/);
+  await expect(blocks.nth(1)).toHaveAttribute("title", /^Kick 3 - trance/);
+});
+
 test("search query persists when switching categories", async ({ page }) => {
   await page.route("**/data/index.json", async (route) => {
     await route.fulfill({

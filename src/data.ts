@@ -109,6 +109,8 @@ export interface Sample {
   subcategory?: string | null;
   product?: string;
   source?: string;
+  internal_name?: string;
+  sample_id?: number;
   duration_sec?: number;
   beats?: number;
   bpm?: number;
@@ -394,6 +396,10 @@ export function sampleDisplayName(sample: Pick<Sample, "alias" | "filename">): s
   return sample.filename.replace(/^.*[\\/]/, "").replace(/\.wav$/i, "");
 }
 
+export function sampleDisplayKey(sample: Pick<Sample, "alias" | "filename">): string {
+  return sampleDisplayName(sample).trim().toLowerCase();
+}
+
 /**
  * Build a short metadata string for display under the sample label.
  * Shows product, BPM, and beat count when available.
@@ -422,6 +428,55 @@ export function sampleMetadataLine(
   }
 
   return parts.join(" \u00B7 ");
+}
+
+/**
+ * Build a short provenance suffix that distinguishes same-name samples.
+ */
+export function sampleDisambiguationLine(
+  sample: Pick<Sample, "internal_name" | "sample_id">,
+): string {
+  const parts: string[] = [];
+
+  const internalName = normalizeText(sample.internal_name);
+  if (internalName) {
+    parts.push(internalName);
+  }
+
+  if (typeof sample.sample_id === "number" && Number.isFinite(sample.sample_id)) {
+    parts.push(`#${sample.sample_id}`);
+  }
+
+  return parts.join(" \u00B7 ");
+}
+
+/**
+ * Build a full hover tooltip for a sample block, including provenance.
+ */
+export function sampleTooltip(
+  sample: Pick<Sample, "alias" | "filename" | "product" | "bpm" | "beats" | "detail" | "internal_name" | "sample_id" | "source">,
+): string {
+  const lines = [sampleDisplayName(sample)];
+  const meta = sampleMetadataLine(sample);
+  if (meta) {
+    lines.push(meta);
+  }
+
+  const internalName = normalizeText(sample.internal_name);
+  if (internalName) {
+    lines.push(`Internal: ${internalName}`);
+  }
+
+  if (typeof sample.sample_id === "number" && Number.isFinite(sample.sample_id)) {
+    lines.push(`Sample ID: ${sample.sample_id}`);
+  }
+
+  const source = normalizeText(sample.source);
+  if (source) {
+    lines.push(`Source: ${source}`);
+  }
+
+  return lines.join("\n");
 }
 
 /** Humanize ids for display; `compactDmkit` is opt-in so existing callers keep spaced `DMKIT 1` output by default. */

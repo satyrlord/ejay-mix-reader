@@ -1967,6 +1967,30 @@ test.describe("main edge cases", () => {
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:misc"]')).toHaveAttribute("data-tab-kind", "special");
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:fills"]')).toHaveAttribute("data-tab-kind", "user");
 
+    await page.evaluate(() => {
+      document.getElementById("subcategory-tabs")?.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 24,
+        clientY: 24,
+      }));
+    });
+    await expect(page.locator("#subcategory-context-menu")).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const tabs = document.getElementById("subcategory-tabs");
+      if (!tabs) return;
+
+      const orphanTextNode = document.createTextNode("orphan text target");
+      tabs.appendChild(orphanTextNode);
+      orphanTextNode.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 28,
+        clientY: 28,
+      }));
+      tabs.removeChild(orphanTextNode);
+    });
+    await expect(page.locator("#subcategory-context-menu")).toHaveCount(0);
+
     await page.locator('.subcategory-tab[data-tab-id="subcategory:kick"]').click({ button: "right" });
     await expect(page.locator("#subcategory-context-menu")).toHaveCount(0);
 
