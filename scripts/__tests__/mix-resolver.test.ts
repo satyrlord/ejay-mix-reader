@@ -146,9 +146,12 @@ describe("canonicalizeProduct", () => {
   it("exposes the alias and fallback tables for downstream tooling", () => {
     expect(PRODUCT_ALIASES.Dance_eJay_20).toBe("Dance_eJay2");
     expect(PRODUCT_FALLBACKS.Dance_eJay1).toContain("Dance_SuperPack");
+    expect(PRODUCT_FALLBACKS.Dance_eJay4).toContain("Dance_eJay3");
     expect(PRODUCT_FALLBACKS.HipHop_eJay1).toContain("GenerationPack1_HipHop");
     expect(PRODUCT_FALLBACKS.HipHop_eJay1).toContain("HipHop_eJay2");
     expect(PRODUCT_FALLBACKS.GenerationPack1_HipHop).toContain("HipHop_eJay3");
+    expect(PRODUCT_FALLBACKS.HipHop_eJay3).toContain("Dance_eJay3");
+    expect(PRODUCT_FALLBACKS.Techno_eJay3).toContain("Dance_eJay3");
   });
 });
 
@@ -233,6 +236,40 @@ describe("loadGen1Catalogs", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("splices SuperPack sample-kit catalogs when the kit files are present", () => {
+    const root = mkdtempSync(join(tmpdir(), "ejay-resolver-kit-"));
+    try {
+      const baseDir = join(root, "Dance_SuperPack", "dance", "EJAY");
+      mkdirSync(baseDir, { recursive: true });
+      writeFileSync(join(baseDir, "MAX"), '"aa\\base001.pxd"\r\n', "utf8");
+      writeFileSync(join(baseDir, "Pxddance"), "", "utf8");
+      writeFileSync(
+        join(baseDir, "kit1.txt"),
+        ['"01\\rap301.pxd"', '""', '"rap"', '"2"', '"grp"', '"vers"'].join("\r\n") + "\r\n",
+        "utf8",
+      );
+      writeFileSync(
+        join(baseDir, "kit2.txt"),
+        ['"01\\bass301.pxd"', '""', '"bass"', '"2"', '"grp"', '"vers"'].join("\r\n") + "\r\n",
+        "utf8",
+      );
+      writeFileSync(
+        join(baseDir, "kit3.txt"),
+        ['"01\\d4sp001l.pxd"', '""', '"effect"', '"2"', '"grp"', '"vers"'].join("\r\n") + "\r\n",
+        "utf8",
+      );
+
+      const catalogs = loadGen1Catalogs(root);
+      const superpack = catalogs.get("Dance_SuperPack");
+      expect(superpack).toBeDefined();
+      expect(superpack!.entries[3400].path).toBe("01/rap301.pxd");
+      expect(superpack!.entries[3900].path).toBe("01/bass301.pxd");
+      expect(superpack!.entries[4500].path).toBe("dmkit3/01/d4sp001l.pxd");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── buildResolverIndex ───────────────────────────────────────
@@ -257,6 +294,19 @@ describe("buildResolverIndex", () => {
     });
     expect(idx.outputRoot.length).toBeGreaterThan(0);
     expect(idx.archiveRoot.length).toBeGreaterThan(0);
+  });
+
+  it("propagates the Gen 1 alias catalog for HipHop eJay 1", () => {
+    const gp1Catalog = buildGen1Catalog({
+      maxText: '"ba\\h1bs005.pxd"\r\n',
+      product: "GenerationPack1_HipHop",
+      maxPath: "/virtual/MAX",
+    });
+    const idx = buildResolverIndex({
+      metadata: { samples: [] },
+      gen1Catalogs: new Map([["GenerationPack1_HipHop", gp1Catalog]]),
+    });
+    expect(idx.gen1.get("HipHop_eJay1")).toBe(gp1Catalog);
   });
 });
 
@@ -432,6 +482,137 @@ describe("resolveMix — cross-product fallback", () => {
     const report = resolveMix(mix, idx);
     expect(report.resolved).toBe(1);
     expect(report.tracks[0].sampleRef.resolvedPath).toBe("Drum/kick/KIT.wav");
+  });
+
+  it("falls back across products via Gen 1 stem lookup when bySource misses", () => {
+    const superpackCatalog = buildGen1Catalog({
+      maxText: '""\r\n""\r\n',
+      kitCatalogs: [
+        {
+          offset: 5,
+          text: ['"01\\kitstem.pxd"', '""', '"drum"', '"2"', '"grp"', '"vers"'].join("\r\n") + "\r\n",
+        },
+      ],
+      product: "Dance_SuperPack",
+      maxPath: "/virtual/MAX",
+    });
+    const idx = buildResolverIndex({
+      metadata: {
+        samples: [
+          makeSample({
+            product: "SampleKit_DMKIT1",
+            filename: "KITSTEM.wav",
+            category: "Drum",
+            subcategory: "kick",
+            source: null,
+          }),
+        ],
+      },
+      gen1Catalogs: new Map([["Dance_SuperPack", superpackCatalog]]),
+    });
+    const mix = makeMix({
+      format: "A",
+      product: "Dance_SuperPack",
+      tracks: [makeTrack({ rawId: 5 })],
+    });
+    const report = resolveMix(mix, idx);
+    expect(report.resolved).toBe(1);
+    expect(report.tracks[0].sampleRef.resolvedPath).toBe("Drum/kick/KITSTEM.wav");
+  });
+
+  it("prefers the declared fallback order for cross-product Gen 1 matches", () => {
+    const superpackCatalog = buildGen1Catalog({
+      maxText: '""\r\n""\r\n',
+      kitCatalogs: [
+        {
+          offset: 5,
+          text: ['"01\\shared.pxd"', '""', '"drum"', '"2"', '"grp"', '"vers"'].join("\r\n") + "\r\n",
+        },
+      ],
+      product: "Dance_SuperPack",
+      maxPath: "/virtual/MAX",
+    });
+    const idx = buildResolverIndex({
+      metadata: {
+        samples: [
+          makeSample({
+            product: "SampleKit_DMKIT2",
+            filename: "WRONG.wav",
+            category: "Extra",
+            subcategory: null,
+            source: "01/SHARED.PXD",
+          }),
+          makeSample({
+            product: "SampleKit_DMKIT1",
+            filename: "RIGHT.wav",
+            category: "Drum",
+            subcategory: "kick",
+            source: "01/SHARED.PXD",
+          }),
+        ],
+      },
+      gen1Catalogs: new Map([["Dance_SuperPack", superpackCatalog]]),
+    });
+    const mix = makeMix({
+      format: "A",
+      product: "Dance_eJay1",
+      tracks: [makeTrack({ rawId: 5 })],
+    });
+
+    const report = resolveMix(mix, idx);
+    expect(report.resolved).toBe(1);
+    expect(report.tracks[0].sampleRef.resolvedPath).toBe("Drum/kick/RIGHT.wav");
+  });
+
+  it("resolves shared alias-only names through the Dance eJay 3 fallback chain", () => {
+    const idx = buildResolverIndex({
+      metadata: {
+        samples: [
+          ...DANCE3_SAMPLES,
+          makeSample({
+            product: "Dance_eJay3",
+            filename: "clap12.wav",
+            category: "Drum",
+            subcategory: "clap",
+            alias: "clap12",
+          }),
+        ],
+      },
+      gen1Catalogs: new Map(),
+    });
+
+    const hipHopReport = resolveMix(
+      makeMix({
+        format: "C",
+        product: "HipHop_eJay3",
+        tracks: [makeTrack({ rawId: 0, displayName: "clap12" })],
+      }),
+      idx,
+    );
+    expect(hipHopReport.resolved).toBe(1);
+    expect(hipHopReport.tracks[0].sampleRef.resolvedPath).toBe("Drum/clap/clap12.wav");
+
+    const technoReport = resolveMix(
+      makeMix({
+        format: "C",
+        product: "Techno_eJay3",
+        tracks: [makeTrack({ rawId: 0, displayName: "clap12" })],
+      }),
+      idx,
+    );
+    expect(technoReport.resolved).toBe(1);
+    expect(technoReport.tracks[0].sampleRef.resolvedPath).toBe("Drum/clap/clap12.wav");
+
+    const dance4Report = resolveMix(
+      makeMix({
+        format: "C",
+        product: "Dance_eJay4",
+        tracks: [makeTrack({ rawId: 0, displayName: "clap12" })],
+      }),
+      idx,
+    );
+    expect(dance4Report.resolved).toBe(1);
+    expect(dance4Report.tracks[0].sampleRef.resolvedPath).toBe("Drum/clap/clap12.wav");
   });
 });
 

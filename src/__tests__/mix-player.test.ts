@@ -224,6 +224,20 @@ describe("MixChannel", () => {
     const channel = new MixChannel(ctx);
     expect(channel.input).toBe(channel.gain);
   });
+
+  it("dispose disconnects gain and panner nodes", () => {
+    const gainDisconnect = vi.fn();
+    const pannerDisconnect = vi.fn();
+    const ctx: AudioContextLike = {
+      ...makeCtx(),
+      createGain: () => ({ gain: { value: 1 }, connect: () => {}, disconnect: gainDisconnect }),
+      createStereoPanner: () => ({ pan: { value: 0 }, connect: () => {}, disconnect: pannerDisconnect }),
+    };
+    const channel = new MixChannel(ctx);
+    channel.dispose();
+    expect(gainDisconnect).toHaveBeenCalledOnce();
+    expect(pannerDisconnect).toHaveBeenCalledOnce();
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -289,6 +303,16 @@ describe("DrumMachine", () => {
     dm.setPad("hat", { buffer: {}, gain: -5 });
     expect(dm.trigger("hat", 0)).not.toBeNull();
   });
+
+  it("dispose clears all registered pads", () => {
+    const ctx = makeCtx();
+    const dm = new DrumMachine(ctx, ctx.destination);
+    dm.setPad("kick", { buffer: {} });
+    dm.setPad("snare", { buffer: {} });
+    expect(dm.padCount).toBe(2);
+    dm.dispose();
+    expect(dm.padCount).toBe(0);
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -308,6 +332,18 @@ describe("createEffect", () => {
     const fx = createEffect(ctx, "delay");
     expect(fx.kind).toBe("delay");
     expect((fx.input as DelayNodeLike).delayTime.value).toBeCloseTo(0.25);
+  });
+
+  it("delay effect dispose disconnects the internal feedback gain node", () => {
+    const feedbackDisconnect = vi.fn();
+    const ctx: AudioContextLike = {
+      ...makeCtx(),
+      createGain: () => ({ gain: { value: 1 }, connect: () => {}, disconnect: feedbackDisconnect }),
+    };
+    const fx = createEffect(ctx, "delay");
+    expect(fx.dispose).toBeDefined();
+    fx.dispose?.();
+    expect(feedbackDisconnect).toHaveBeenCalledOnce();
   });
 
   it("builds a reverb effect with an impulse response buffer", () => {

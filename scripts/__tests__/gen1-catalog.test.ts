@@ -254,6 +254,58 @@ describe("buildGen1Catalog", () => {
     expect(cat.maxPath).toBe("/x/MAX");
     expect(cat.pxddancePath).toBe("/x/Pxddance");
   });
+
+  it("splices sample-kit records at fixed offsets", () => {
+    const cat = buildGen1Catalog({
+      maxText: ['"aa\\base001.pxd"', '""'].join("\n"),
+      kitCatalogs: [
+        {
+          offset: 3,
+          text: [
+            '"01\\rap301.pxd"',
+            '""',
+            '"rap"',
+            '"2"',
+            '"save the"',
+            '"planet[1]"',
+          ].join("\n"),
+        },
+        {
+          offset: 5,
+          pathPrefix: "dmkit3/",
+          text: [
+            '"01\\d4sp001l.pxd"',
+            '""',
+            '"effect"',
+            '"2"',
+            '"space"',
+            '"vers1"',
+          ].join("\n"),
+        },
+      ],
+      maxPath: "C:/archive/MAX",
+    });
+
+    expect(cat.totalIds).toBe(6);
+    expect(cat.populatedIds).toBe(3);
+    expect(cat.entries[0].path).toBe("aa/base001.pxd");
+    expect(cat.entries[3]).toMatchObject({
+      id: 3,
+      path: "01/rap301.pxd",
+      file: "RAP301",
+      category: "rap",
+      group: "save the",
+      version: "planet[1]",
+    });
+    expect(cat.entries[5]).toMatchObject({
+      id: 5,
+      path: "dmkit3/01/d4sp001l.pxd",
+      file: "D4SP001L",
+      category: "effect",
+      group: "space",
+      version: "vers1",
+    });
+  });
 });
 
 // ── resolveProductPaths ──────────────────────────────────────
@@ -285,6 +337,43 @@ describe("resolveProductPaths", () => {
       "GenerationPack1_HipHop",
       "GenerationPack1_Rave",
       "Rave",
+    ]);
+  });
+
+  it("returns sample-kit overlays for Dance SuperPack", () => {
+    const resolved = resolveProductPaths("Dance_SuperPack", "D:/archive");
+    expect(
+      resolved.kitCatalogPaths.map((kit) => ({
+        ...kit,
+        path: kit.path.replace(/\\/g, "/"),
+      })),
+    ).toEqual([
+      {
+        path: "D:/archive/Dance_SuperPack/dance/EJAY/kit1.txt",
+        offset: 3400,
+        pathPrefix: undefined,
+      },
+      {
+        path: "D:/archive/Dance_SuperPack/dance/EJAY/kit2.txt",
+        offset: 3900,
+        pathPrefix: undefined,
+      },
+      {
+        path: "D:/archive/Dance_SuperPack/dance/EJAY/kit3.txt",
+        offset: 4500,
+        pathPrefix: "dmkit3/",
+      },
+    ]);
+  });
+
+  it("reuses the SuperPack sample-kit catalogs for GP1 Dance", () => {
+    const resolved = resolveProductPaths("GenerationPack1_Dance", "D:/archive");
+    expect(
+      resolved.kitCatalogPaths.map((kit) => kit.path.replace(/\\/g, "/")),
+    ).toEqual([
+      "D:/archive/Dance_SuperPack/dance/EJAY/kit1.txt",
+      "D:/archive/Dance_SuperPack/dance/EJAY/kit2.txt",
+      "D:/archive/Dance_SuperPack/dance/EJAY/kit3.txt",
     ]);
   });
 });
@@ -334,17 +423,20 @@ describe("runCli", () => {
 // ── Live archive spot-checks (skipped when archive/ is absent) ──
 
 describe.skipIf(!hasArchive)("live archive spot-checks", () => {
-  it("Dance SuperPack MAX has 2845 IDs and resolves known START.MIX refs", () => {
+  it("Dance SuperPack builds the extended 5050-ID catalog and resolves known refs", () => {
     const cat = runCli({
       product: "Dance_SuperPack",
       archiveRoot: ARCHIVE,
       outputRoot: mkdtempSync(join(tmpdir(), "gen1-live-")),
     });
-    expect(cat.totalIds).toBe(2845);
+    expect(cat.totalIds).toBe(5050);
     // IDs observed in the hex dump of Dance 1 START.MIX.
     expect(cat.entries[1231].path).toBe("ai/bvjp.pxd");
     expect(cat.entries[746].path).toBe("bt/bcsp.pxd");
     expect(cat.entries[1919].path).toBe("dmkit2/04/fx316.pxd");
+    expect(cat.entries[3400].path).toBe("01/rap301.pxd");
+    expect(cat.entries[3900].path).toBe("01/bass301.pxd");
+    expect(cat.entries[4500].path).toBe("dmkit3/01/d4sp001l.pxd");
     // Pxddance enrichment should populate the base-kit range.
     expect(cat.entries[1231].category).not.toBeNull();
   });

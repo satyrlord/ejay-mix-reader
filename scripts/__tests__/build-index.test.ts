@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-import { buildIndex, buildMixLibrary, buildSampleIndex, collectProductMixes, countWavFiles, deriveDisplayName, findMixSubdir, scanMixDir } from "../build-index.js";
+import { buildIndex, buildMixLibrary, buildSampleIndex, buildUserdataMixLibrary, collectProductMixes, countWavFiles, deriveDisplayName, findMixSubdir, scanMixDir, userdataGroupLabel } from "../build-index.js";
 
 describe("countWavFiles", () => {
   it("counts nested wav files recursively", () => {
@@ -43,6 +43,50 @@ describe("buildIndex", () => {
   it("returns empty categories when outputDir does not exist", () => {
     const result = buildIndex(join(tmpdir(), "build-index-missing-xyz"));
     expect(result.categories).toEqual([]);
+  });
+
+  it("merges embedded MIX manifest samples into the generated categories", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-embedded-"));
+    try {
+      mkdirSync(join(root, "Loop"), { recursive: true });
+      mkdirSync(join(root, "Unsorted", "embedded mix"), { recursive: true });
+      writeFileSync(join(root, "Loop", "loop.wav"), "x");
+      writeFileSync(join(root, "Unsorted", "embedded mix", "Kick01.wav"), "x");
+      writeFileSync(
+        join(root, "metadata.json"),
+        JSON.stringify({
+          samples: [
+            { filename: "loop.wav", category: "Loop" },
+          ],
+        }),
+      );
+      writeFileSync(
+        join(root, "Unsorted", "embedded-mix-audio-manifest.json"),
+        JSON.stringify({
+          outDir: root + "\\Unsorted",
+          extractions: [
+            {
+              mixPath: "D:\\archive\\Needles.mix",
+              embeddedPath: "E:\\samples\\Kick01.wav",
+              outputPath: join(root, "Unsorted", "embedded mix", "Kick01.wav"),
+            },
+          ],
+        }),
+      );
+
+      const result = buildIndex(root);
+      expect(result.categories.find((entry) => entry.id === "Loop")).toEqual(
+        expect.objectContaining({ sampleCount: 1 }),
+      );
+      expect(result.categories.find((entry) => entry.id === "Unsorted")).toEqual(
+        expect.objectContaining({
+          sampleCount: 1,
+          subcategories: expect.arrayContaining(["embedded mix", "unsorted"]),
+        }),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("builds the normalized category list from the root metadata catalog", () => {
@@ -147,7 +191,7 @@ describe("buildIndex", () => {
         {
           id: "Dance_eJay1",
           name: "Dance eJay 1",
-          mixes: [{ filename: "START.MIX", sizeBytes: 6, format: "A" }],
+          mixes: [expect.objectContaining({ filename: "START.MIX", sizeBytes: 6, format: "A" })],
         },
       ]);
     } finally {
@@ -288,6 +332,48 @@ describe("scanMixDir", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("still includes a file when parseMix returns null (truncated gen-2 header)", () => {
+    // A Format-B stub: the SKKENNUNG marker is present (passes detectFormat)
+    // but the buffer is < 16 bytes so parseGen23Header throws "Invalid Gen 2/3
+    // MIX: truncated header", which parseMix converts to null. irToMeta(null)
+    // returns null, so meta stays undefined — but the entry must still be
+    // returned so the index is not silently truncated.
+    const root = mkdtempSync(join(tmpdir(), "build-index-scan-"));
+    try {
+      // 12 bytes: enough for SKKENNUNG detection, too few for gen-2/3 header.
+      writeFileSync(join(root, "stub.mix"), Buffer.from("#SKKENNUNG#:X"));
+      const entries = scanMixDir(root);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].filename).toBe("stub.mix");
+      expect(entries[0].format).toBe("B");
+      expect(entries[0].meta).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("forwards productId to parseMix and still returns meta when productId is omitted", () => {
+    // Format A file: Dance_eJay1 app signature (0x0706).
+    const root = mkdtempSync(join(tmpdir(), "build-index-scan-pid-"));
+    try {
+      writeFileSync(join(root, "start.mix"), Buffer.from([0x06, 0x0a, 0, 0, 0, 0]));
+
+      // With explicit productId: parseMix is called with the hint; meta must be populated.
+      const withHint = scanMixDir(root, "Dance_eJay1");
+      expect(withHint).toHaveLength(1);
+      expect(withHint[0]!.meta).toBeDefined();
+      expect(withHint[0]!.meta?.format).toBe("A");
+
+      // Without productId: heuristic detection via app signature must produce equivalent meta.
+      const withoutHint = scanMixDir(root);
+      expect(withoutHint).toHaveLength(1);
+      expect(withoutHint[0]!.meta?.format).toBe("A");
+      expect(withoutHint[0]!.meta?.bpm).toBe(withHint[0]!.meta?.bpm);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("collectProductMixes", () => {
@@ -326,7 +412,7 @@ describe("buildMixLibrary", () => {
       expect(library.map(e => e.id).sort()).toEqual(["HipHop_eJay2", "Rave"]);
       const rave = library.find(e => e.id === "Rave");
       expect(rave?.name).toBe("Rave");
-      expect(rave?.mixes).toEqual([{ filename: "a.mix", sizeBytes: 4, format: "A" }]);
+      expect(rave?.mixes).toEqual([expect.objectContaining({ filename: "a.mix", sizeBytes: 4, format: "A" })]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -334,6 +420,133 @@ describe("buildMixLibrary", () => {
 
   it("returns [] when no archive directory exists", () => {
     expect(buildMixLibrary(join(tmpdir(), "build-index-lib-missing-xyz"))).toEqual([]);
+  });
+
+  it("includes _userdata groups after product entries", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-lib-ud-"));
+    try {
+      // One product archive with a mix.
+      mkdirSync(join(root, "Rave", "MIX"), { recursive: true });
+      writeFileSync(join(root, "Rave", "MIX", "a.mix"), Buffer.from([0x07, 0x0a, 0, 0]));
+      // One _userdata subfolder with a mix.
+      mkdirSync(join(root, "_userdata", "mysets"), { recursive: true });
+      writeFileSync(join(root, "_userdata", "mysets", "x.mix"), Buffer.from([0x06, 0x0a, 0, 0]));
+
+      const library = buildMixLibrary(root);
+      const ids = library.map(e => e.id);
+      expect(ids).toContain("Rave");
+      expect(ids).toContain("_userdata/mysets");
+      // Product entries must precede userdata entries.
+      expect(ids.indexOf("Rave")).toBeLessThan(ids.indexOf("_userdata/mysets"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("userdataGroupLabel", () => {
+  it("prefixes with 'User: ' and humanizes segments", () => {
+    expect(userdataGroupLabel(["Dance2"])).toBe("User: Dance 2");
+  });
+
+  it("strips leading underscores from segments", () => {
+    expect(userdataGroupLabel(["_unsorted"])).toBe("User: unsorted");
+  });
+
+  it("applies DMKIT compaction to segments", () => {
+    expect(userdataGroupLabel(["_DMKIT2"])).toBe("User: DMKIT2");
+  });
+
+  it("joins multiple segments with en-dash", () => {
+    expect(userdataGroupLabel(["Dance and House", "Dance3"])).toBe("User: Dance and House \u2013 Dance 3");
+  });
+});
+
+describe("buildUserdataMixLibrary", () => {
+  it("returns [] when _userdata folder does not exist", () => {
+    expect(buildUserdataMixLibrary(join(tmpdir(), "build-index-ud-missing-xyz"))).toEqual([]);
+  });
+
+  it("returns [] when archive has no _userdata subfolder", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-ud-"));
+    try {
+      mkdirSync(join(root, "other"));
+      expect(buildUserdataMixLibrary(root)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers a flat _userdata subfolder with mix files", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-ud-"));
+    try {
+      mkdirSync(join(root, "_userdata", "mysets"), { recursive: true });
+      writeFileSync(join(root, "_userdata", "mysets", "track.mix"), Buffer.from([0x06, 0x0a, 0, 0]));
+
+      const library = buildUserdataMixLibrary(root);
+      expect(library).toHaveLength(1);
+      expect(library[0]!.id).toBe("_userdata/mysets");
+      expect(library[0]!.name).toBe("User: mysets");
+      expect(library[0]!.mixes).toEqual([expect.objectContaining({ filename: "track.mix", format: "A" })]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers nested _userdata subfolders and creates separate groups", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-ud-"));
+    try {
+      mkdirSync(join(root, "_userdata", "genre", "sub1"), { recursive: true });
+      mkdirSync(join(root, "_userdata", "genre", "sub2"), { recursive: true });
+      writeFileSync(join(root, "_userdata", "genre", "sub1", "a.mix"), Buffer.from([0x06, 0x0a, 0, 0]));
+      writeFileSync(join(root, "_userdata", "genre", "sub2", "b.mix"), Buffer.from([0x07, 0x0a, 0, 0]));
+
+      const library = buildUserdataMixLibrary(root);
+      const ids = library.map(e => e.id).sort();
+      expect(ids).toEqual(["_userdata/genre/sub1", "_userdata/genre/sub2"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("skips subdirs that contain no valid mix files", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-ud-"));
+    try {
+      mkdirSync(join(root, "_userdata", "empty"), { recursive: true });
+      writeFileSync(join(root, "_userdata", "empty", "notes.txt"), "not a mix");
+
+      expect(buildUserdataMixLibrary(root)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("skips the _userdata root itself even if it directly contains mix files", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-ud-"));
+    try {
+      mkdirSync(join(root, "_userdata"), { recursive: true });
+      writeFileSync(join(root, "_userdata", "direct.mix"), Buffer.from([0x06, 0x0a, 0, 0]));
+
+      // Root-level files are not a named group — no relParts.
+      expect(buildUserdataMixLibrary(root)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("results are sorted alphabetically by relative path", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-ud-"));
+    try {
+      for (const name of ["zzz", "aaa", "mmm"]) {
+        mkdirSync(join(root, "_userdata", name), { recursive: true });
+        writeFileSync(join(root, "_userdata", name, "x.mix"), Buffer.from([0x06, 0x0a, 0, 0]));
+      }
+
+      const library = buildUserdataMixLibrary(root);
+      expect(library.map(e => e.id)).toEqual(["_userdata/aaa", "_userdata/mmm", "_userdata/zzz"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -412,6 +625,33 @@ describe("buildSampleIndex", () => {
 
       const index = buildSampleIndex(root);
       expect(index.P1.byStem["kick"]).toBe("Drum/kick.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("indexes embedded MIX manifest samples as synthetic catalog entries", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-embedded-"));
+    try {
+      mkdirSync(join(root, "Unsorted", "embedded mix"), { recursive: true });
+      writeFileSync(join(root, "Unsorted", "embedded mix", "Kick01.wav"), "x");
+      writeFileSync(
+        join(root, "Unsorted", "embedded-mix-audio-manifest.json"),
+        JSON.stringify({
+          outDir: root + "\\Unsorted",
+          extractions: [
+            {
+              mixPath: "D:\\archive\\Needles.mix",
+              embeddedPath: "E:\\samples\\Kick01.wav",
+              outputPath: join(root, "Unsorted", "embedded mix", "Kick01.wav"),
+            },
+          ],
+        }),
+      );
+
+      const index = buildSampleIndex(root);
+      expect(index["Embedded MIX"].byStem["kick01"]).toBe("Unsorted/embedded mix/Kick01.wav");
+      expect(index["Embedded MIX"].bySource["e:/samples/kick01.wav"]).toBe("Unsorted/embedded mix/Kick01.wav");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

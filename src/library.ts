@@ -5,8 +5,13 @@ import {
   buildCategoryEntries,
   buildDefaultCategoryConfig,
   CATEGORY_CONFIG_FILENAME,
+  EMBEDDED_MIX_MANIFEST_FILENAME,
+  embeddedMixSamplesFromManifest,
+  mergeSamplesByAudioPath,
   normalizeCategoryConfig,
+  parseEmbeddedMixManifest,
   sampleAudioPath,
+  UNSORTED_CATEGORY_ID,
 } from "./data.js";
 
 function normalizeMetadataPath(value: string): string[] {
@@ -82,12 +87,21 @@ async function parseCategoryConfigResponse(response: Response): Promise<Category
   return config;
 }
 
+async function parseEmbeddedMixSamplesResponse(response: Response): Promise<Sample[]> {
+  if (response.status === 404 || !response.ok) return [];
+
+  const parsed: unknown = await response.json();
+  const manifest = parseEmbeddedMixManifest(parsed);
+  return manifest ? embeddedMixSamplesFromManifest(manifest) : [];
+}
+
 export interface Library {
   loadIndex(): Promise<IndexData>;
-  loadSamples(): Promise<Sample[]>;
+  loadSamples(options?: { force?: boolean }): Promise<Sample[]>;
   loadCategoryConfig?(options?: { force?: boolean }): Promise<CategoryConfig>;
   saveCategoryConfig?(config: CategoryConfig): Promise<void>;
   canWriteCategoryConfig?(): boolean;
+  moveSample?(sample: Sample, newCategory: string, newSubcategory: string | null): Promise<void>;
   resolveAudioUrl(sample: Sample): Promise<string>;
   dispose(): void;
 }
@@ -114,29 +128,42 @@ export class FetchLibrary implements Library {
     return promise;
   }
 
-  async loadSamples(): Promise<Sample[]> {
+  async loadSamples(options?: { force?: boolean }): Promise<Sample[]> {
+    if (options?.force) {
+      this.samplesPromise = null;
+    }
     if (!this.samplesPromise) {
       this.samplesPromise = (async () => {
-        const response = await fetch("output/metadata.json");
-        if (response.status === 404) return [];
-        if (!response.ok) {
-          throw new Error(`Failed to load sample catalog: ${response.status}`);
+        const [catalogResponse, embeddedMixSamples] = await Promise.all([
+          fetch("output/metadata.json"),
+          fetch(`output/${UNSORTED_CATEGORY_ID}/${EMBEDDED_MIX_MANIFEST_FILENAME}`)
+            .then(parseEmbeddedMixSamplesResponse)
+            .catch(() => []),
+        ]);
+
+        let catalogSamples: Sample[] = [];
+        if (catalogResponse.status !== 404) {
+          if (!catalogResponse.ok) {
+            throw new Error(`Failed to load sample catalog: ${catalogResponse.status}`);
+          }
+
+          const parsed: unknown = await catalogResponse.json();
+          if (!isMetadataCatalog(parsed)) {
+            throw new Error("Invalid output/metadata.json");
+          }
+
+          catalogSamples = parsed.samples;
         }
 
-        const parsed: unknown = await response.json();
-        if (!isMetadataCatalog(parsed)) {
-          throw new Error("Invalid output/metadata.json");
-        }
-
-        return parsed.samples;
+        return mergeSamplesByAudioPath(catalogSamples, embeddedMixSamples);
       })();
     }
 
     return this.samplesPromise;
   }
 
-  async loadCategoryConfig(options: { force?: boolean } = {}): Promise<CategoryConfig> {
-    const force = options.force ?? false;
+  async loadCategoryConfig(options?: { force?: boolean }): Promise<CategoryConfig> {
+    const force = options?.force ?? false;
     if (force || !this.categoryConfigPromise) {
       this.categoryConfigPromise = (async () => {
         const response = await fetch(`output/${CATEGORY_CONFIG_FILENAME}`, {
@@ -169,6 +196,27 @@ export class FetchLibrary implements Library {
 
   canWriteCategoryConfig(): boolean {
     return import.meta.env.DEV;
+  }
+
+  async moveSample(sample: Sample, newCategory: string, newSubcategory: string | null): Promise<void> {
+    /* istanbul ignore next -- PROD move is in-memory only; DEV server path is tested via Playwright */
+    if (!import.meta.env.DEV) return;
+    const response = await fetch("/__sample-move", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: sample.filename,
+        oldCategory: sample.category ?? "",
+        oldSubcategory: sample.subcategory ?? null,
+        newCategory,
+        newSubcategory: newSubcategory ?? null,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to move sample: ${response.status}`);
+    }
+    // Invalidate samples cache so next load reflects the server-side change
+    this.samplesPromise = null;
   }
 
   resolveAudioUrl(sample: Sample): Promise<string> {
@@ -211,7 +259,10 @@ export class FsLibrary implements Library {
     return this.indexPromise;
   }
 
-  async loadSamples(): Promise<Sample[]> {
+  async loadSamples(options?: { force?: boolean }): Promise<Sample[]> {
+    if (options?.force) {
+      this.samplesPromise = null;
+    }
     if (!this.samplesPromise) {
       this.samplesPromise = this.loadSamplesUncached();
     }
@@ -219,8 +270,8 @@ export class FsLibrary implements Library {
     return this.samplesPromise;
   }
 
-  async loadCategoryConfig(options: { force?: boolean } = {}): Promise<CategoryConfig> {
-    const force = options.force ?? false;
+  async loadCategoryConfig(options?: { force?: boolean }): Promise<CategoryConfig> {
+    const force = options?.force ?? false;
     if (force || !this.categoryConfigPromise) {
       this.categoryConfigPromise = this.loadCategoryConfigUncached();
     }
@@ -229,24 +280,41 @@ export class FsLibrary implements Library {
   }
 
   private async loadSamplesUncached(): Promise<Sample[]> {
+    let samples: Sample[] = [];
     try {
       const metaHandle = await this.root.getFileHandle("metadata.json");
       const file = await metaHandle.getFile();
       const text = await file.text();
       const parsed: unknown = JSON.parse(text);
       if (isMetadataCatalog(parsed)) {
-        return parsed.samples;
+        samples = parsed.samples;
       }
     } catch {
       // Fall back to scanning the normalized category tree.
     }
 
-    const samples: Sample[] = [];
-    for await (const [name, handle] of this.root.entries()) {
-      if (handle.kind !== "directory") continue;
-      await collectCategorySamples(handle as FileSystemDirectoryHandle, name, [], samples);
+    if (samples.length === 0) {
+      for await (const [name, handle] of this.root.entries()) {
+        if (handle.kind !== "directory") continue;
+        await collectCategorySamples(handle as FileSystemDirectoryHandle, name, [], samples);
+      }
     }
-    return samples;
+
+    return mergeSamplesByAudioPath(samples, await this.loadEmbeddedMixSamplesUncached());
+  }
+
+  private async loadEmbeddedMixSamplesUncached(): Promise<Sample[]> {
+    try {
+      const unsortedDir = await this.root.getDirectoryHandle(UNSORTED_CATEGORY_ID);
+      const manifestHandle = await unsortedDir.getFileHandle(EMBEDDED_MIX_MANIFEST_FILENAME);
+      const file = await manifestHandle.getFile();
+      const text = await file.text();
+      const parsed: unknown = JSON.parse(text);
+      const manifest = parseEmbeddedMixManifest(parsed);
+      return manifest ? embeddedMixSamplesFromManifest(manifest) : [];
+    } catch {
+      return [];
+    }
   }
 
   private async loadCategoryConfigUncached(): Promise<CategoryConfig> {

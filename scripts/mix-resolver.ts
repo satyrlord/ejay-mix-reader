@@ -109,10 +109,13 @@ export const PRODUCT_ALIASES: Record<string, string> = {
   Dance_eJay_10: "Dance_eJay1",
   Dance_eJay_20: "Dance_eJay2",
   Dance_eJay_30: "Dance_eJay3",
+  Dance_eJay_3:  "Dance_eJay3",   // "Dance eJay 3" catalog (no .0 suffix)
   Dance_eJay_40: "Dance_eJay4",
   Dance_eJay_SuperPack: "Dance_SuperPack",
   Techno_eJay_30: "Techno_eJay3",
   Techno_eJay_40: "Techno_eJay",
+  // "Techno eJay " catalog name has a trailing space → label ends with _
+  "Techno_eJay_": "Techno_eJay",
   HipHop_eJay_20: "HipHop_eJay2",
   HipHop_eJay_30: "HipHop_eJay3",
   HipHop_eJay_40: "HipHop_eJay4",
@@ -120,6 +123,10 @@ export const PRODUCT_ALIASES: Record<string, string> = {
   Xtreme_eJay_10: "Xtreme_eJay",
   Rave_eJay_101: "Rave",
   Rave_eJay: "Rave",
+  // Outlier .mix files whose first catalog entry names a sample (e.g.
+  // "EUROKICK5") rather than the product. Map them to the owning edition.
+  eurokick5: "Techno_eJay",
+  EUROKICK5: "Techno_eJay",
 };
 
 /** Return the canonical product id for a parser-emitted label. */
@@ -133,9 +140,19 @@ export function canonicalizeProduct(label: string): string {
  */
 export const PRODUCT_FALLBACKS: Record<string, string[]> = {
   Dance_eJay1: ["Dance_SuperPack", "SampleKit_DMKIT1", "SampleKit_DMKIT2"],
+  Dance_eJay4: ["Dance_eJay3"],
   Dance_SuperPack: ["Dance_eJay1", "SampleKit_DMKIT1", "SampleKit_DMKIT2"],
+  GenerationPack1_Dance: [
+    "Dance_SuperPack",
+    "Dance_eJay1",
+    "SampleKit_DMKIT1",
+    "SampleKit_DMKIT2",
+  ],
+  GenerationPack1_Rave: ["Rave"],
   GenerationPack1_HipHop: ["HipHop_eJay2", "HipHop_eJay3"],
   HipHop_eJay1: ["GenerationPack1_HipHop", "HipHop_eJay2", "HipHop_eJay3"],
+  HipHop_eJay3: ["Dance_eJay3"],
+  Techno_eJay3: ["Dance_eJay3"],
 };
 
 /** Map MixIR catalog names to canonical product ids used as fallbacks. */
@@ -264,12 +281,20 @@ export function loadGen1Catalogs(archiveRoot: string): Map<string, Gen1Catalog> 
         paths.pxdtxtPath && existsSync(paths.pxdtxtPath)
           ? readFileSync(paths.pxdtxtPath, "utf8")
           : undefined;
+      const kitCatalogs = paths.kitCatalogPaths
+        .filter(({ path }) => existsSync(path))
+        .map(({ path, offset, pathPrefix }) => ({
+          text: readFileSync(path, "utf8"),
+          offset,
+          pathPrefix,
+        }));
       out.set(
         product,
         buildGen1Catalog({
           maxText,
           pxddanceText,
           pxdtxtText,
+          kitCatalogs,
           product,
           maxPath: paths.maxPath,
           pxddancePath: paths.pxddancePath,
@@ -361,6 +386,40 @@ function lookupInProduct(
   return null;
 }
 
+/**
+ * Last-resort cross-product gen1 lookup. Walks every gen1 catalog in `order`
+ * and, for each one, derives the catalog path/file for `ref.rawId`, then
+ * searches *every* product index in `index.products` for a matching
+ * `bySource` or `byStem` entry. This handles the common case where a
+ * SuperPack/GenerationPack catalog points at a `dmkit1/.../X.PXD` whose
+ * actual WAV lives under a sibling product (`SampleKit_DMKIT1`, etc.).
+ */
+function crossProductGen1Lookup(
+  ref: SampleRef,
+  order: string[],
+  index: ResolverIndex,
+): NormalizedSample | null {
+  if (ref.rawId <= 0) return null;
+  for (const productId of order) {
+    const gen1 = index.gen1.get(productId);
+    if (!gen1 || ref.rawId >= gen1.entries.length) continue;
+    const entry = gen1.entries[ref.rawId];
+    if (!entry?.path) continue;
+    const stem = entry.file?.toLowerCase() ?? null;
+    for (const targetProductId of order) {
+      const idx = index.products.get(targetProductId);
+      if (!idx) continue;
+      const byPath = idx.bySource.get(entry.path);
+      if (byPath) return byPath;
+      if (stem) {
+        const byStem = idx.byStem.get(stem);
+        if (byStem) return byStem;
+      }
+    }
+  }
+  return null;
+}
+
 function buildLookupOrder(mix: MixIR): string[] {
   const primary = canonicalizeProduct(mix.product);
   const order = [primary];
@@ -404,6 +463,21 @@ export function resolveMix(mix: MixIR, index: ResolverIndex): ResolutionReport {
         };
       }
     }
+
+    // Cross-product gen1 fallback: catalog hit in one product, sample data
+    // extracted under another (e.g. SuperPack catalog → SampleKit_DMKIT1 WAVs).
+    const xMatch = crossProductGen1Lookup(track.sampleRef, order, index);
+    if (xMatch) {
+      resolved += 1;
+      return {
+        ...track,
+        sampleRef: {
+          ...track.sampleRef,
+          resolvedPath: sampleRelativePath(xMatch),
+        },
+      };
+    }
+
     unresolved += 1;
     warnings.push(describeUnresolved(track.sampleRef, order));
     return track;

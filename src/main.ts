@@ -1,22 +1,28 @@
 import "./app.css";
 
 import type { CategoryConfig, CategoryEntry, Sample, SubcategoryKind } from "./data.js";
+import { initMixFileBrowser } from "./mix-file-browser.js";
+import { createSampleGridContextMenuController } from "./sample-grid-context-menu.js";
 import {
   addSubcategoryToCategoryConfig,
   buildCategoryEntries,
   buildDefaultCategoryConfig,
   categoryConfigsEqual,
   CATEGORY_CONFIG_UPDATED_EVENT,
+  SAMPLE_METADATA_UPDATED_EVENT,
+  DEFAULT_GRID_SORT_DIR,
+  DEFAULT_GRID_SORT_KEY,
   filterSamples,
+  filterSamplesBySearchQuery,
   getSubcategoryKind,
   normalizeCategoryLabel,
   removeSubcategoryFromCategoryConfig,
   sampleCategory,
-  sampleMatchesSearchQuery,
-  sortSamplesForGrid,
+  sortSamplesByKey,
   UNSORTED_CATEGORY_ID,
   UNSORTED_SUBCATEGORY_ID,
 } from "./data.js";
+import type { GridSortDir, GridSortKey } from "./data.js";
 import type { Library } from "./library.js";
 import { FetchLibrary, pickLibraryFolder } from "./library.js";
 import { calcProgressInterval, Player } from "./player.js";
@@ -53,11 +59,13 @@ interface AppState {
   samples: Sample[];
   tabs: CategoryTab[];
   activeTab: CategoryTab | null;
-  bpm: number;
+  bpm: number | null;
   sampleBubbleZoomScale: number;
   isAddingSubcategory: boolean;
   subcategoryDraft: string;
   searchQuery: string;
+  gridSortKey: GridSortKey;
+  gridSortDir: GridSortDir;
 }
 
 const state: AppState = {
@@ -68,11 +76,13 @@ const state: AppState = {
   samples: [],
   tabs: [],
   activeTab: null,
-  bpm: 140,
+  bpm: null,
   sampleBubbleZoomScale: 1,
   isAddingSubcategory: false,
   subcategoryDraft: "",
   searchQuery: "",
+  gridSortKey: DEFAULT_GRID_SORT_KEY,
+  gridSortDir: DEFAULT_GRID_SORT_DIR,
 };
 
 const SAMPLE_BUBBLE_ZOOM_CSS_VAR = "--sample-bubble-zoom-scale";
@@ -83,10 +93,12 @@ const SAMPLE_BUBBLE_ZOOM_MAX = 2;
 const player = new Player();
 let slots: SpaShellSlots | null = null;
 let progressUpdateIntervalId: number | null = null;
-let stopCategoryConfigWatch: (() => void) | null = null;
+const noop = (): void => {};
+let stopCategoryConfigWatch: () => void = noop;
 let categoryConfigRefreshInFlight = false;
 const subcategoryOperationsInFlight = new Set<SubcategoryOperation>();
-let cleanupSubcategoryContextMenu: (() => void) | null = null;
+let cleanupSubcategoryContextMenu: () => void = noop;
+let currentGridSamples: Sample[] = [];
 
 const SUBCATEGORY_CONTEXT_MENU_ID = "subcategory-context-menu";
 
@@ -94,6 +106,23 @@ const appElement = document.getElementById("app");
 /* istanbul ignore next -- index.html always provides #app */
 if (!appElement) throw new Error("Missing #app element");
 const app = appElement;
+
+const sampleGridContextMenu = createSampleGridContextMenuController({
+  getCategories: () => state.categories,
+  getCurrentGridSamples: () => currentGridSamples,
+  getSortState: () => ({ key: state.gridSortKey, dir: state.gridSortDir }),
+  setSortState: (key, dir) => {
+    state.gridSortKey = key;
+    state.gridSortDir = dir;
+  },
+  refreshSamples,
+  onMoveSample: (sample, newCategory, newSubcategory) => {
+    void handleMoveSample(sample, newCategory, newSubcategory);
+  },
+  closeOtherMenus: () => {
+    closeSubcategoryContextMenu();
+  },
+});
 
 function clearProgressUpdateInterval(): void {
   if (progressUpdateIntervalId === null) return;
@@ -115,8 +144,8 @@ function adjustSampleBubbleZoom(delta: number): void {
 }
 
 function clearCategoryConfigWatcher(): void {
-  stopCategoryConfigWatch?.();
-  stopCategoryConfigWatch = null;
+  stopCategoryConfigWatch();
+  stopCategoryConfigWatch = noop;
 }
 
 function isSubcategoryOperationInFlight(operation: SubcategoryOperation): boolean {
@@ -158,6 +187,7 @@ function showHome(): void {
 }
 /* istanbul ignore next -- the OS folder picker path is not exercised by the dev-server coverage harness */
 async function handlePickFolder(): Promise<void> {
+  /* v8 ignore start -- production-only folder picking is not exercised by the dev-server coverage harness */
   try {
     const lib = await pickLibraryFolder();
     await startBrowser(lib);
@@ -165,6 +195,7 @@ async function handlePickFolder(): Promise<void> {
     if (error instanceof DOMException && error.name === "AbortError") return;
     throw error;
   }
+  /* v8 ignore stop */
 }
 
 async function startWithFetchLibrary(): Promise<void> {
@@ -174,17 +205,18 @@ async function startWithFetchLibrary(): Promise<void> {
 async function startBrowser(library: Library): Promise<void> {
   clearCategoryConfigWatcher();
   closeSubcategoryContextMenu();
+  closeSampleContextMenu();
   resetSubcategoryAddState();
   state.library = library;
   slots = renderSpaShell(app);
   const currentSlots = slots;
 
   currentSlots.transport.querySelector("#transport-stop")?.addEventListener("click", () => player.stop());
-  currentSlots.bpm.value = String(state.bpm);
+  currentSlots.bpm.value = state.bpm === null ? "" : String(state.bpm);
   applySampleBubbleZoom();
 
   currentSlots.bpm.addEventListener("change", () => {
-    state.bpm = Number(currentSlots.bpm.value);
+    state.bpm = currentSlots.bpm.value === "" ? null : Number(currentSlots.bpm.value);
     if (state.activeCategory) {
       state.tabs = buildTabsForCategory(state.activeCategory);
       const still = state.tabs.find((tab) => tab.id === state.activeTab?.id);
@@ -192,6 +224,10 @@ async function startBrowser(library: Library): Promise<void> {
       refreshTabs();
     }
     refreshSamples();
+  });
+
+  currentSlots.grid.addEventListener("contextmenu", (event) => {
+    sampleGridContextMenu.handleContextMenu(event);
   });
 
   currentSlots.zoomOut.addEventListener("click", () => {
@@ -232,7 +268,13 @@ async function startBrowser(library: Library): Promise<void> {
     }) ?? Promise.resolve(buildDefaultCategoryConfig()),
   ]);
 
-  void index;
+  initMixFileBrowser(currentSlots.archiveTree, {
+    isDev,
+    mixLibrary: isDev ? index.mixLibrary : undefined,
+    onSelectFile: (_ref) => {
+      // TODO: load and parse the selected .mix file (Milestone 3)
+    },
+  });
   state.samples = samples;
   applyCategoryConfig(categoryConfig);
   startCategoryConfigWatching();
@@ -241,6 +283,7 @@ async function startBrowser(library: Library): Promise<void> {
 function selectCategory(category: CategoryEntry): void {
   player.stop();
   closeSubcategoryContextMenu();
+  closeSampleContextMenu();
   resetSubcategoryAddState();
   state.activeCategory = category;
   state.activeTab = null;
@@ -308,10 +351,13 @@ function refreshSamples(): void {
       .filter((value): value is string => typeof value === "string" && value.length > 0),
   };
 
-  let filtered = sortSamplesForGrid(filterSamples(state.samples, filters));
-  if (state.searchQuery.trim()) {
-    filtered = filtered.filter((sample) => sampleMatchesSearchQuery(sample, state.searchQuery));
-  }
+  let filtered = sortSamplesByKey(
+    filterSamples(state.samples, filters),
+    state.gridSortKey,
+    state.gridSortDir,
+  );
+  filtered = filterSamplesBySearchQuery(filtered, state.searchQuery);
+  currentGridSamples = filtered;
   renderSampleGrid(currentSlots.grid, filtered, player, currentLibrary);
   updatePlayingBlock(player.activePath);
 }
@@ -330,6 +376,7 @@ window.addEventListener("beforeunload", () => {
   clearCategoryConfigWatcher();
   clearProgressUpdateInterval();
   closeSubcategoryContextMenu();
+  closeSampleContextMenu();
   player.destroy();
   /* istanbul ignore next -- browser coverage boots the library before unload */
   state.library?.dispose();
@@ -394,11 +441,19 @@ function startCategoryConfigWatching(): void {
     void refreshCategoryConfig(true);
   };
 
+  const handleSampleMetadataUpdated = (): void => {
+    void refreshSampleMetadata();
+  };
+
   window.addEventListener(CATEGORY_CONFIG_UPDATED_EVENT, handleCategoryConfigUpdated as EventListener);
   hot?.on(CATEGORY_CONFIG_UPDATED_EVENT, handleCategoryConfigUpdated);
+  window.addEventListener(SAMPLE_METADATA_UPDATED_EVENT, handleSampleMetadataUpdated as EventListener);
+  hot?.on(SAMPLE_METADATA_UPDATED_EVENT, handleSampleMetadataUpdated);
   stopCategoryConfigWatch = () => {
     window.removeEventListener(CATEGORY_CONFIG_UPDATED_EVENT, handleCategoryConfigUpdated as EventListener);
     hot?.off(CATEGORY_CONFIG_UPDATED_EVENT, handleCategoryConfigUpdated);
+    window.removeEventListener(SAMPLE_METADATA_UPDATED_EVENT, handleSampleMetadataUpdated as EventListener);
+    hot?.off(SAMPLE_METADATA_UPDATED_EVENT, handleSampleMetadataUpdated);
   };
 }
 
@@ -422,6 +477,18 @@ async function refreshCategoryConfig(force: boolean): Promise<void> {
   }
 }
 
+async function refreshSampleMetadata(): Promise<void> {
+  const library = state.library;
+  if (!library) return;
+  try {
+    const samples = await library.loadSamples({ force: true });
+    state.samples = samples;
+    applyCategoryConfig(state.categoryConfig);
+  } catch (error) {
+    console.warn("Failed to refresh sample metadata.", error);
+  }
+}
+
 function resetSubcategoryAddState(): void {
   state.isAddingSubcategory = false;
   state.subcategoryDraft = "";
@@ -429,8 +496,34 @@ function resetSubcategoryAddState(): void {
 
 function closeSubcategoryContextMenu(): void {
   document.getElementById(SUBCATEGORY_CONTEXT_MENU_ID)?.remove();
-  cleanupSubcategoryContextMenu?.();
-  cleanupSubcategoryContextMenu = null;
+  const cleanup = cleanupSubcategoryContextMenu;
+  cleanupSubcategoryContextMenu = noop;
+  cleanup();
+}
+
+function closeSampleContextMenu(): void {
+  sampleGridContextMenu.close();
+}
+
+async function handleMoveSample(
+  sample: Sample,
+  newCategory: string,
+  newSubcategory: string | null,
+): Promise<void> {
+  closeSampleContextMenu();
+
+  try {
+    if (state.library?.moveSample) {
+      await state.library.moveSample(sample, newCategory, newSubcategory);
+    }
+    // In-memory patch (always — PROD changes are transient, DEV changes are persisted above)
+    sample.category = newCategory;
+    sample.subcategory = newSubcategory ?? undefined;
+    applyCategoryConfig(state.categoryConfig);
+  } catch (error) {
+    console.error("Failed to move sample:", error);
+    showErrorToast("Could not move sample — check the console for details.");
+  }
 }
 
 function findTabById(tabId: string | null | undefined): CategoryTab | null {

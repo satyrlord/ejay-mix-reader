@@ -40,6 +40,16 @@ Rave eJay respectively.
 `0x00 0x00`, verified). Skip any `.mix` file smaller than 4 bytes during
 parsing.
 
+**Note**: any `.mix` file whose size exceeds ~100 KB most likely contains one
+or more custom audio samples embedded directly in the file (a feature of the
+eJay HyperKit / recording workflow). None of the 231 shipped library mixes
+reaches that threshold — the largest is 23,721 bytes. Files above 100 KB
+should be parsed normally (the format header is unaffected), but the caller
+should expect unresolvable sample references until the embedded PCM data is
+recovered. Use `npm run mix:extract-embedded` to extract those in-band WAVs
+into `output/Unsorted/embedded mix` and write the provenance manifest consumed
+by `scripts/build-index.ts`.
+
 ---
 
 ## Format Families
@@ -538,6 +548,15 @@ original eJay application's runtime — it decompressed PXD samples to temp WAV
 files during session load. The alphabetical suffix (`d`, `e`, `f`, ...) indicates
 the loading order, not a persistent identifier.
 
+> **Timeline rendering limitation**: The temp-path records carry no beat or
+> channel index. The parser emits `beat: null` and `channel: null` for every
+> Format C `TrackPlacement`. Timeline position is irretrievably lost for these
+> files — only the sample list is recoverable. Format C mixes cannot be
+> rendered on a sequencer grid without further reverse-engineering of the
+> on-disk format to locate beat/channel fields. Until that work is done, the
+> player must degrade gracefully (e.g. flat sample list, or all tracks at
+> beat 0).
+
 ---
 
 ### Format D — Gen 3 Late (Full Mixer + Drum Machine)
@@ -636,6 +655,13 @@ includes drum machine per-pad state:
 
 This means each mix file snapshot captures the complete drum machine kit
 configuration, not just the timeline placement.
+
+> **Timeline rendering limitation**: Format D has the same null beat/channel
+> problem as Format C. The parser intentionally emits `beat: null` and
+> `channel: null` for every `TrackPlacement` (see the comment in
+> `parseFormatDTracks`: *"Update if a future analysis recovers them"*).
+> Format D mixes (HipHop eJay 4, House eJay) cannot be rendered on a
+> sequencer grid until beat/channel fields are located in the binary.
 
 ---
 
@@ -945,6 +971,8 @@ or loading alive, and surface the gap in diagnostics rather than failing hard.
 | Ticker text (Format B) has no audio equivalent | **Low** | Preserve in MixIR for display purposes. Render as subtitle overlay in the UI. |
 | SuperPack Gen 1+ files may have extended grid | ~~**Low**~~ **Resolved** | SuperPack `dream.mix` (11,413 B), `Mcxtreme.mix` (11,277 B) and peers carry a structured trailer, not an extended grid. The grid ends at the first ≥ 32-byte zero run; everything after is trailer metadata (product signature, `"DanceMachine Sample-Kit Vol. N"`, etc.). See the Format A [Trailer Block](#trailer-block) section. |
 | Empty .mix file in Dance 4 | **None** | Skip 2-byte files during parsing. |
+| Oversized .mix file (> 100 KB) contains embedded audio | **Low** | No shipped library mix exceeds 23,721 bytes. Files above ~100 KB are assumed to carry in-band PCM data from the eJay HyperKit recording workflow. Parse the header and text sections normally, then run `npm run mix:extract-embedded` to recover the WAV payloads into `output/Unsorted/embedded mix`; unresolved references should degrade gracefully rather than failing. |
+| Format C/D `beat`/`channel` are always `null` — timeline rendering blocked | **High (Milestone 3 blocker)** | Temp-path records carry no positional data; beat/channel fields have not been located in the binary. Affects Dance 3/4, HipHop 3/4, Techno 3, Xtreme, House (9 of 14 products). Mitigation: render as a flat sample list or play all tracks at beat 0 until the format is further reverse-engineered. |
 
 ---
 

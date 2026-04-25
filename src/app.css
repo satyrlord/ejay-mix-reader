@@ -262,6 +262,222 @@ body {
   font-size: 0.98rem;
 }
 
+/* Clickable state: the whole tree-content area acts as a button */
+.archive-tree-content.is-awaiting-click {
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.archive-tree-content.is-awaiting-click:hover {
+  background: rgba(61, 255, 137, 0.04);
+}
+
+/* Folder-info chip shown in the archive header after a root is picked */
+.archive-folder-info {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(242, 241, 236, 0.45);
+  padding-left: 0.45rem;
+}
+
+/* "Choose different folder" icon button in the archive header */
+.archive-choose-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0.25rem;
+  background: transparent;
+  color: rgba(242, 241, 236, 0.45);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.archive-choose-btn:hover,
+.archive-choose-btn:focus-visible {
+  color: rgba(242, 241, 236, 0.9);
+  border-color: rgba(61, 255, 137, 0.5);
+  outline: none;
+}
+
+/* ── Mix file browser tree ─────────────────────────────── */
+
+.mix-tree-root {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.mix-tree-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.mix-tree-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.26rem 0.3rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: rgba(242, 241, 236, 0.65);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.03em;
+  font-size: 0.9rem;
+  font-weight: 700;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.mix-tree-group-header:hover,
+.mix-tree-group-header:focus-visible {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(242, 241, 236, 0.88);
+  outline: none;
+}
+
+.mix-tree-group-label {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mix-tree-count {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(242, 241, 236, 0.4);
+  font-variant-caps: normal;
+  letter-spacing: 0;
+}
+
+.mix-tree-items {
+  display: flex;
+  flex-direction: column;
+  padding-left: 1.2rem;
+}
+
+.mix-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.2rem 0.3rem;
+  border: none;
+  border-radius: 0.22rem;
+  background: transparent;
+  color: rgba(242, 241, 236, 0.52);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.03em;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.mix-tree-item:hover,
+.mix-tree-item:focus-visible {
+  background: rgba(61, 255, 137, 0.07);
+  color: rgba(242, 241, 236, 0.9);
+  outline: none;
+}
+
+.mix-tree-item.is-active {
+  background: rgba(61, 255, 137, 0.12);
+  color: var(--color-primary);
+}
+
+.mix-tree-item-label {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mix-tree-icon {
+  width: 0.88rem;
+  height: 0.88rem;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+/* ── Mix metadata popup ─────────────────────────────────── */
+
+.mix-meta-popup {
+  position: fixed;
+  z-index: 200;
+  min-width: 13rem;
+  max-width: 22rem;
+  background: rgba(11, 13, 18, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.45rem;
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(61, 255, 137, 0.1);
+  padding: 0.6rem 0.75rem;
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  animation: mix-popup-in 120ms ease forwards;
+}
+
+@keyframes mix-popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.mix-meta-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.78rem;
+  font-family: var(--font-sans);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.03em;
+}
+
+.mix-meta-table th {
+  text-align: left;
+  font-weight: 700;
+  color: rgba(242, 241, 236, 0.42);
+  padding: 0.15rem 0.55rem 0.15rem 0;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.mix-meta-table td {
+  color: rgba(242, 241, 236, 0.9);
+  font-weight: 500;
+  padding: 0.15rem 0;
+  word-break: break-word;
+}
+
 /* ── Sequencer area ────────────────────────────────────── */
 
 .sequencer-area {
@@ -697,6 +913,114 @@ body {
   outline: none;
 }
 
+/* ── Generic cascading context menu ──────────────────────── */
+
+.ctx-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 10rem;
+  padding: 0.18rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.35rem;
+  background: rgba(11, 13, 18, 0.98);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
+  user-select: none;
+}
+
+.ctx-menu-header {
+  padding: 0.28rem 0.6rem 0.22rem;
+  color: rgba(242, 241, 236, 0.42);
+  font: 600 0.76rem var(--font-sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 0.18rem;
+  pointer-events: none;
+}
+
+.ctx-menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 1.9rem;
+  border: 0;
+  border-radius: 0.24rem;
+  background: transparent;
+  color: rgba(242, 241, 236, 0.9);
+  font: 700 0.9rem var(--font-sans);
+  font-variant-caps: all-small-caps;
+  text-align: left;
+  padding: 0.34rem 0.6rem;
+  cursor: pointer;
+  outline: none;
+}
+
+.ctx-menu-item:hover,
+.ctx-menu-item:focus-visible {
+  background: rgba(45, 255, 139, 0.14);
+  color: var(--color-primary);
+  outline: none;
+}
+
+.ctx-menu-item.is-active {
+  color: var(--color-primary);
+}
+
+.ctx-menu-item.is-current {
+  color: rgba(45, 255, 139, 0.55);
+  cursor: default;
+  pointer-events: none;
+}
+
+.ctx-menu-item.is-current-category > span:first-child {
+  opacity: 0.55;
+}
+
+.ctx-menu-arrow,
+.ctx-menu-sort-dir {
+  margin-left: 0.6rem;
+  flex: 0 0 auto;
+  font-style: normal;
+  font-variant-caps: normal;
+  opacity: 0.55;
+  font-size: 0.85em;
+}
+
+.ctx-menu-item.is-active .ctx-menu-sort-dir {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+/* Submenu container — hidden by default, shown on parent hover */
+.ctx-submenu {
+  display: none;
+  position: absolute;
+  top: -0.18rem;
+  left: calc(100% + 2px);
+  min-width: 9rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0.18rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.35rem;
+  background: rgba(11, 13, 18, 0.98);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
+  z-index: 71;
+}
+
+/* Flip submenus to the left when the main menu is near the right edge */
+.ctx-menu--flip .ctx-submenu {
+  left: auto;
+  right: calc(100% + 2px);
+}
+
+.ctx-menu-item.has-submenu:hover > .ctx-submenu,
+.ctx-menu-item.has-submenu.is-open > .ctx-submenu {
+  display: block;
+}
+
 .spa-bpm {
   display: flex;
   align-items: center;
@@ -800,8 +1124,8 @@ body {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 0.75rem;
-  min-height: 3.5rem;
-  padding: 0.8rem 1rem;
+  min-height: 2rem;
+  padding: 0.3rem 1rem;
   background: #191a22;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }

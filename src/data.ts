@@ -43,6 +43,16 @@ export const CATEGORY_CONFIG_FILENAME = "categories.json";
 export const CATEGORY_CONFIG_UPDATED_EVENT = "category-config-updated";
 export const UNSORTED_CATEGORY_ID = "Unsorted";
 export const UNSORTED_SUBCATEGORY_ID = "unsorted";
+export const EMBEDDED_MIX_MANIFEST_FILENAME = "embedded-mix-audio-manifest.json";
+export const EMBEDDED_MIX_PRODUCT = "Embedded MIX";
+export const EMBEDDED_MIX_SUBCATEGORY_ID = "embedded mix";
+/**
+ * Canonical BPM used to estimate beat-count from duration when no BPM
+ * is stored in the embedded-mix manifest. 140 BPM matches the dominant
+ * Dance eJay product tempo and produces clean beat snapping for most
+ * embedded samples (3.43 s → 8 b, 6.86 s → 16 b, 13.71 s → 32 b).
+ */
+export const EMBEDDED_MIX_DEFAULT_BPM = 140;
 
 export interface CategoryConfigEntry {
   id: string;
@@ -71,10 +81,38 @@ export type SubcategoryKind = "special" | "system" | "user";
 
 export type MixFormat = "A" | "B" | "C" | "D";
 
+/**
+ * Lightweight metadata extracted from a parsed `.mix` file.
+ * Fields are optional — Format A files carry only `bpm` and `trackCount`;
+ * Format B/C/D files additionally carry `title`, `author`, `catalogs`, etc.
+ */
+export interface MixFileMeta {
+  format?: MixFormat;
+  bpm: number;
+  bpmAdjusted?: number | null;
+  title?: string | null;
+  author?: string | null;
+  trackCount: number;
+  catalogs: string[];
+  tickerText?: string[];
+}
+
+/** Human-readable generation label for a MIX format letter. */
+export function mixFormatLabel(format: MixFormat): string {
+  switch (format) {
+    case "A": return "Generation 1";
+    case "B": return "Generation 2";
+    case "C": return "Generation 3";
+    case "D": return "Generation 3b";
+  }
+}
+
 export interface MixFileEntry {
   filename: string;
   sizeBytes: number;
   format: MixFormat;
+  /** Parsed metadata enriched by `build-index.ts` / `extract-mix-metadata.ts`. */
+  meta?: MixFileMeta;
 }
 
 export interface CategoryEntry {
@@ -121,6 +159,10 @@ export interface Sample {
   sample_rate?: number;
   bit_depth?: number;
   channels?: number;
+  source_mix?: string;
+  source_mixes?: string[];
+  embedded_paths?: string[];
+  dedupe_count?: number;
   [key: string]: unknown;
 }
 
@@ -129,6 +171,45 @@ export interface MetadataCatalog {
   total_samples?: number;
   per_category?: Record<string, number>;
   samples: Sample[];
+}
+
+export interface EmbeddedMixManifestExtraction {
+  mixPath: string;
+  mixFormat?: MixFormat | null;
+  embeddedPath: string;
+  outputPath: string;
+  sampleRate?: number;
+  channels?: number;
+  bitDepth?: number;
+  dataSize?: number;
+  duration?: number;
+  dedupeGroup?: string;
+  dedupeGroupSize?: number;
+  dedupeKept?: boolean;
+}
+
+export interface EmbeddedMixManifest {
+  generatedAt?: string;
+  archiveDir?: string;
+  outDir: string;
+  thresholdBytes?: number;
+  totals?: {
+    mixes?: number;
+    embeddedWavs?: number;
+    bytes?: number;
+    uniqueOutputs?: number;
+    duplicateGroups?: number;
+    redundantExtractions?: number;
+    uniqueBytes?: number;
+  };
+  mixes?: Array<{
+    mixPath: string;
+    mixFormat?: MixFormat | null;
+    fileSize?: number;
+    embeddedCount?: number;
+    totalEmbeddedBytes?: number;
+  }>;
+  extractions: EmbeddedMixManifestExtraction[];
 }
 
 export interface SampleFilterOptions {
@@ -149,6 +230,22 @@ function normalizeText(value: string | null | undefined): string {
 
 function normalizeLower(value: string | null | undefined): string {
   return normalizeText(value).toLowerCase();
+}
+
+function uniqueNonEmptyValues(values: readonly string[]): string[] {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawValue of values) {
+    const value = normalizeText(rawValue);
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(value);
+  }
+
+  return unique;
 }
 
 export function normalizeCategoryLabel(value: string): string {
@@ -400,6 +497,172 @@ export function sampleDisplayKey(sample: Pick<Sample, "alias" | "filename">): st
   return sampleDisplayName(sample).trim().toLowerCase();
 }
 
+function normalizeManifestFsPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+}
+
+function manifestRelativeOutputPath(outDir: string, outputPath: string): string | null {
+  const normalizedOutDir = normalizeManifestFsPath(outDir);
+  const normalizedOutputPath = normalizeManifestFsPath(outputPath);
+  if (!normalizedOutDir || !normalizedOutputPath) return null;
+
+  const prefix = `${normalizedOutDir.toLowerCase()}/`;
+  const candidate = normalizedOutputPath.toLowerCase();
+  if (!candidate.startsWith(prefix)) return null;
+
+  return normalizedOutputPath.slice(prefix.length);
+}
+
+function samplePathKey(sample: Pick<Sample, "filename" | "category" | "subcategory">): string {
+  const category = sampleCategory(sample).toLowerCase();
+  const subcategory = (sampleSubcategory(sample) ?? "").toLowerCase();
+  const filename = normalizeText(sample.filename).replace(/\\/g, "/").toLowerCase();
+  return `${category}/${subcategory}/${filename}`;
+}
+
+function leafName(value: string): string {
+  return value.replace(/^.*[\\/]/, "");
+}
+
+function stripWavExtension(value: string): string {
+  return value.replace(/\.wav$/i, "");
+}
+
+function compareEmbeddedMixExtraction(
+  left: EmbeddedMixManifestExtraction,
+  right: EmbeddedMixManifestExtraction,
+): number {
+  return normalizeManifestFsPath(left.mixPath).localeCompare(normalizeManifestFsPath(right.mixPath), undefined, {
+    sensitivity: "base",
+  }) || normalizeManifestFsPath(left.embeddedPath).localeCompare(normalizeManifestFsPath(right.embeddedPath), undefined, {
+    sensitivity: "base",
+  }) || normalizeManifestFsPath(left.outputPath).localeCompare(normalizeManifestFsPath(right.outputPath), undefined, {
+    sensitivity: "base",
+  });
+}
+
+function formatTooltipList(label: string, values: readonly string[]): string {
+  if (values.length === 0) return "";
+  const visible = values.slice(0, 3).join("; ");
+  const more = values.length > 3 ? ` (+${values.length - 3} more)` : "";
+  return `${label}: ${visible}${more}`;
+}
+
+export function parseEmbeddedMixManifest(value: unknown): EmbeddedMixManifest | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const parsed = value as Partial<EmbeddedMixManifest>;
+  if (typeof parsed.outDir !== "string" || !Array.isArray(parsed.extractions)) {
+    return null;
+  }
+
+  for (const extraction of parsed.extractions) {
+    if (typeof extraction !== "object" || extraction === null) {
+      return null;
+    }
+
+    const candidate = extraction as Partial<EmbeddedMixManifestExtraction>;
+    if (
+      typeof candidate.mixPath !== "string" ||
+      typeof candidate.embeddedPath !== "string" ||
+      typeof candidate.outputPath !== "string"
+    ) {
+      return null;
+    }
+  }
+
+  return parsed as EmbeddedMixManifest;
+}
+
+export function embeddedMixSamplesFromManifest(manifest: EmbeddedMixManifest): Sample[] {
+  const grouped = new Map<string, EmbeddedMixManifestExtraction[]>();
+
+  for (const extraction of manifest.extractions) {
+    const key = normalizeManifestFsPath(extraction.outputPath).toLowerCase();
+    const existing = grouped.get(key) ?? [];
+    existing.push(extraction);
+    grouped.set(key, existing);
+  }
+
+  const samples: Sample[] = [];
+
+  for (const [, records] of [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const ordered = [...records].sort((left, right) => {
+      if (left.dedupeKept && !right.dedupeKept) return -1;
+      if (!left.dedupeKept && right.dedupeKept) return 1;
+      return compareEmbeddedMixExtraction(left, right);
+    });
+    const primary = ordered[0];
+    if (!primary) continue;
+
+    const relPath = manifestRelativeOutputPath(manifest.outDir, primary.outputPath);
+    if (!relPath) continue;
+
+    const pathParts = relPath.split("/").filter(Boolean);
+    if (pathParts.length === 0) continue;
+
+    const subcategory = pathParts.length > 1 ? pathParts[0]! : null;
+    const filename = pathParts.length > 1 ? pathParts.slice(1).join("/") : pathParts[0]!;
+    const sourceMixes = uniqueNonEmptyValues(ordered.map((record) => leafName(record.mixPath)));
+    const embeddedPaths = uniqueNonEmptyValues(ordered.map((record) => record.embeddedPath));
+
+    const durationSec = typeof primary.duration === "number" ? primary.duration : undefined;
+    const beats = typeof durationSec === "number"
+      ? Math.round((durationSec * EMBEDDED_MIX_DEFAULT_BPM) / 60)
+      : undefined;
+
+    samples.push({
+      filename,
+      alias: stripWavExtension(leafName(filename)),
+      category: UNSORTED_CATEGORY_ID,
+      subcategory,
+      product: EMBEDDED_MIX_PRODUCT,
+      detail: sourceMixes.length === 1 ? sourceMixes[0] : `${sourceMixes.length} mix sources`,
+      source: embeddedPaths[0],
+      original_filename: leafName(primary.embeddedPath),
+      duration_sec: durationSec,
+      beats,
+      sample_rate: typeof primary.sampleRate === "number" ? primary.sampleRate : undefined,
+      bit_depth: typeof primary.bitDepth === "number" ? primary.bitDepth : undefined,
+      channels: typeof primary.channels === "number" ? primary.channels : undefined,
+      source_mix: sourceMixes[0],
+      source_mixes: sourceMixes,
+      embedded_paths: embeddedPaths,
+      dedupe_count: ordered.length,
+    });
+  }
+
+  return samples;
+}
+
+export function mergeSamplesByAudioPath(baseSamples: Sample[], additionalSamples: Sample[]): Sample[] {
+  const merged = [...baseSamples];
+  const indexByPath = new Map<string, number>();
+
+  for (let index = 0; index < merged.length; index++) {
+    indexByPath.set(samplePathKey(merged[index]!), index);
+  }
+
+  for (const sample of additionalSamples) {
+    const key = samplePathKey(sample);
+    const existingIndex = indexByPath.get(key);
+    if (existingIndex === undefined) {
+      indexByPath.set(key, merged.length);
+      merged.push(sample);
+      continue;
+    }
+
+    merged[existingIndex] = {
+      ...merged[existingIndex],
+      ...sample,
+    };
+  }
+
+  return merged;
+}
+
 /**
  * Build a short metadata string for display under the sample label.
  * Shows product, BPM, and beat count when available.
@@ -454,7 +717,7 @@ export function sampleDisambiguationLine(
  * Build a full hover tooltip for a sample block, including provenance.
  */
 export function sampleTooltip(
-  sample: Pick<Sample, "alias" | "filename" | "product" | "bpm" | "beats" | "detail" | "internal_name" | "sample_id" | "source">,
+  sample: Pick<Sample, "alias" | "filename" | "product" | "bpm" | "beats" | "detail" | "internal_name" | "sample_id" | "source" | "source_mix" | "source_mixes" | "embedded_paths" | "dedupe_count">,
 ): string {
   const lines = [sampleDisplayName(sample)];
   const meta = sampleMetadataLine(sample);
@@ -474,6 +737,25 @@ export function sampleTooltip(
   const source = normalizeText(sample.source);
   if (source) {
     lines.push(`Source: ${source}`);
+  }
+
+  const sourceMixes = uniqueNonEmptyValues(Array.isArray(sample.source_mixes) ? sample.source_mixes : []);
+  const sourceMix = normalizeText(sample.source_mix);
+  if (sourceMixes.length > 1) {
+    lines.push(formatTooltipList("Mixes", sourceMixes));
+  } else if (sourceMix) {
+    lines.push(`Mix: ${sourceMix}`);
+  } else if (sourceMixes.length === 1) {
+    lines.push(`Mix: ${sourceMixes[0]}`);
+  }
+
+  const embeddedPaths = uniqueNonEmptyValues(Array.isArray(sample.embedded_paths) ? sample.embedded_paths : []);
+  if (embeddedPaths.length > 1) {
+    lines.push(formatTooltipList("Embedded Paths", embeddedPaths));
+  }
+
+  if (typeof sample.dedupe_count === "number" && Number.isFinite(sample.dedupe_count) && sample.dedupe_count > 1) {
+    lines.push(`Embedded Copies: ${sample.dedupe_count}`);
   }
 
   return lines.join("\n");
@@ -497,10 +779,18 @@ export function buildCategoryEntries(
   configuredCategories: CategoryConfigEntry[] = DEFAULT_CATEGORY_CONFIG.categories,
 ): CategoryEntry[] {
   const counts = new Map<string, number>();
+  const discoveredSubcategories = new Map<string, string[]>();
 
   for (const sample of samples) {
     const category = sampleCategory(sample);
     counts.set(category, (counts.get(category) ?? 0) + 1);
+
+    const subcategory = sampleSubcategory(sample);
+    if (!subcategory) continue;
+
+    const existing = discoveredSubcategories.get(category) ?? [];
+    existing.push(subcategory);
+    discoveredSubcategories.set(category, existing);
   }
 
   const normalizedConfigured = configuredCategories
@@ -514,7 +804,10 @@ export function buildCategoryEntries(
   return normalizedConfigured.map((category) => ({
     id: category.id,
     name: category.name,
-    subcategories: orderedSubcategories(category.id, category.subcategories),
+    subcategories: orderedSubcategories(category.id, [
+      ...category.subcategories,
+      ...(discoveredSubcategories.get(category.id) ?? []),
+    ]),
     sampleCount: counts.get(category.id) ?? 0,
   }));
 }
@@ -557,6 +850,13 @@ export function sampleMatchesSearchQuery(sample: Sample, query: string): boolean
   if (terms.length === 0) return true;
   const haystack = `${sampleDisplayName(sample)} ${sampleMetadataLine(sample)}`.toLowerCase();
   return terms.every((term) => haystack.includes(term));
+}
+
+export function filterSamplesBySearchQuery(samples: Sample[], query: string): Sample[] {
+  const trimmedQuery = query.trim();
+  return trimmedQuery
+    ? samples.filter((sample) => sampleMatchesSearchQuery(sample, trimmedQuery))
+    : samples;
 }
 
 export function filterSamples(samples: Sample[], filters: SampleFilterOptions): Sample[] {
@@ -625,4 +925,77 @@ export function sortSamplesForGrid(samples: Sample[]): Sample[] {
       sensitivity: "base",
     });
   });
+}
+
+export type GridSortKey = "name" | "bpm" | "beats" | "product" | "detail" | "subcategory" | "source";
+export type GridSortDir = "asc" | "desc";
+
+export const DEFAULT_GRID_SORT_KEY: GridSortKey = "beats";
+export const DEFAULT_GRID_SORT_DIR: GridSortDir = "desc";
+
+export const SAMPLE_METADATA_UPDATED_EVENT = "sample-metadata-updated";
+
+const GRID_SORT_KEY_LABELS: Record<GridSortKey, string> = {
+  name: "Name",
+  bpm: "BPM",
+  beats: "Sample Length",
+  product: "Product",
+  detail: "Detail",
+  subcategory: "Subcategory",
+  source: "Source",
+};
+
+export function gridSortKeyLabel(key: GridSortKey): string {
+  return GRID_SORT_KEY_LABELS[key] ?? key;
+}
+
+export function sortSamplesByKey(samples: Sample[], key: GridSortKey, dir: GridSortDir): Sample[] {
+  const multiplier = dir === "asc" ? 1 : -1;
+  return [...samples].sort((a, b) => {
+    let cmp = 0;
+    switch (key) {
+      case "name":
+        cmp = sampleDisplayName(a).localeCompare(sampleDisplayName(b), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+        break;
+      case "bpm":
+        cmp = (typeof a.bpm === "number" ? a.bpm : -1) - (typeof b.bpm === "number" ? b.bpm : -1);
+        break;
+      case "beats":
+        cmp = (typeof a.beats === "number" ? a.beats : -1) - (typeof b.beats === "number" ? b.beats : -1);
+        break;
+      case "product":
+        cmp = normalizeText(a.product).localeCompare(normalizeText(b.product), undefined, { sensitivity: "base" });
+        break;
+      case "detail":
+        cmp = normalizeText(a.detail).localeCompare(normalizeText(b.detail), undefined, { sensitivity: "base" });
+        break;
+      case "subcategory":
+        cmp = (sampleSubcategory(a) ?? "").localeCompare(sampleSubcategory(b) ?? "", undefined, { sensitivity: "base" });
+        break;
+      case "source":
+        cmp = normalizeText(a.source).localeCompare(normalizeText(b.source), undefined, { sensitivity: "base" });
+        break;
+    }
+    if (cmp === 0 && key !== "name") {
+      return sampleDisplayName(a).localeCompare(sampleDisplayName(b), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    }
+    return cmp * multiplier;
+  });
+}
+
+export function activeSortKeys(samples: readonly Sample[]): GridSortKey[] {
+  const keys: GridSortKey[] = ["name"];
+  if (samples.some((s) => typeof s.bpm === "number" && s.bpm > 0)) keys.push("bpm");
+  if (samples.some((s) => typeof s.beats === "number" && s.beats > 0)) keys.push("beats");
+  if (samples.some((s) => normalizeText(s.product).length > 0)) keys.push("product");
+  if (samples.some((s) => normalizeText(s.detail).length > 0)) keys.push("detail");
+  if (samples.some((s) => (sampleSubcategory(s) ?? "").length > 0)) keys.push("subcategory");
+  if (samples.some((s) => normalizeText(s.source).length > 0)) keys.push("source");
+  return keys;
 }

@@ -25,11 +25,43 @@ src/mix-parser.ts          ← browser-side `.mix` parser emitting MixIR
 src/mix-player.ts          ← browser MIX loader and Web Audio helpers
 src/player.ts              ← browser audio playback helpers for sample preview
 src/render.ts              ← DOM rendering for the browser UI
+src/sample-grid-context-menu.ts ← sample-grid right-click controller for
+                              move/sort menus and dismiss lifecycle
 src/env.d.ts               ← ambient type declarations (CSS modules)
+src/mix-file-browser.ts    ← in-app .mix file browser for the archive-tree
+                              panel; DEV mode reads from data/index.json
+                              mixLibrary; PROD mode uses File System Access API
+                              with a webkitdirectory fallback; hovering a
+                              .mix file shows a metadata tooltip; clicking
+                              opens a floating `.mix-meta-popup` panel.
+                              Public API: `initMixFileBrowser`,
+                              `showMixMetaPopup`, `dismissMixMetaPopup`,
+                              `isMixMetaPopupVisible`, `formatMetaTooltip`,
+                              `buildMetaRows`, `MixFileRef`, `MixFileSource`,
+                              `MixFileBrowserOptions`
 
 scripts/test-coverage.ts   ← Playwright + nyc coverage runner and threshold
                               enforcement
-scripts/build-index.ts     ← generates data/index.json from extracted output
+scripts/build-index.ts     ← generates data/index.json from extracted output;
+                              also populates MixFileMeta on each MixFileEntry,
+                              merges embedded-MIX manifest samples into the
+                              browser catalog, and appends `_userdata` mix
+                              groups after product archives
+
+scripts/extract-mix-metadata.ts ← standalone script (`npm run mix:meta`) that
+                              walks all archive .mix files, parses them, and
+                              writes a compact manifest to data/mix-metadata.json;
+                              also exports `irToMeta` for reuse
+scripts/extract-embedded-mix-audio.ts ← extracts in-band WAV payloads from
+                              oversized `.mix` files into
+                              output/Unsorted/embedded mix and writes
+                              output/Unsorted/embedded-mix-audio-manifest.json
+scripts/gen-missing-beats-report.ts ← scans archived `.mix` files for
+                              unresolved sample references and writes
+                              logs/missing-beats-report.json
+scripts/recover-missing-samples.ts ← recovers WAVs named in the missing-beats
+                              report from output/ or an external library and
+                              appends metadata to output/metadata.json
 
 tests/baseFixtures.ts      ← Playwright fixtures with Istanbul coverage capture
 tests/browser.spec.ts      ← browser interaction and regression coverage
@@ -56,10 +88,12 @@ docs/file-formats.md       ← sample/archive/container format reference
 docs/mix-format-analysis.md ← canonical `.mix` format reference
 
 output/                    ← normalized browser library root: metadata.json,
-                              categories.json, and WAV folders grouped by
-                              category/subcategory
+                              categories.json, WAV folders grouped by
+                              category/subcategory, and optional
+                              Unsorted/embedded-mix-audio-manifest.json
 archive/                   ← read-only source data (14 product folders +
-                              auxiliary `_userdata/` imports)
+                              auxiliary `_userdata/` imports indexed as mix
+                              browser groups)
 codec/                     ← proprietary DLLs and verification scripts (optional)
 
 dist/                      ← generated Vite production build
@@ -94,11 +128,19 @@ into `dist/assets/` for production.
 
 `npm run build` runs the Vite production build to `dist/`.
 
-During local development, the Vite server also exposes two project-specific
+Before Vite bundles the app, `scripts/build-index.ts` regenerates
+`data/index.json`. That step merges recovered embedded-MIX samples into the
+browser catalog, enriches each `.mix` entry with parsed `MixFileMeta`, and
+includes `_userdata` directories after the product archive groups.
+
+During local development, the Vite server also exposes three project-specific
 endpoints:
 
 1. `/mix/<product>/<filename>` — allow-listed access to archived `.mix` files.
 2. `PUT /__category-config` — dev-only persistence for `output/categories.json`.
+3. `PUT /__sample-move` — dev-only sample moves between category/subcategory
+  folders; patches `output/metadata.json` and emits a hot-update event so the
+  grid reloads in place.
 
 `npm run test` runs Playwright tests against `http://127.0.0.1:3000/`.
 If that Vite dev server is already running, Playwright reuses it; otherwise it
@@ -136,9 +178,12 @@ The app is a single-page application with two states:
 The browser shell is split into three stacked regions above the fixed transport
 bar:
 
-- **Top editor area** — A `Mix Archive` sidebar placeholder on the left and a
-  sequencer/timeline placeholder on the right. The renderer shows the shell,
-  but archive browsing and mix editing are not yet wired into the main app.
+- **Top editor area** — A live `Mix Archive` browser on the left and a
+  sequencer/timeline placeholder on the right. In dev mode, the archive tree
+  loads from `data/index.json`; in production-style folder picks it prompts for
+  an `archive/` root via the File System Access API or a `webkitdirectory`
+  fallback. Clicking a `.mix` item opens a metadata popup, but loading the mix
+  into the sequencer is still pending.
 - **Middle context strip** — Current mix status text plus subcategory tabs,
   sample search input, sample-bubble zoom controls, and the BPM filter.
 - **Bottom browser area** — A category sidebar and a lane-based sample grid.
@@ -146,8 +191,13 @@ bar:
   `Unsorted` and `Load JSON`.
 
 Samples are rendered as beat-scaled blocks rather than table rows. The browser
-sorts them by descending beat length and then by display name. Search terms are
-matched against the display name plus the rendered metadata line.
+matches search terms against the display name plus the rendered metadata line.
+The default sort is descending beat length and then display name, but
+right-clicking empty grid space opens a sort menu for name, BPM, sample
+length, product, detail, subcategory, and source. Right-clicking a sample
+block opens a `Move to` menu; in the dev-server library flow the move is
+persisted through `PUT /__sample-move`, while production-style folder picks
+apply the change in-memory only.
 
 ### Terminology
 
@@ -184,6 +234,10 @@ be updated.
   folders. These are generated by the extraction/normalization scripts and
   should not be hand-edited unless you are intentionally editing the category
   config during local development.
+- **Recovered embedded-MIX provenance lives beside the output library**:
+  `output/Unsorted/embedded-mix-audio-manifest.json` is generated by
+  `npm run mix:extract-embedded`, and `scripts/build-index.ts` merges it back
+  into the browser catalog as synthetic `Embedded MIX` samples.
 - **Source data is read-only**: never modify files under `archive/`.
 - **Keep MIX format detail in the dedicated reference**:
   `docs/mix-format-analysis.md` is the low-level `.mix` format reference.

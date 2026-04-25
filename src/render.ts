@@ -2,6 +2,7 @@
 
 import type { CategoryEntry, Sample } from "./data.js";
 import {
+  gridSortKeyLabel,
   sampleCategory,
   sampleDisambiguationLine,
   sampleDisplayKey,
@@ -10,6 +11,7 @@ import {
   UNSORTED_CATEGORY_ID,
   UNSORTED_SUBCATEGORY_ID,
 } from "./data.js";
+import type { GridSortDir, GridSortKey } from "./data.js";
 import type { Library } from "./library.js";
 import type { Player } from "./player.js";
 
@@ -93,11 +95,15 @@ function createBpmSelect(selectId: string, ariaLabel: string): HTMLSelectElement
   select.id = selectId;
   select.setAttribute("aria-label", ariaLabel);
 
+  const allOption = document.createElement("option");
+  allOption.value = "";
+  allOption.textContent = "All";
+  select.appendChild(allOption);
+
   for (const value of BPM_VALUES) {
     const option = document.createElement("option");
     option.value = String(value);
     option.textContent = String(value);
-    option.selected = value === 140;
     select.appendChild(option);
   }
 
@@ -1057,13 +1063,15 @@ export function renderTransportBar(container: HTMLElement): HTMLElement {
       <progress id="transport-progress" class="transport-progress" value="0" max="100"></progress>
     </div>
     <div class="transport-center">
-      <span class="transport-build-label">${BUILD_LABEL}</span>
+      <span class="transport-build-label"></span>
     </div>
     <div class="transport-right">
-      <span class="transport-version">${APP_VERSION}</span>
+      <span class="transport-version"></span>
       <a class="transport-github" href="https://github.com/satyrlord/ejay-mix-reader" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">GitHub</a>
     </div>
   `;
+  bar.querySelector<HTMLElement>(".transport-build-label")!.textContent = BUILD_LABEL;
+  bar.querySelector<HTMLElement>(".transport-version")!.textContent = APP_VERSION;
   container.appendChild(bar);
   syncTransportBuildLabelVisibility();
   return bar;
@@ -1091,5 +1099,148 @@ export function updatePlayingBlock(activePath: string | null): void {
   for (const block of document.querySelectorAll<HTMLElement>(".sample-block")) {
     block.classList.toggle("is-playing", block.dataset.path === activePath);
   }
+}
+
+/**
+ * Builds a cascading "Move to" context menu for a sample block right-click.
+ * Categories appear as top-level items, each expanding to a subcategory submenu on hover.
+ *
+ * @param categories - Full category list (Unsorted excluded — it is appended last).
+ * @param currentCategory - The sample's current category id (used to mark the current position).
+ * @param currentSubcategory - The sample's current subcategory (used to mark the current position).
+ * @param onMoveTo - Called with (categoryId, subcategoryId | null) when a destination is clicked.
+ * @param flipSubmenu - When true, submenus open to the left instead of the right.
+ */
+export function buildSampleMoveMenu(
+  categories: CategoryEntry[],
+  currentCategory: string,
+  currentSubcategory: string | null,
+  onMoveTo: (categoryId: string, subcategoryId: string | null) => void,
+  flipSubmenu: boolean,
+): HTMLElement {
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  if (flipSubmenu) menu.classList.add("ctx-menu--flip");
+  menu.setAttribute("role", "menu");
+
+  const header = document.createElement("div");
+  header.className = "ctx-menu-header";
+  header.textContent = "Move to";
+  menu.appendChild(header);
+
+  for (const category of categories) {
+    if (category.sampleCount === 0 && category.id !== UNSORTED_CATEGORY_ID) continue;
+
+    const isCurrent = category.id === currentCategory;
+
+    const item = document.createElement("div");
+    item.className = "ctx-menu-item has-submenu";
+    if (isCurrent) item.classList.add("is-current-category");
+    item.setAttribute("role", "menuitem");
+    item.setAttribute("aria-haspopup", "true");
+    item.tabIndex = 0;
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = category.name;
+    const arrowSpan = document.createElement("span");
+    arrowSpan.className = "ctx-menu-arrow";
+    arrowSpan.setAttribute("aria-hidden", "true");
+    arrowSpan.textContent = "›";
+    item.append(labelSpan, arrowSpan);
+
+    const submenu = document.createElement("div");
+    submenu.className = "ctx-submenu";
+    submenu.setAttribute("role", "menu");
+
+    const subcategories = category.subcategories.length > 0
+      ? category.subcategories
+      : [UNSORTED_SUBCATEGORY_ID];
+
+    for (const sub of subcategories) {
+      const isCurrentSub = isCurrent && (sub === currentSubcategory || (sub === UNSORTED_SUBCATEGORY_ID && !currentSubcategory));
+      const storedSub = sub === UNSORTED_SUBCATEGORY_ID ? null : sub;
+
+      const subBtn = document.createElement("button");
+      subBtn.type = "button";
+      subBtn.className = "ctx-menu-item";
+      if (isCurrentSub) subBtn.classList.add("is-current");
+      subBtn.setAttribute("role", "menuitem");
+      subBtn.tabIndex = -1;
+      subBtn.textContent = sub;
+      subBtn.addEventListener("click", () => onMoveTo(category.id, storedSub));
+      submenu.appendChild(subBtn);
+    }
+
+    item.appendChild(submenu);
+    menu.appendChild(item);
+
+    item.addEventListener("mouseenter", () => {
+      for (const sibling of menu.querySelectorAll<HTMLElement>(".ctx-menu-item.has-submenu")) {
+        sibling.classList.remove("is-open");
+      }
+      item.classList.add("is-open");
+    });
+  }
+
+  menu.addEventListener("mouseleave", () => {
+    for (const sibling of menu.querySelectorAll<HTMLElement>(".ctx-menu-item.has-submenu")) {
+      sibling.classList.remove("is-open");
+    }
+  });
+
+  return menu;
+}
+
+/**
+ * Builds a flat "Sort by" context menu for an empty-grid-space right-click.
+ * The active sort key is highlighted; clicking an active key flips the direction.
+ *
+ * @param sortKeys - Sort keys available for the current sample set.
+ * @param currentKey - The currently active sort key.
+ * @param currentDir - The currently active sort direction.
+ * @param onSort - Called with (key, dir) when an item is clicked.
+ */
+export function buildGridSortMenu(
+  sortKeys: GridSortKey[],
+  currentKey: GridSortKey,
+  currentDir: GridSortDir,
+  onSort: (key: GridSortKey, dir: GridSortDir) => void,
+): HTMLElement {
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  menu.setAttribute("role", "menu");
+
+  const header = document.createElement("div");
+  header.className = "ctx-menu-header";
+  header.textContent = "Sort by";
+  menu.appendChild(header);
+
+  for (const key of sortKeys) {
+    const isActive = key === currentKey;
+    const nextDir: GridSortDir = isActive && currentDir === "asc" ? "desc" : "asc";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ctx-menu-item";
+    if (isActive) btn.classList.add("is-active");
+    btn.setAttribute("role", "menuitem");
+    btn.tabIndex = 0;
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = gridSortKeyLabel(key);
+
+    const dirSpan = document.createElement("span");
+    dirSpan.className = "ctx-menu-sort-dir";
+    dirSpan.setAttribute("aria-hidden", "true");
+    if (isActive) {
+      dirSpan.textContent = currentDir === "asc" ? "↑" : "↓";
+    }
+
+    btn.append(labelSpan, dirSpan);
+    btn.addEventListener("click", () => onSort(key, nextDir));
+    menu.appendChild(btn);
+  }
+
+  return menu;
 }
 

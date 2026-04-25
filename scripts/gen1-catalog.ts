@@ -79,6 +79,25 @@ export interface PxdTxtChannelRanges {
   ranges: Array<{ startId: number; count: number; endId: number }>;
 }
 
+export interface KitCatalogSpec {
+  path: string;
+  offset: number;
+  pathPrefix?: string;
+}
+
+export interface LoadedKitCatalog {
+  text: string;
+  offset: number;
+  pathPrefix?: string;
+}
+
+export interface ProductLayout {
+  max: string;
+  pxddance?: string;
+  pxdtxt?: string;
+  kitCatalogs?: KitCatalogSpec[];
+}
+
 // --- Product layout ---
 
 /**
@@ -89,7 +108,7 @@ export interface PxdTxtChannelRanges {
  */
 export const GEN1_PRODUCT_LAYOUT: Record<
   string,
-  { max: string; pxddance?: string; pxdtxt?: string }
+  ProductLayout
 > = {
   Dance_eJay1: {
     max: "Dance_eJay1/dance/DMACHINE/MAX.TXT",
@@ -98,6 +117,15 @@ export const GEN1_PRODUCT_LAYOUT: Record<
   Dance_SuperPack: {
     max: "Dance_SuperPack/dance/EJAY/MAX",
     pxddance: "Dance_SuperPack/dance/EJAY/Pxddance",
+    kitCatalogs: [
+      { path: "Dance_SuperPack/dance/EJAY/kit1.txt", offset: 3400 },
+      { path: "Dance_SuperPack/dance/EJAY/kit2.txt", offset: 3900 },
+      {
+        path: "Dance_SuperPack/dance/EJAY/kit3.txt",
+        offset: 4500,
+        pathPrefix: "dmkit3/",
+      },
+    ],
   },
   Rave: {
     max: "Rave/RAVE/EJAY/MAX",
@@ -105,6 +133,17 @@ export const GEN1_PRODUCT_LAYOUT: Record<
   GenerationPack1_Dance: {
     max: "GenerationPack1/Dance/dance/EJAY/MAX",
     pxddance: "GenerationPack1/Dance/dance/EJAY/Pxddance",
+    // GP1 Dance reuses the SuperPack sample-kit catalogs; the local bundle
+    // does not carry separate kit*.txt copies.
+    kitCatalogs: [
+      { path: "Dance_SuperPack/dance/EJAY/kit1.txt", offset: 3400 },
+      { path: "Dance_SuperPack/dance/EJAY/kit2.txt", offset: 3900 },
+      {
+        path: "Dance_SuperPack/dance/EJAY/kit3.txt",
+        offset: 4500,
+        pathPrefix: "dmkit3/",
+      },
+    ],
   },
   GenerationPack1_Rave: {
     max: "GenerationPack1/Rave/RAVE/EJAY/MAX",
@@ -262,12 +301,21 @@ export interface BuildCatalogOptions {
   pxddanceText?: string;
   /** Text content of the Dance 1 PXD.TXT, when available. */
   pxdtxtText?: string;
+  /** Additional SampleKit catalogs to splice in at fixed rawId offsets. */
+  kitCatalogs?: LoadedKitCatalog[];
   /** Product key (e.g. "Dance_SuperPack") for the output record. */
   product?: string;
   /** Absolute path of the MAX file (for the output record). */
   maxPath: string;
   /** Absolute path of the Pxddance file (for the output record). */
   pxddancePath?: string | null;
+}
+
+function prependCatalogPath(prefix: string | undefined, path: string): string {
+  if (!prefix || path.trim() === "") return path;
+  const normalizedPrefix = prefix.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedPath = path.replace(/\\/g, "/").replace(/^\/+/, "");
+  return `${normalizedPrefix}/${normalizedPath}`;
 }
 
 /**
@@ -282,6 +330,22 @@ export function buildGen1Catalog(opts: BuildCatalogOptions): Gen1Catalog {
   const channelRanges = opts.pxdtxtText
     ? parsePxdTxtChannelRanges(opts.pxdtxtText)
     : null;
+
+  for (const kit of opts.kitCatalogs ?? []) {
+    const records = parsePxddanceFile(kit.text);
+    for (let index = 0; index < records.length; index += 1) {
+      const rawPath = prependCatalogPath(kit.pathPrefix, records[index].path);
+      const id = kit.offset + index;
+      while (paths.length <= id) {
+        paths.push("");
+      }
+      paths[id] = rawPath;
+      pxddance.push({
+        ...records[index],
+        path: rawPath,
+      });
+    }
+  }
 
   // Build a path→Pxddance lookup so enrichment is O(1) per entry. Paths in
   // Pxddance are already in the canonical quoted-catalog form but we
@@ -346,7 +410,12 @@ export interface CliOptions {
 export function resolveProductPaths(
   product: string,
   archiveRoot: string,
-): { maxPath: string; pxddancePath: string | null; pxdtxtPath: string | null } {
+): {
+  maxPath: string;
+  pxddancePath: string | null;
+  pxdtxtPath: string | null;
+  kitCatalogPaths: Array<{ path: string; offset: number; pathPrefix?: string }>;
+} {
   const layout = GEN1_PRODUCT_LAYOUT[product];
   if (!layout) {
     throw new Error(
@@ -357,6 +426,11 @@ export function resolveProductPaths(
     maxPath: resolve(archiveRoot, layout.max),
     pxddancePath: layout.pxddance ? resolve(archiveRoot, layout.pxddance) : null,
     pxdtxtPath: layout.pxdtxt ? resolve(archiveRoot, layout.pxdtxt) : null,
+    kitCatalogPaths: (layout.kitCatalogs ?? []).map((kit) => ({
+      path: resolve(archiveRoot, kit.path),
+      offset: kit.offset,
+      pathPrefix: kit.pathPrefix,
+    })),
   };
 }
 
@@ -364,6 +438,7 @@ export function runCli(opts: CliOptions): Gen1Catalog {
   let maxPath: string;
   let pxddancePath: string | null;
   let pxdtxtPath: string | null;
+  let kitCatalogPaths: Array<{ path: string; offset: number; pathPrefix?: string }> = [];
 
   if (opts.maxPath) {
     maxPath = resolve(opts.maxPath);
@@ -374,6 +449,7 @@ export function runCli(opts: CliOptions): Gen1Catalog {
     maxPath = resolved.maxPath;
     pxddancePath = resolved.pxddancePath;
     pxdtxtPath = resolved.pxdtxtPath;
+    kitCatalogPaths = resolved.kitCatalogPaths;
   } else {
     throw new Error("runCli: either `product` or `maxPath` is required");
   }
@@ -391,11 +467,19 @@ export function runCli(opts: CliOptions): Gen1Catalog {
     pxdtxtPath && existsSync(pxdtxtPath)
       ? readFileSync(pxdtxtPath, "utf8")
       : undefined;
+  const kitCatalogs = kitCatalogPaths
+    .filter(({ path }) => existsSync(path))
+    .map(({ path, offset, pathPrefix }) => ({
+      text: readFileSync(path, "utf8"),
+      offset,
+      pathPrefix,
+    }));
 
   const catalog = buildGen1Catalog({
     maxText,
     pxddanceText,
     pxdtxtText,
+    kitCatalogs,
     product: opts.product,
     maxPath,
     pxddancePath,

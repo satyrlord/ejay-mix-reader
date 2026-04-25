@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { test, expect } from "./baseFixtures.js";
 import { buildDisplayVersion } from "../scripts/version.js";
@@ -106,11 +107,12 @@ test("default view renders sample blocks", async ({ page }) => {
   await expect(page.locator(".sample-block").first()).toBeVisible();
 });
 
-test("BPM filter is present and defaults to 140", async ({ page }) => {
+test("BPM filter is present and defaults to All", async ({ page }) => {
   await page.goto("/");
   const bpm = page.locator("#bpm-filter");
   await expect(bpm).toBeVisible();
-  await expect(bpm).toHaveValue("140");
+  await expect(page.locator('#bpm-filter option[value=""]')).toHaveText("All");
+  await expect(bpm).toHaveValue("");
 });
 
 test("transport bar is present and idle", async ({ page }) => {
@@ -351,4 +353,64 @@ test("search query persists when switching categories", async ({ page }) => {
 
   await expect(searchInput).toHaveValue("robot");
   await expect(page.locator(".sample-grid-empty")).toHaveText("No samples in this selection.");
+});
+
+// ---------------------------------------------------------------------------
+// DEV-only persistence tests
+// These tests rely on user-created data in output/ (gitignored). They are
+// skipped automatically when the output directory or the required subcategory
+// is not present (e.g. in CI or fresh checkouts).
+// ---------------------------------------------------------------------------
+
+const outputCategoriesPath = join(process.cwd(), "output", "categories.json");
+
+function devCategoryHasSubcategory(categoryId: string, subcategoryId: string): boolean {
+  if (!existsSync(outputCategoriesPath)) return false;
+  try {
+    const raw: unknown = JSON.parse(readFileSync(outputCategoriesPath, "utf-8"));
+    if (typeof raw !== "object" || raw === null || !Array.isArray((raw as { categories?: unknown }).categories)) {
+      return false;
+    }
+    const categories = (raw as { categories: Array<{ id?: unknown; subcategories?: unknown }> }).categories;
+    const entry = categories.find((c) => c.id === categoryId);
+    return Array.isArray(entry?.subcategories) && (entry.subcategories as unknown[]).includes(subcategoryId);
+  } catch {
+    return false;
+  }
+}
+
+test("DEV — Loop/fills subcategory is persistent and contains samples", async ({ page }) => {
+  test.skip(!devCategoryHasSubcategory("Loop", "fills"), "output/categories.json does not have Loop/fills — skipping DEV-only persistence test");
+
+  await page.goto("/");
+  await page.locator('.category-btn[data-category-id="Loop"]').click();
+  await expect(page.locator('#subcategory-tabs .subcategory-tab[data-tab-id="subcategory:fills"]')).toBeVisible();
+
+  await page.locator('#subcategory-tabs .subcategory-tab[data-tab-id="subcategory:fills"]').click();
+  await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:fills"]')).toHaveClass(/is-active/);
+
+  await expect.poll(() => page.locator(".sample-block").count(), { timeout: 10_000 }).toBeGreaterThan(1);
+});
+
+// Regression test: filenames containing ".." (e.g. "VXB010..wav") must not
+// be rejected by the path-traversal guard in /__sample-move. The file won't
+// exist on disk, so no actual data is modified; the endpoint should still
+// return 204 rather than 400.
+test("DEV — /__sample-move accepts filenames that contain double-dot", async ({ page }) => {
+  await page.goto("/");
+  const response = await page.evaluate(async () => {
+    const res = await fetch("/__sample-move", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "fake..test.wav",
+        oldCategory: "Voice",
+        oldSubcategory: "misc",
+        newCategory: "Voice",
+        newSubcategory: "misc",
+      }),
+    });
+    return { status: res.status };
+  });
+  expect(response.status).toBe(204);
 });

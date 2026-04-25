@@ -5,6 +5,7 @@ test.describe("data module edge cases", () => {
 
   test("sample helpers normalize category, labels, and paths", async ({ page }) => {
     await page.goto("/");
+    await page.waitForLoadState("networkidle");
     const result = await page.evaluate(async (modPath) => {
       const mod = await import(/* @vite-ignore */ modPath);
       return {
@@ -191,7 +192,152 @@ test.describe("data module edge cases", () => {
     expect(result.invalidFilename).toContain("Invalid sample filename");
   });
 
-  test("data helpers keep configured tabs only and handle empty configured subcategory lists", async ({ page }) => {
+  test("embedded mix manifest helpers merge overlays and expose sortable metadata", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const mod = await import(/* @vite-ignore */ modPath);
+      const manifest = {
+        outDir: "D:/dev/eJay/output/Unsorted",
+        extractions: [
+          {
+            mixPath: "D:/archive/A.mix",
+            embeddedPath: "riff://A.wav",
+            outputPath: "D:/dev/eJay/output/Unsorted/embedded mix/alpha.wav",
+            dedupeKept: false,
+          },
+          {
+            mixPath: "D:/archive/B.mix",
+            embeddedPath: "riff://B.wav",
+            outputPath: "D:/dev/eJay/output/Unsorted/embedded mix/alpha.wav",
+            dedupeKept: true,
+            duration: 1.5,
+            sampleRate: 44100,
+            bitDepth: 16,
+            channels: 2,
+          },
+          {
+            mixPath: "D:/archive/C.mix",
+            embeddedPath: "riff://C.wav",
+            outputPath: "D:/dev/eJay/output/Unsorted/solo.wav",
+            duration: 0.5,
+          },
+          {
+            mixPath: "D:/archive/D.mix",
+            embeddedPath: "riff://D.wav",
+            outputPath: "D:/outside/skip.wav",
+          },
+        ],
+      };
+
+      const parsed = mod.parseEmbeddedMixManifest(manifest);
+      const samples = mod.embeddedMixSamplesFromManifest(parsed);
+      const merged = mod.mergeSamplesByAudioPath(
+        [{ filename: "alpha.wav", alias: "Old Alpha", category: "Unsorted", subcategory: "embedded mix" }],
+        samples,
+      );
+
+      const sortable = [
+        { filename: "gamma.wav", alias: "Gamma", category: "Bass", product: "Rave", bpm: 130, beats: 4, detail: "lead", subcategory: "riff", source: "pack/c.wav" },
+        { filename: "alpha.wav", alias: "Alpha", category: "Bass", product: "Dance_eJay1", bpm: 120, beats: 8, detail: "arp", subcategory: "pad", source: "pack/a.wav" },
+        { filename: "beta.wav", alias: "Beta", category: "Bass", product: "Dance_eJay1", beats: 0 },
+      ];
+
+      return {
+        mixLabels: ["A", "B", "C", "D"].map((format) => mod.mixFormatLabel(format)),
+        invalidManifest: mod.parseEmbeddedMixManifest({ outDir: "D:/dev/eJay/output/Unsorted", extractions: [{ mixPath: "x" }] }),
+        sampleSummaries: samples.map((sample: { alias?: string; filename: string; subcategory?: string | null; source_mix?: string; source_mixes?: string[]; detail?: string; dedupe_count?: number; sample_rate?: number; channels?: number; bit_depth?: number }) => ({
+          name: mod.sampleDisplayName(sample),
+          subcategory: sample.subcategory ?? null,
+          sourceMix: sample.source_mix ?? null,
+          sourceMixes: sample.source_mixes ?? [],
+          detail: sample.detail ?? "",
+          dedupeCount: sample.dedupe_count ?? 0,
+          sampleRate: sample.sample_rate ?? 0,
+          channels: sample.channels ?? 0,
+          bitDepth: sample.bit_depth ?? 0,
+        })),
+        mergedAliases: merged.map((sample: { alias?: string; filename: string }) => mod.sampleDisplayName(sample)),
+        metadataLine: mod.sampleMetadataLine({ product: "Dance_eJay1", bpm: 140, beats: 8, detail: "layered" }),
+        disambiguationLine: mod.sampleDisambiguationLine({ internal_name: "INT_ALPHA", sample_id: 42 }),
+        tooltipSingle: mod.sampleTooltip({
+          filename: "solo.wav",
+          alias: "Solo",
+          source: "riff://solo.wav",
+          source_mix: "Solo.mix",
+          source_mixes: ["Solo.mix"],
+          embedded_paths: ["riff://solo.wav"],
+        }),
+        tooltipMany: mod.sampleTooltip({
+          filename: "alpha.wav",
+          alias: "Alpha",
+          source: "riff://alpha.wav",
+          source_mixes: ["A.mix", "B.mix", "C.mix", "D.mix"],
+          embedded_paths: ["p1", "p2", "p3", "p4"],
+          dedupe_count: 4,
+        }),
+        humanizedCompact: mod.humanizeIdentifier("SampleKit_DMKIT3", { compactDmkit: true }),
+        sortLabels: ["name", "bpm", "beats", "product", "detail", "subcategory", "source"].map((key) => mod.gridSortKeyLabel(key)),
+        sortResults: {
+          name: mod.sortSamplesByKey(sortable, "name", "asc").map((sample: { alias?: string; filename: string }) => mod.sampleDisplayName(sample)),
+          bpm: mod.sortSamplesByKey(sortable, "bpm", "desc").map((sample: { alias?: string; filename: string }) => mod.sampleDisplayName(sample)),
+          beats: mod.sortSamplesByKey(sortable, "beats", "asc").map((sample: { alias?: string; filename: string }) => mod.sampleDisplayName(sample)),
+          product: mod.sortSamplesByKey(sortable, "product", "asc").map((sample: { alias?: string; filename: string }) => mod.sampleDisplayName(sample)),
+          detail: mod.sortSamplesByKey(sortable, "detail", "asc").map((sample: { alias?: string; filename: string }) => mod.sampleDisplayName(sample)),
+          subcategory: mod.sortSamplesByKey(sortable, "subcategory", "asc").map((sample: { alias?: string; filename: string }) => mod.sampleDisplayName(sample)),
+          source: mod.sortSamplesByKey(sortable, "source", "asc").map((sample: { alias?: string; filename: string }) => mod.sampleDisplayName(sample)),
+        },
+        activeSortKeys: mod.activeSortKeys(sortable),
+      };
+    }, DATA_MOD);
+
+    expect(result.mixLabels).toEqual(["Generation 1", "Generation 2", "Generation 3", "Generation 3b"]);
+    expect(result.invalidManifest).toBeNull();
+    expect(result.sampleSummaries).toEqual([
+      {
+        name: "alpha",
+        subcategory: "embedded mix",
+        sourceMix: "B.mix",
+        sourceMixes: ["B.mix", "A.mix"],
+        detail: "2 mix sources",
+        dedupeCount: 2,
+        sampleRate: 44100,
+        channels: 2,
+        bitDepth: 16,
+      },
+      {
+        name: "solo",
+        subcategory: null,
+        sourceMix: "C.mix",
+        sourceMixes: ["C.mix"],
+        detail: "C.mix",
+        dedupeCount: 1,
+        sampleRate: 0,
+        channels: 0,
+        bitDepth: 0,
+      },
+    ]);
+    expect(result.mergedAliases).toEqual(["alpha", "solo"]);
+    expect(result.metadataLine).toBe("Dance eJay1 · 140 BPM · 8b · layered");
+    expect(result.disambiguationLine).toBe("INT_ALPHA · #42");
+    expect(result.tooltipSingle).toContain("Mix: Solo.mix");
+    expect(result.tooltipMany).toContain("Mixes: A.mix; B.mix; C.mix (+1 more)");
+    expect(result.tooltipMany).toContain("Embedded Paths: p1; p2; p3 (+1 more)");
+    expect(result.tooltipMany).toContain("Embedded Copies: 4");
+    expect(result.humanizedCompact).toBe("SampleKit DMKIT3");
+    expect(result.sortLabels).toEqual(["Name", "BPM", "Sample Length", "Product", "Detail", "Subcategory", "Source"]);
+    expect(result.sortResults).toEqual({
+      name: ["Alpha", "Beta", "Gamma"],
+      bpm: ["Gamma", "Alpha", "Beta"],
+      beats: ["Beta", "Gamma", "Alpha"],
+      product: ["Alpha", "Beta", "Gamma"],
+      detail: ["Beta", "Alpha", "Gamma"],
+      subcategory: ["Beta", "Alpha", "Gamma"],
+      source: ["Beta", "Alpha", "Gamma"],
+    });
+    expect(result.activeSortKeys).toEqual(["name", "bpm", "beats", "product", "detail", "subcategory", "source"]);
+  });
+
+  test("data helpers surface discovered sample subcategories even when the configured list is empty", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(async (modPath) => {
       const mod = await import(/* @vite-ignore */ modPath);
@@ -216,7 +362,7 @@ test.describe("data module edge cases", () => {
     }, DATA_MOD);
 
     expect(result.ids).toEqual(["Bass"]);
-    expect(result.bassSubcategories).toEqual(["unsorted"]);
+    expect(result.bassSubcategories).toEqual(["unsorted", "riff"]);
     expect(result.bassCount).toBe(2);
     expect(result.rejectedBySubcategory).toBe(0);
   });
@@ -486,6 +632,116 @@ test.describe("library edge cases", () => {
     expect(result.indexFetches).toBe(2);
     expect(result.sampleFetches).toBe(2);
     expect(result.sampleName).toBe("Deep");
+  });
+
+  test("FetchLibrary.loadSamples({ force: true }) bypasses the cache", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { FetchLibrary } = await import(/* @vite-ignore */ modPath);
+      const originalFetch = globalThis.fetch;
+      let fetchCount = 0;
+
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        if (url.endsWith("output/metadata.json")) fetchCount++;
+        return new Response(JSON.stringify({
+          samples: [{ filename: "kick.wav", category: "Drum", alias: "Kick" }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      };
+
+      try {
+        const library = new FetchLibrary();
+        const first = await library.loadSamples();
+        const cached = await library.loadSamples(); // should not re-fetch
+        const forced = await library.loadSamples({ force: true }); // must re-fetch
+        return {
+          sameObject: first === cached,
+          forcedDifferentObject: first !== forced,
+          fetchCount,
+        };
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }, LIBRARY_MOD);
+
+    expect(result.sameObject).toBe(true);
+    expect(result.forcedDifferentObject).toBe(true);
+    expect(result.fetchCount).toBe(2); // initial load + forced reload
+  });
+
+  test("FetchLibrary.moveSample sends PUT /__sample-move and invalidates the samples cache", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { FetchLibrary } = await import(/* @vite-ignore */ modPath);
+      const originalFetch = globalThis.fetch;
+      let sampleFetches = 0;
+      let moveBodies: string[] = [];
+      let moveStatuses: number[] = [];
+
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        if (url.endsWith("output/metadata.json")) {
+          sampleFetches++;
+          return new Response(JSON.stringify({
+            samples: [{ filename: "kick.wav", category: "Drum", alias: "Kick" }],
+          }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        if (url.endsWith("/__sample-move")) {
+          moveBodies.push(typeof init?.body === "string" ? init.body : "");
+          moveStatuses.push(204);
+          return new Response(null, { status: 204 });
+        }
+        return new Response(null, { status: 404 });
+      };
+
+      try {
+        const library = new FetchLibrary();
+        const before = await library.loadSamples();
+        const beforeFetches = sampleFetches;
+
+        await library.moveSample(
+          { filename: "kick.wav", category: "Drum", subcategory: "kick" },
+          "Percussion",
+          "misc",
+        );
+
+        const after = await library.loadSamples(); // cache invalidated → re-fetch
+        return {
+          beforeSampleCount: before.length,
+          afterSampleCount: after.length,
+          sampleFetchesBefore: beforeFetches,
+          sampleFetchesTotal: sampleFetches,
+          moveCallCount: moveBodies.length,
+          moveStatus: moveStatuses[0],
+          moveBodyParsed: JSON.parse(moveBodies[0] ?? "{}"),
+        };
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }, LIBRARY_MOD);
+
+    expect(result.moveCallCount).toBe(1);
+    expect(result.moveStatus).toBe(204);
+    expect(result.moveBodyParsed).toMatchObject({
+      filename: "kick.wav",
+      oldCategory: "Drum",
+      oldSubcategory: "kick",
+      newCategory: "Percussion",
+      newSubcategory: "misc",
+    });
+    // Cache was invalidated: second loadSamples triggered a second fetch.
+    expect(result.sampleFetchesBefore).toBe(1);
+    expect(result.sampleFetchesTotal).toBe(2);
   });
 
   test("FetchLibrary loads and saves category config in development mode", async ({ page }) => {
@@ -974,6 +1230,7 @@ test.describe("render edge cases", () => {
         __subcatHarness: { renderEditing: (value?: string) => void };
       }).__subcatHarness.renderEditing();
     });
+    await expect(page.locator("#harness-tabs #subcategory-add-input")).toBeVisible();
     await page.locator("#outside-target").click();
 
     const result = await page.evaluate(() => {
@@ -1233,6 +1490,10 @@ test.describe("render edge cases", () => {
         legacyTabsRowPresent: Boolean(shellHost.querySelector(".spa-tabs-row")),
         gridId: shell.grid.id,
         bpmValue: shell.bpm.value,
+        bpmOptions: Array.from(shell.bpm.options as HTMLCollectionOf<HTMLOptionElement>).map((option) => ({
+          value: option.value,
+          label: option.textContent ?? "",
+        })),
         transportId: shell.transport.id,
       };
     }, RENDER_MOD);
@@ -1250,7 +1511,8 @@ test.describe("render edge cases", () => {
     expect(result.hasZoomInControl).toBe(true);
     expect(result.legacyTabsRowPresent).toBe(false);
     expect(result.gridId).toBe("sample-grid");
-    expect(result.bpmValue).toBe("140");
+    expect(result.bpmValue).toBe("");
+    expect(result.bpmOptions).toContainEqual({ value: "", label: "All" });
     expect(result.transportId).toBe("transport");
   });
 
@@ -1340,6 +1602,46 @@ test.describe("render edge cases", () => {
     expect(result.toggled).toEqual(["mock://long.wav"]);
     expect(result.transportName).toBe("long");
     expect(result.transportProgress).toBe(50);
+  });
+
+  test("renderSampleGrid disambiguates duplicate labels through every fallback stage", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const render = await import(/* @vite-ignore */ modPath);
+      const grid = document.createElement("div");
+      document.body.appendChild(grid);
+
+      render.renderSampleGrid(grid, [
+        { filename: "a.wav", alias: "Echo", category: "Loop", detail: "warm", product: "Dance_eJay1", bpm: 140, beats: 4 },
+        { filename: "b.wav", alias: "Echo", category: "Loop", detail: "warm", product: "Rave", bpm: 140, beats: 4 },
+        { filename: "c.wav", alias: "Echo", category: "Loop", product: "Rave", internal_name: "INT_C", bpm: 140, beats: 4 },
+        { filename: "d-left.wav", alias: "Echo", category: "Loop", product: "Rave", internal_name: "INT_C", sample_id: 7, bpm: 140, beats: 4 },
+        { filename: "d-right.wav", alias: "Echo", category: "Loop", product: "Rave", internal_name: "INT_C", sample_id: 7, bpm: 140, beats: 4 },
+        { filename: "d-source.wav", alias: "Echo", category: "Loop", product: "Rave", internal_name: "INT_C", sample_id: 7, source: "pack/echo.wav", bpm: 140, beats: 4 },
+      ], { toggle() {} } as never, {
+        loadIndex: () => Promise.resolve({ categories: [], mixLibrary: [] }),
+        loadSamples: () => Promise.resolve([]),
+        resolveAudioUrl: () => Promise.resolve("mock://echo.wav"),
+        dispose: () => {},
+      });
+
+      return [...grid.querySelectorAll<HTMLElement>(".sample-block")].map((block) => ({
+        label: block.querySelector(".sample-block-label")?.textContent ?? "",
+        meta: block.querySelector(".sample-block-meta")?.textContent ?? "",
+        title: block.title,
+      }));
+    }, RENDER_MOD);
+
+    expect(result.map((entry) => entry.label)).toEqual([
+      "Echo - warm - Dance eJay1 - a",
+      "Echo - warm - Rave - b",
+      "Echo - Rave - INT_C - c",
+      "Echo - Rave - INT_C - #7 - d-left",
+      "Echo - Rave - INT_C - #7 - d-right",
+      "Echo - Rave - INT_C - #7 - pack/echo.wav - d-source",
+    ]);
+    expect(result.every((entry) => entry.meta === "140 BPM · 4b")).toBe(true);
+    expect(result[5]?.title).toContain("Source: pack/echo.wav");
   });
 });
 
@@ -1837,6 +2139,8 @@ test.describe("main edge cases", () => {
     await expect.poll(() => categoryFetches).toBe(2);
     releaseRefresh();
 
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator('.category-btn[data-category-id="Bass"]')).toBeVisible();
     await expect(page.locator('.category-btn.is-active')).toHaveAttribute("data-category-id", "Bass");
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:riff"]')).toBeVisible();
     await expect(page.locator('.subcategory-tab.is-active')).toHaveAttribute("data-tab-id", "subcategory:unsorted");
@@ -1922,7 +2226,7 @@ test.describe("main edge cases", () => {
     await expect(page.locator("#subcategory-tabs .subcategory-tab")).toHaveCount(3);
   });
 
-  test("the real app hardcodes special tabs and removes only user subcategories through the context menu", async ({ page }) => {
+  test("the real app hardcodes special tabs and removes only configured user subcategories through the context menu", async ({ page }) => {
     let saveCalls = 0;
     let categoryConfig = {
       categories: [{ id: "Drum", name: "Drum", subcategories: ["kick", "fills"] }],
@@ -2018,11 +2322,14 @@ test.describe("main edge cases", () => {
       categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"] }],
     });
 
-    await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:fills"]')).toHaveCount(0);
+    await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:fills"]')).toBeVisible();
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:kick"]')).toBeVisible();
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:misc"]')).toBeVisible();
 
     await page.locator('.subcategory-tab[data-tab-id="subcategory:misc"]').click();
+    await expect(page.locator(".sample-grid")).not.toContainText("Fill");
+
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:fills"]').click();
     await expect(page.locator(".sample-grid")).toContainText("Fill");
   });
 
@@ -2073,6 +2380,951 @@ test.describe("main edge cases", () => {
     expect(saveCalls).toBe(1);
     await expect(page.locator("#error-toast")).toHaveText("Could not save categories.json.");
     await expect(page.locator("#subcategory-add-input")).toBeVisible();
+  });
+
+  test("the real app exercises sample move, sort, and watcher refresh flows", async ({ page }) => {
+    let metadataVersion = 0;
+    let categoryVersion = 0;
+    let moveCalls = 0;
+
+    await page.route("**/data/index.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"], sampleCount: 2 },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          ],
+          mixLibrary: [],
+        }),
+      });
+    });
+
+    await page.route("**/output/categories.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            {
+              id: "Drum",
+              name: "Drum",
+              subcategories: categoryVersion === 0 ? ["kick", "fills"] : ["kick", "fills", "snare"],
+            },
+            { id: "Bass", name: "Bass", subcategories: [] },
+          ],
+        }),
+      });
+    });
+
+    await page.route("**/output/metadata.json*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          samples: metadataVersion === 0
+            ? [
+                { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+                { filename: "fill.wav", alias: "Fill", category: "Drum", subcategory: "fills", bpm: 140, beats: 4 },
+                { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+              ]
+            : [
+                { filename: "kick.wav", alias: "Kick Reloaded", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+                { filename: "fill.wav", alias: "Fill", category: "Drum", subcategory: "fills", bpm: 140, beats: 4 },
+                { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+              ],
+        }),
+      });
+    });
+
+    await page.route("**/__sample-move", async (route) => {
+      if (route.request().method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+
+      moveCalls += 1;
+      await route.fulfill({ status: 204, body: "" });
+    });
+
+    await page.goto("/");
+    await page.locator('.category-btn[data-category-id="Drum"]').click();
+
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:fills"]').click();
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:kick"]').click();
+    await page.locator("#bpm-filter").selectOption("140");
+
+    await page.locator("#sample-search").fill("Kick");
+    await expect(page.locator("#sample-search-clear")).toBeVisible();
+    await expect(page.locator(".sample-grid")).toContainText("Kick");
+    await page.locator("#sample-search-clear").click();
+
+    await page.locator(".sample-block").first().click({ button: "right" });
+    await expect(page.locator("#sample-context-menu .ctx-menu-header")).toHaveText("Move to");
+    await page.mouse.click(8, 8);
+    await expect(page.locator("#sample-context-menu")).toHaveCount(0);
+
+    await page.locator(".sample-block").first().click({ button: "right" });
+    const bassMoveItem = page.locator("#sample-context-menu .ctx-menu-item.has-submenu").filter({ hasText: "Bass" });
+    await bassMoveItem.hover();
+    await bassMoveItem.locator(".ctx-submenu .ctx-menu-item").first().click();
+    await expect.poll(() => moveCalls).toBe(1);
+    await expect(page.locator(".sample-grid-empty")).toHaveText("No samples in this selection.");
+
+    metadataVersion = 1;
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("sample-metadata-updated"));
+    });
+    await expect(page.locator(".sample-grid")).toContainText("Kick Reloaded");
+
+    categoryVersion = 1;
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("category-config-updated"));
+    });
+    await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:snare"]')).toBeVisible();
+
+    await page.evaluate(() => {
+      const grid = document.getElementById("sample-grid");
+      if (!grid) {
+        throw new Error("Missing sample grid");
+      }
+
+      grid.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 24,
+        clientY: 24,
+      }));
+    });
+    await expect(page.locator("#sample-context-menu .ctx-menu-header")).toHaveText("Sort by");
+    await page.locator("#sample-context-menu button.ctx-menu-item").first().click();
+    await expect(page.locator("#sample-context-menu")).toHaveCount(0);
+
+    const result = await page.evaluate(() => {
+      const zoomScale = document.documentElement.style.getPropertyValue("--sample-bubble-zoom-scale") || "";
+      window.dispatchEvent(new Event("beforeunload"));
+      return { zoomScale };
+    });
+
+    expect(result.zoomScale).toBe("1");
+  });
+
+  test("the real app shows a toast when moving a sample fails and supports sort-menu cleanup", async ({ page }) => {
+    let moveCalls = 0;
+
+    await page.route("**/data/index.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"], sampleCount: 2 },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          ],
+          mixLibrary: [],
+        }),
+      });
+    });
+
+    await page.route("**/output/categories.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"] },
+            { id: "Bass", name: "Bass", subcategories: [] },
+          ],
+        }),
+      });
+    });
+
+    await page.route("**/output/metadata.json*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          samples: [
+            { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+            { filename: "fill.wav", alias: "Fill", category: "Drum", subcategory: "fills", bpm: 140, beats: 4 },
+            { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+          ],
+        }),
+      });
+    });
+
+    await page.route("**/__sample-move", async (route) => {
+      if (route.request().method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+
+      moveCalls += 1;
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "move failed" }),
+      });
+    });
+
+    await page.goto("/");
+    await page.locator('.category-btn[data-category-id="Drum"]').click();
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:kick"]').click();
+
+    await page.locator(".sample-block").first().click({ button: "right" });
+    const bassMoveItem = page.locator("#sample-context-menu .ctx-menu-item.has-submenu").filter({ hasText: "Bass" });
+    await bassMoveItem.hover();
+    await bassMoveItem.locator(".ctx-submenu .ctx-menu-item").first().click();
+
+    await expect.poll(() => moveCalls).toBe(1);
+    await expect(page.locator("#error-toast")).toHaveText("Could not move sample — check the console for details.");
+
+    await page.evaluate(() => {
+      const grid = document.getElementById("sample-grid");
+      if (!grid) {
+        throw new Error("Missing sample grid");
+      }
+
+      grid.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 24,
+        clientY: 24,
+      }));
+    });
+    await expect(page.locator("#sample-context-menu .ctx-menu-header")).toHaveText("Sort by");
+    await page.locator("#sample-context-menu button.ctx-menu-item").first().click();
+    await expect(page.locator("#sample-context-menu")).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const grid = document.getElementById("sample-grid");
+      if (!grid) {
+        throw new Error("Missing sample grid");
+      }
+
+      grid.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 24,
+        clientY: 24,
+      }));
+    });
+    await expect(page.locator("#sample-context-menu")).toBeVisible();
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    await expect(page.locator("#sample-context-menu")).toHaveCount(0);
+  });
+
+  test("the real app tolerates failing sample metadata refreshes while UI state resets", async ({ page }) => {
+    let failRefresh = false;
+
+    await page.route("**/data/index.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"], sampleCount: 2 },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          ],
+          mixLibrary: [],
+        }),
+      });
+    });
+
+    await page.route("**/output/categories.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"] },
+            { id: "Bass", name: "Bass", subcategories: [] },
+          ],
+        }),
+      });
+    });
+
+    await page.route("**/output/metadata.json*", async (route) => {
+      if (failRefresh) {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "refresh failed" }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          samples: [
+            { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+            { filename: "fill.wav", alias: "Fill", category: "Drum", subcategory: "fills", bpm: 140, beats: 4 },
+            { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+          ],
+        }),
+      });
+    });
+
+    await page.goto("/");
+    await page.locator('.category-btn[data-category-id="Drum"]').click();
+
+    await page.locator("#subcategory-add").click();
+    await expect(page.locator("#subcategory-add-input")).toBeVisible();
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:fills"]').click({ button: "right" });
+    await expect(page.locator("#subcategory-context-menu")).toBeVisible();
+
+    await page.locator('.category-btn[data-category-id="Bass"]').click();
+    await expect(page.locator("#subcategory-add-input")).toHaveCount(0);
+    await expect(page.locator("#subcategory-context-menu")).toHaveCount(0);
+    await expect(page.locator(".sample-grid")).toContainText("Bass");
+
+    failRefresh = true;
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("sample-metadata-updated"));
+    });
+    await expect(page.locator('.category-btn.is-active')).toHaveAttribute("data-category-id", "Bass");
+    await expect(page.locator(".sample-grid")).toContainText("Bass");
+  });
+
+  test("the real app handles context-menu edge targets and explicit sort changes", async ({ page }) => {
+    await page.route("**/data/index.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"], sampleCount: 2 },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          ],
+          mixLibrary: [],
+        }),
+      });
+    });
+
+    await page.route("**/output/categories.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"] },
+            { id: "Bass", name: "Bass", subcategories: [] },
+          ],
+        }),
+      });
+    });
+
+    await page.route("**/output/metadata.json*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          samples: [
+            { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 140, beats: 4, detail: "tight" },
+            { filename: "fill.wav", alias: "Fill", category: "Drum", subcategory: "fills", bpm: 140, beats: 8, detail: "busy" },
+            { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+          ],
+        }),
+      });
+    });
+
+    await page.goto("/");
+    await page.locator('.category-btn[data-category-id="Drum"]').click();
+
+    await page.evaluate(() => {
+      const grid = document.getElementById("sample-grid");
+      if (!grid) {
+        throw new Error("Missing sample grid");
+      }
+
+      const ghost = document.createElement("button");
+      ghost.className = "sample-block";
+      ghost.dataset.filename = "ghost.wav";
+      grid.appendChild(ghost);
+      ghost.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 28,
+        clientY: 28,
+      }));
+      grid.removeChild(ghost);
+    });
+    await expect(page.locator("#sample-context-menu")).toHaveCount(0);
+
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:fills"]').click({ button: "right" });
+    await expect(page.locator("#subcategory-context-menu")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#subcategory-context-menu")).toHaveCount(0);
+
+    await page.locator("#sample-search").fill("Kick");
+    await expect(page.locator(".sample-grid")).toContainText("Kick");
+
+    await page.evaluate(() => {
+      const grid = document.getElementById("sample-grid");
+      if (!grid) {
+        throw new Error("Missing sample grid");
+      }
+
+      grid.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 24,
+        clientY: 24,
+      }));
+    });
+    await expect(page.locator("#sample-context-menu .ctx-menu-header")).toHaveText("Sort by");
+    await page.locator("#sample-context-menu button.ctx-menu-item").filter({ hasText: "Name" }).click();
+    await expect(page.locator("#sample-context-menu")).toHaveCount(0);
+  });
+
+  test("the real app sorts multiple visible samples and moves one via contextmenu dispatch", async ({ page }) => {
+    let moveCalls = 0;
+
+    await page.route("**/data/index.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick"], sampleCount: 2 },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          ],
+          mixLibrary: [],
+        }),
+      });
+    });
+
+    await page.route("**/output/categories.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick"] },
+            { id: "Bass", name: "Bass", subcategories: [] },
+          ],
+        }),
+      });
+    });
+
+    await page.route("**/output/metadata.json*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          samples: [
+            { filename: "zulu.wav", alias: "Zulu", category: "Drum", subcategory: "kick", bpm: 140, beats: 8 },
+            { filename: "alpha.wav", alias: "Alpha", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+            { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+          ],
+        }),
+      });
+    });
+
+    await page.route("**/__sample-move", async (route) => {
+      if (route.request().method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+
+      moveCalls += 1;
+      await route.fulfill({ status: 204, body: "" });
+    });
+
+    await page.goto("/");
+    await page.locator('.category-btn[data-category-id="Drum"]').click();
+    await expect(page.locator(".sample-block")).toHaveCount(2);
+
+    const result = await page.evaluate(async () => {
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitForTree = async (sidebar: HTMLElement): Promise<void> => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (
+            sidebar.querySelector(".mix-tree-group-label") ||
+            sidebar.querySelector(".archive-tree-empty")
+          ) {
+            return;
+          }
+          await flush();
+        }
+      };
+
+      const dispatchContextMenu = (
+        controller: { handleContextMenu: (event: MouseEvent) => void },
+        target: HTMLElement,
+        init: MouseEventInit,
+      ): void => {
+        const event = new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          ...init,
+        });
+        target.dispatchEvent(event);
+        controller.handleContextMenu(event);
+      };
+
+      const labels = (): string[] => [...document.querySelectorAll<HTMLElement>(".sample-block-label")]
+        .map((entry) => entry.textContent ?? "");
+
+      const search = document.getElementById("sample-search") as HTMLInputElement | null;
+      search!.value = "140";
+      search!.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+
+      const grid = document.getElementById("sample-grid");
+      if (!grid) {
+        throw new Error("Missing sample grid");
+      }
+
+      grid.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 24,
+        clientY: 24,
+      }));
+      await flush();
+      const sortButton = [...document.querySelectorAll<HTMLButtonElement>("#sample-context-menu button.ctx-menu-item")]
+        .find((button) => button.textContent?.includes("Name"));
+      sortButton?.click();
+      await flush();
+      const sortedLabels = labels();
+
+      const firstBlock = document.querySelector<HTMLElement>(".sample-block");
+      if (!firstBlock) {
+        throw new Error("Missing sorted sample block");
+      }
+
+      firstBlock.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: window.innerWidth - 12,
+        clientY: 40,
+      }));
+      await flush();
+      const bassMoveItem = [...document.querySelectorAll<HTMLElement>("#sample-context-menu .ctx-menu-item.has-submenu")]
+        .find((entry) => entry.querySelector("span")?.textContent === "Bass");
+      bassMoveItem?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      (bassMoveItem?.querySelector(".ctx-submenu .ctx-menu-item") as HTMLButtonElement | null)?.click();
+      await flush();
+
+      return {
+        sortedLabels,
+        gridTextAfterMove: document.getElementById("sample-grid")?.textContent ?? "",
+      };
+    });
+
+    expect(result.sortedLabels.slice(0, 2)).toEqual(["Alpha", "Zulu"]);
+    expect(moveCalls).toBe(1);
+    expect(result.gridTextAfterMove).not.toContain("Alpha");
+  });
+
+  test("main opens sample move and sort menus and refreshes sample metadata on demand", async ({ page }) => {
+    await page.goto("/");
+
+    const result = await page.evaluate(async (modPath) => {
+      const library = await import(/* @vite-ignore */ modPath);
+      let metadataVersion = 0;
+      let moveCalls = 0;
+      let failedMoveCalls = 0;
+      const moveTargets: Array<{ category: string; subcategory: string | null }> = [];
+
+      class FakeAudio {
+        src = "";
+        currentTime = 0;
+        duration = 0;
+        paused = true;
+        ended = false;
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        play(): Promise<void> {
+          return Promise.resolve();
+        }
+        pause(): void {}
+      }
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const openContextMenu = (target: Element, clientX: number, clientY: number): void => {
+        target.dispatchEvent(new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX,
+          clientY,
+        }));
+      };
+
+      const firstSubmenuItemFor = (categoryName: string): HTMLButtonElement => {
+        const categoryItem = [...document.querySelectorAll<HTMLElement>("#sample-context-menu .ctx-menu-item.has-submenu")]
+          .find((entry) => entry.querySelector("span")?.textContent === categoryName);
+        if (!categoryItem) {
+          throw new Error(`Missing category menu item: ${categoryName}`);
+        }
+
+        categoryItem.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+        const button = categoryItem.querySelector<HTMLButtonElement>(".ctx-submenu .ctx-menu-item");
+        if (!button) {
+          throw new Error(`Missing submenu button for ${categoryName}`);
+        }
+
+        return button;
+      };
+
+      (window as unknown as { Audio: typeof Audio }).Audio = FakeAudio as unknown as typeof Audio;
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"], sampleCount: 2 },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          ],
+          mixLibrary: [],
+        };
+      };
+      library.FetchLibrary.prototype.loadSamples = async function () {
+        return metadataVersion === 0
+          ? [
+              { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+              { filename: "fill.wav", alias: "Fill", category: "Drum", subcategory: "fills", bpm: 140, beats: 4 },
+              { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+            ]
+          : [
+              { filename: "kick.wav", alias: "Kick Reloaded", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+              { filename: "fill.wav", alias: "Fill", category: "Drum", subcategory: "fills", bpm: 140, beats: 4 },
+              { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+            ];
+      };
+      library.FetchLibrary.prototype.loadCategoryConfig = async function () {
+        return {
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"] },
+            { id: "Bass", name: "Bass", subcategories: [] },
+          ],
+        };
+      };
+      library.FetchLibrary.prototype.canWriteCategoryConfig = function () {
+        return true;
+      };
+      library.FetchLibrary.prototype.saveCategoryConfig = async function () {};
+      library.FetchLibrary.prototype.resolveAudioUrl = async function (sample: { filename: string }) {
+        return `mock://${sample.filename}`;
+      };
+      library.FetchLibrary.prototype.moveSample = async function (
+        _sample: { filename: string },
+        newCategory: string,
+        newSubcategory: string | null,
+      ) {
+        moveCalls += 1;
+        moveTargets.push({ category: newCategory, subcategory: newSubcategory });
+        if (moveCalls === 2) {
+          failedMoveCalls += 1;
+          throw new Error("move failed");
+        }
+      };
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      document.body.innerHTML = '<div id="app"></div>';
+      await import(`/src/main.ts?scenario=sample-context-${Date.now()}`);
+      await flush();
+
+      const kickTab = document.querySelector<HTMLButtonElement>('.subcategory-tab[data-tab-id="subcategory:kick"]');
+      const grid = document.getElementById("sample-grid");
+      const firstBlock = document.querySelector<HTMLElement>(".sample-block");
+      if (!kickTab || !grid || !firstBlock) {
+        throw new Error("Missing initial sample-grid state");
+      }
+
+      openContextMenu(firstBlock, window.innerWidth - 12, 32);
+      await flush();
+
+      const moveMenu = document.getElementById("sample-context-menu");
+      const moveHeader = moveMenu?.querySelector(".ctx-menu-header")?.textContent ?? "";
+      const moveMenuFlip = moveMenu?.classList.contains("ctx-menu--flip") ?? false;
+
+      const PointerCtor = window.PointerEvent ?? MouseEvent;
+      document.body.dispatchEvent(new PointerCtor("pointerdown", { bubbles: true, clientX: 4, clientY: 4 }));
+      await flush();
+      const dismissedByPointer = !document.getElementById("sample-context-menu");
+
+      openContextMenu(firstBlock, window.innerWidth - 12, 32);
+      await flush();
+      firstSubmenuItemFor("Bass").click();
+      await flush();
+      const gridAfterMove = grid.textContent ?? "";
+
+      metadataVersion = 1;
+      window.dispatchEvent(new CustomEvent("sample-metadata-updated"));
+      await flush();
+      await flush();
+      const gridAfterRefresh = grid.textContent ?? "";
+
+      openContextMenu(grid, 24, 24);
+      await flush();
+      const sortHeader = document.querySelector("#sample-context-menu .ctx-menu-header")?.textContent ?? "";
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await flush();
+      const sortDismissedByEscape = !document.getElementById("sample-context-menu");
+
+      openContextMenu(grid, 24, 24);
+      await flush();
+      const firstSortButton = document.querySelector<HTMLButtonElement>("#sample-context-menu button.ctx-menu-item");
+      firstSortButton?.click();
+      await flush();
+      const sortClosedAfterSelect = !document.getElementById("sample-context-menu");
+
+      const refreshedBlock = document.querySelector<HTMLElement>(".sample-block");
+      if (!refreshedBlock) {
+        throw new Error("Missing refreshed sample block");
+      }
+
+      openContextMenu(refreshedBlock, window.innerWidth - 12, 40);
+      await flush();
+      firstSubmenuItemFor("Bass").click();
+      await flush();
+
+      return {
+        moveHeader,
+        moveMenuFlip,
+        dismissedByPointer,
+        gridAfterMove,
+        gridAfterRefresh,
+        sortHeader,
+        sortDismissedByEscape,
+        sortClosedAfterSelect,
+        moveCalls,
+        failedMoveCalls,
+        moveTargets,
+        toastText: document.getElementById("error-toast")?.textContent ?? "",
+      };
+    }, LIBRARY_MOD);
+
+    expect(result.moveHeader).toBe("Move to");
+    expect(result.moveMenuFlip).toBe(true);
+    expect(result.dismissedByPointer).toBe(true);
+    expect(result.gridAfterMove).toContain("No samples in this selection.");
+    expect(result.gridAfterRefresh).toContain("Kick Reloaded");
+    expect(result.sortHeader).toBe("Sort by");
+    expect(result.sortDismissedByEscape).toBe(true);
+    expect(result.sortClosedAfterSelect).toBe(true);
+    expect(result.moveCalls).toBe(2);
+    expect(result.failedMoveCalls).toBe(1);
+    expect(result.moveTargets).toEqual([
+      { category: "Bass", subcategory: null },
+      { category: "Bass", subcategory: null },
+    ]);
+    expect(result.toastText).toBe("Could not move sample — check the console for details.");
+  });
+
+  test("the coverage harness imports exact main.ts and exercises menu and refresh branches", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (modPath) => {
+      const library = await import(/* @vite-ignore */ modPath);
+      let metadataVersion = 0;
+      let categoryVersion = 0;
+      let moveCalls = 0;
+
+      class FakeAudio {
+        src = "";
+        currentTime = 0;
+        duration = 0;
+        paused = true;
+        ended = false;
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        play(): Promise<void> {
+          return Promise.resolve();
+        }
+        pause(): void {}
+      }
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const openContextMenu = (target: Element, clientX: number, clientY: number): void => {
+        target.dispatchEvent(new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX,
+          clientY,
+        }));
+      };
+
+      (window as unknown as { Audio: typeof Audio }).Audio = FakeAudio as unknown as typeof Audio;
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "fills"], sampleCount: 2 },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          ],
+          mixLibrary: [],
+        };
+      };
+      library.FetchLibrary.prototype.loadSamples = async function () {
+        return metadataVersion === 0
+          ? [
+              { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+              { filename: "fill.wav", alias: "Fill", category: "Drum", subcategory: "fills", bpm: 140, beats: 4 },
+              { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+            ]
+          : [
+              { filename: "kick.wav", alias: "Kick Reloaded", category: "Drum", subcategory: "kick", bpm: 140, beats: 4 },
+              { filename: "fill.wav", alias: "Fill", category: "Drum", subcategory: "fills", bpm: 140, beats: 4 },
+              { filename: "bass.wav", alias: "Bass", category: "Bass", bpm: 140, beats: 4 },
+            ];
+      };
+      library.FetchLibrary.prototype.loadCategoryConfig = async function () {
+        return {
+          categories: [
+            {
+              id: "Drum",
+              name: "Drum",
+              subcategories: categoryVersion === 0 ? ["kick", "fills"] : ["kick", "fills", "snare"],
+            },
+            { id: "Bass", name: "Bass", subcategories: [] },
+          ],
+        };
+      };
+      library.FetchLibrary.prototype.canWriteCategoryConfig = function () {
+        return true;
+      };
+      library.FetchLibrary.prototype.saveCategoryConfig = async function () {};
+      library.FetchLibrary.prototype.resolveAudioUrl = async function (sample: { filename: string }) {
+        return `mock://${sample.filename}`;
+      };
+      library.FetchLibrary.prototype.moveSample = async function () {
+        moveCalls += 1;
+      };
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      // @ts-expect-error Vite serves browser modules from /src during page-eval tests.
+      await import("/src/main.ts");
+      await flush();
+
+      const addButton = document.getElementById("subcategory-add") as HTMLButtonElement | null;
+      addButton?.click();
+      await flush();
+
+      const fillsTab = document.querySelector<HTMLButtonElement>('.subcategory-tab[data-tab-id="subcategory:fills"]');
+      fillsTab?.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 32,
+        clientY: 32,
+      }));
+      await flush();
+
+      const bassCategory = document.querySelector<HTMLButtonElement>('.category-btn[data-category-id="Bass"]');
+      bassCategory?.click();
+      await flush();
+
+      const drumCategory = document.querySelector<HTMLButtonElement>('.category-btn[data-category-id="Drum"]');
+      drumCategory?.click();
+      await flush();
+
+      const fillsTabAfterReset = document.querySelector<HTMLButtonElement>('.subcategory-tab[data-tab-id="subcategory:fills"]');
+      fillsTabAfterReset?.click();
+      await flush();
+      const kickTab = document.querySelector<HTMLButtonElement>('.subcategory-tab[data-tab-id="subcategory:kick"]');
+      kickTab?.click();
+      await flush();
+
+      const searchInput = document.getElementById("sample-search") as HTMLInputElement | null;
+      searchInput!.value = "Kick";
+      searchInput!.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+
+      const searchClear = document.getElementById("sample-search-clear") as HTMLButtonElement | null;
+      searchClear?.click();
+      await flush();
+
+      const firstBlock = document.querySelector<HTMLElement>(".sample-block");
+      if (!firstBlock) {
+        throw new Error("Missing sample block");
+      }
+
+      openContextMenu(firstBlock, window.innerWidth - 12, 40);
+      await flush();
+      const moveMenuVisible = Boolean(document.getElementById("sample-context-menu"));
+      const PointerCtor = window.PointerEvent ?? MouseEvent;
+      document.body.dispatchEvent(new PointerCtor("pointerdown", { bubbles: true, clientX: 4, clientY: 4 }));
+      await flush();
+
+      openContextMenu(firstBlock, window.innerWidth - 12, 40);
+      await flush();
+      const bassMoveItem = [...document.querySelectorAll<HTMLElement>("#sample-context-menu .ctx-menu-item.has-submenu")]
+        .find((entry) => entry.querySelector("span")?.textContent === "Bass");
+      bassMoveItem?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      (bassMoveItem?.querySelector(".ctx-submenu .ctx-menu-item") as HTMLButtonElement | null)?.click();
+      await flush();
+
+      metadataVersion = 1;
+      window.dispatchEvent(new CustomEvent("sample-metadata-updated"));
+      await flush();
+      await flush();
+
+      const grid = document.getElementById("sample-grid");
+      if (!grid) {
+        throw new Error("Missing sample grid");
+      }
+
+      openContextMenu(grid, 24, 24);
+      await flush();
+      (document.querySelector("#sample-context-menu button.ctx-menu-item") as HTMLButtonElement | null)?.click();
+      await flush();
+
+      categoryVersion = 1;
+      window.dispatchEvent(new CustomEvent("category-config-updated"));
+      await flush();
+      await flush();
+
+      const snareTab = document.querySelector<HTMLButtonElement>('.subcategory-tab[data-tab-id="subcategory:snare"]');
+      snareTab?.click();
+      await flush();
+
+      return {
+        moveCalls,
+        moveMenuVisible,
+        activeTab: document.querySelector<HTMLElement>(".subcategory-tab.is-active")?.dataset.tabId ?? null,
+        hasSnareTab: Boolean(snareTab),
+        gridText: document.getElementById("sample-grid")?.textContent ?? "",
+        searchClearHidden: document.getElementById("sample-search-clear")?.classList.contains("is-hidden") ?? false,
+      };
+    }, LIBRARY_MOD);
+
+    expect(result.moveCalls).toBe(1);
+    expect(result.moveMenuVisible).toBe(true);
+    expect(result.hasSnareTab).toBe(true);
+    expect(result.activeTab).toBe("subcategory:snare");
+    expect(result.gridText).toContain("No samples in this selection.");
+    expect(result.searchClearHidden).toBe(true);
   });
 
   test("the real app switches configured subcategory tabs, BPM filters, categories, and playback state", async ({ page }) => {
@@ -2310,10 +3562,15 @@ test.describe("main edge cases", () => {
     await expect(page.locator(".category-btn")).toHaveCount(2);
     await expect(page.locator(".category-system-btn")).toHaveCount(2);
     await expect(page.locator('.category-system-btn[data-category-id="Unsorted"]')).toBeVisible();
-    await expect(page.locator(".subcategory-tab")).toHaveCount(1);
+    await expect(page.locator(".subcategory-tab")).toHaveCount(2);
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:unsorted"]')).toContainText("unsorted");
-    await expect(page.locator(".sample-block")).toHaveCount(2);
+    await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:riff"]')).toContainText("riff");
+    await expect(page.locator(".sample-block")).toHaveCount(1);
     await expect(page.locator(".sample-grid")).toContainText("Bass 140");
+    await expect(page.locator(".sample-grid")).not.toContainText("Bass Riff");
+
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:riff"]').click();
+    await expect(page.locator(".sample-block")).toHaveCount(1);
     await expect(page.locator(".sample-grid")).toContainText("Bass Riff");
 
     await page.locator('.category-system-btn[data-category-id="Unsorted"]').click();
@@ -2342,7 +3599,7 @@ test.describe("main edge cases", () => {
     await expect(page.locator("#transport-name")).toHaveText("No sample playing");
   });
 
-  test("main shows the hardcoded unsorted tab and keeps unmatched samples visible when a category has no configured subcategories", async ({ page }) => {
+  test("main shows the hardcoded unsorted tab alongside discovered sample subcategories when config is empty", async ({ page }) => {
     await page.goto("/");
 
     await page.evaluate(async (modPath) => {
@@ -2394,11 +3651,16 @@ test.describe("main edge cases", () => {
       await Promise.resolve();
     }, LIBRARY_MOD);
 
-    await expect(page.locator("#subcategory-tabs .subcategory-tab")).toHaveCount(1);
+    await expect(page.locator("#subcategory-tabs .subcategory-tab")).toHaveCount(2);
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:unsorted"]')).toBeVisible();
+    await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:riff"]')).toBeVisible();
     await expect(page.locator("#subcategory-add")).toBeVisible();
-    await expect(page.locator(".sample-block")).toHaveCount(2);
+    await expect(page.locator(".sample-block")).toHaveCount(1);
     await expect(page.locator(".sample-grid")).toContainText("Bass Plain");
+    await expect(page.locator(".sample-grid")).not.toContainText("Bass Riff");
+
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:riff"]').click();
+    await expect(page.locator(".sample-block")).toHaveCount(1);
     await expect(page.locator(".sample-grid")).toContainText("Bass Riff");
   });
 
@@ -2542,5 +3804,1165 @@ test.describe("main edge cases", () => {
 
     expect(result.warnings.some((message) => message.includes("Failed to refresh category config."))).toBe(true);
     expect(result.toastText).toBe("Could not save categories.json.");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sample-grid-context-menu module tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+test.describe("sample-grid-context-menu module", () => {
+  const SGCM_MOD = "/src/sample-grid-context-menu.ts";
+
+  test("controller handles edge branches without opening or dismissing the wrong menu", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    const result = await page.evaluate(async (modPath) => {
+      const { createSampleGridContextMenuController, SAMPLE_CONTEXT_MENU_ID } = await import(/* @vite-ignore */ modPath);
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const dispatchContextMenu = (
+        controller: { handleContextMenu: (event: MouseEvent) => void },
+        target: HTMLElement,
+        init: MouseEventInit,
+      ): void => {
+        const event = new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          ...init,
+        });
+        target.dispatchEvent(event);
+        controller.handleContextMenu(event);
+      };
+
+      const grid = document.createElement("div");
+      grid.className = "sample-grid";
+      document.body.appendChild(grid);
+
+      const outside = document.createElement("div");
+      document.body.appendChild(outside);
+
+      const ghostBlock = document.createElement("button");
+      ghostBlock.className = "sample-block";
+      ghostBlock.dataset.filename = "ghost.wav";
+      grid.appendChild(ghostBlock);
+
+      const realBlock = document.createElement("button");
+      realBlock.className = "sample-block";
+      realBlock.dataset.filename = "real.wav";
+      grid.appendChild(realBlock);
+
+      let refreshCalls = 0;
+      const sortCalls: Array<[string, string]> = [];
+      const moveCalls: Array<{ categoryId: string; subcategoryId: string | null }> = [];
+
+      const controller = createSampleGridContextMenuController({
+        getCategories: () => [{ id: "Bass", name: "Bass", sampleCount: 1, subcategories: [] }],
+        getCurrentGridSamples: () => [{ filename: "real.wav" }],
+        getSortState: () => ({ key: "name", dir: "asc" }),
+        setSortState: (key: string, dir: string) => {
+          sortCalls.push([key, dir]);
+        },
+        refreshSamples: () => {
+          refreshCalls += 1;
+        },
+        onMoveSample: (_sample: { filename: string }, categoryId: string, subcategoryId: string | null) => {
+          moveCalls.push({ categoryId, subcategoryId });
+        },
+      });
+
+      controller.close();
+
+      dispatchContextMenu(controller, outside, {
+        clientX: 10,
+        clientY: 10,
+      });
+      const openedOutsideGrid = Boolean(document.getElementById(SAMPLE_CONTEXT_MENU_ID));
+
+      dispatchContextMenu(controller, ghostBlock, {
+        clientX: 12,
+        clientY: 12,
+      });
+      const openedForMissingSample = Boolean(document.getElementById(SAMPLE_CONTEXT_MENU_ID));
+
+      dispatchContextMenu(controller, grid, {
+        clientX: 20,
+        clientY: 20,
+      });
+      await flush();
+
+      const PointerCtor = window.PointerEvent ?? MouseEvent;
+      document.querySelector("#sample-context-menu .ctx-menu-item")?.dispatchEvent(new PointerCtor("pointerdown", {
+        bubbles: true,
+      }));
+      const stayedOpenAfterInsidePointer = Boolean(document.getElementById(SAMPLE_CONTEXT_MENU_ID));
+
+      document.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+      }));
+      const stayedOpenAfterNonEscapeKey = Boolean(document.getElementById(SAMPLE_CONTEXT_MENU_ID));
+
+      window.dispatchEvent(new Event("resize"));
+      const closedAfterResize = !document.getElementById(SAMPLE_CONTEXT_MENU_ID);
+
+      dispatchContextMenu(controller, realBlock, {
+        clientX: window.innerWidth - 12,
+        clientY: 28,
+      });
+      await flush();
+
+      const bassMoveItem = [...document.querySelectorAll<HTMLElement>("#sample-context-menu .ctx-menu-item.has-submenu")]
+        .find((entry) => entry.querySelector("span")?.textContent === "Bass");
+      bassMoveItem?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      (bassMoveItem?.querySelector(".ctx-submenu .ctx-menu-item") as HTMLButtonElement | null)?.click();
+      await flush();
+
+      dispatchContextMenu(controller, grid, {
+        clientX: 24,
+        clientY: 24,
+      });
+      await flush();
+      (document.querySelector("#sample-context-menu button.ctx-menu-item") as HTMLButtonElement | null)?.click();
+      await flush();
+
+      return {
+        openedOutsideGrid,
+        openedForMissingSample,
+        stayedOpenAfterInsidePointer,
+        stayedOpenAfterNonEscapeKey,
+        closedAfterResize,
+        moveCalls,
+        sortCalls,
+        refreshCalls,
+      };
+    }, SGCM_MOD);
+
+    expect(result.openedOutsideGrid).toBe(false);
+    expect(result.openedForMissingSample).toBe(false);
+    expect(result.stayedOpenAfterInsidePointer).toBe(true);
+    expect(result.stayedOpenAfterNonEscapeKey).toBe(true);
+    expect(result.closedAfterResize).toBe(true);
+    expect(result.moveCalls).toEqual([{ categoryId: "Bass", subcategoryId: null }]);
+    expect(result.sortCalls).toEqual([["name", "desc"]]);
+    expect(result.refreshCalls).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// mix-file-browser module tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+test.describe("mix-file-browser module", () => {
+  const MFB_MOD = "/src/mix-file-browser.ts";
+
+  /**
+   * Build a minimal archive-sidebar DOM fixture that matches what
+   * `renderArchivePlaceholder` produces in `render.ts`.
+   */
+  function buildArchiveSidebar(): string {
+    return `
+      <aside id="archive-tree" class="archive-sidebar">
+        <div class="archive-header">
+          <span class="archive-title">Mix Archive</span>
+        </div>
+        <div class="archive-tree-content">
+          <p class="archive-placeholder">Load a .mix file to begin</p>
+        </div>
+      </aside>
+    `;
+  }
+
+  const SAMPLE_LIBRARY = [
+    {
+      id: "Dance_eJay1",
+      name: "Dance eJay 1",
+      mixes: [
+        { filename: "START.MIX", sizeBytes: 11234, format: "A" },
+        { filename: "LOVE.MIX", sizeBytes: 11234, format: "A" },
+      ],
+    },
+    {
+      id: "Dance_eJay2",
+      name: "Dance eJay 2",
+      mixes: [
+        { filename: "HAPPY.MIX", sizeBytes: 8219, format: "B" },
+      ],
+    },
+  ];
+
+  test("initMixFileBrowser adds is-awaiting-click and keyboard role to placeholder", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="archive-tree-test" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#archive-tree-test")!;
+      initMixFileBrowser(sidebar, {
+        isDev: true,
+        mixLibrary: [],
+        onSelectFile: () => {},
+      });
+
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content");
+      const ph = sidebar.querySelector<HTMLElement>(".archive-placeholder");
+      return {
+        awaiting: content?.classList.contains("is-awaiting-click"),
+        phRole: ph?.getAttribute("role"),
+        phTabindex: ph?.getAttribute("tabindex"),
+      };
+    }, MFB_MOD);
+
+    expect(result.awaiting).toBe(true);
+    expect(result.phRole).toBe("button");
+    expect(result.phTabindex).toBe("0");
+  });
+
+  test("initMixFileBrowser DEV mode: click renders product tree and sets header root", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="archive-tree-dev" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#archive-tree-dev")!;
+      initMixFileBrowser(sidebar, {
+        isDev: true,
+        mixLibrary: library,
+        onSelectFile: () => {},
+      });
+
+      // Trigger by clicking the sidebar
+      sidebar.click();
+
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
+      const groups = content.querySelectorAll(".mix-tree-group-header");
+      const header = sidebar.querySelector<HTMLElement>(".archive-header");
+
+      return {
+        awaiting: content.classList.contains("is-awaiting-click"),
+        groupCount: groups.length,
+        firstGroupLabel: groups[0]?.querySelector(".mix-tree-group-label")?.textContent,
+        headerTitle: header?.querySelector(".archive-title")?.textContent,
+        headerInfo: header?.querySelector(".archive-folder-info")?.textContent,
+      };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.awaiting).toBe(false);
+    expect(result.groupCount).toBe(2);
+    expect(result.firstGroupLabel).toBe("Dance eJay 1");
+    expect(result.headerTitle).toBe("Mix Archive");
+    expect(result.headerInfo).toBe("archive");
+  });
+
+  test("DEV mode: first group is auto-expanded, others are collapsed", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-expand" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-expand")!;
+      initMixFileBrowser(sidebar, {
+        isDev: true,
+        mixLibrary: library,
+        onSelectFile: () => {},
+      });
+
+      sidebar.click();
+
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
+      const items = content.querySelectorAll<HTMLElement>(".mix-tree-items");
+      return {
+        firstHidden: items[0]?.hidden,
+        secondHidden: items[1]?.hidden,
+      };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.firstHidden).toBe(false);
+    expect(result.secondHidden).toBe(true);
+  });
+
+  test("DEV mode: clicking a group header toggles expand / collapse", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-toggle" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-toggle")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+      sidebar.click();
+
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
+      const firstHeader = content.querySelector<HTMLButtonElement>(".mix-tree-group-header")!;
+      const firstItems = content.querySelector<HTMLElement>(".mix-tree-items")!;
+
+      const beforeHidden = firstItems.hidden;
+      firstHeader.click(); // collapse — tree is re-rendered; re-query
+      const afterCollapseHidden = content.querySelector<HTMLElement>(".mix-tree-items")!.hidden;
+      content.querySelector<HTMLButtonElement>(".mix-tree-group-header")!.click(); // expand again
+      const afterExpandHidden = content.querySelector<HTMLElement>(".mix-tree-items")!.hidden;
+
+      return { beforeHidden, afterCollapseHidden, afterExpandHidden };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.beforeHidden).toBe(false);
+    expect(result.afterCollapseHidden).toBe(true);
+    expect(result.afterExpandHidden).toBe(false);
+  });
+
+  test("DEV mode: clicking a .mix file calls onSelectFile with correct ref", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-select" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const selectedRefs: Array<{ label: string; group: string; source: unknown }> = [];
+
+      const sidebar = host.querySelector<HTMLElement>("#at-select")!;
+      initMixFileBrowser(sidebar, {
+        isDev: true,
+        mixLibrary: library,
+        onSelectFile: (ref: { label: string; group: string; source: unknown }) => { selectedRefs.push(ref); },
+      });
+
+      sidebar.click(); // load tree
+
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
+      const firstFile = content.querySelector<HTMLButtonElement>(".mix-tree-item")!;
+      firstFile.click();
+
+      const active = content.querySelector(".mix-tree-item.is-active");
+      return {
+        refCount: selectedRefs.length,
+        label: selectedRefs[0]?.label,
+        group: selectedRefs[0]?.group,
+        sourceType: (selectedRefs[0]?.source as { type: string })?.type,
+        activeLabel: active?.querySelector(".mix-tree-item-label")?.textContent,
+      };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.refCount).toBe(1);
+    expect(result.label).toBe("START.MIX");
+    expect(result.group).toBe("Dance eJay 1");
+    expect(result.sourceType).toBe("url");
+    expect(result.activeLabel).toBe("START.MIX");
+  });
+
+  test("DEV mode: second click on loaded sidebar is a no-op", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-noop" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-noop")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+      sidebar.click();
+      const groupsAfterFirst = sidebar.querySelectorAll(".mix-tree-group").length;
+      sidebar.click();
+      const groupsAfterSecond = sidebar.querySelectorAll(".mix-tree-group").length;
+
+      return { groupsAfterFirst, groupsAfterSecond };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.groupsAfterFirst).toBe(2);
+    expect(result.groupsAfterSecond).toBe(2); // unchanged
+  });
+
+  test("DEV mode: keyboard Enter on placeholder triggers tree load", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-kbd" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-kbd")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+
+      const ph = sidebar.querySelector<HTMLElement>(".archive-placeholder")!;
+      ph.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      return {
+        groups: sidebar.querySelectorAll(".mix-tree-group").length,
+      };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.groups).toBe(2);
+  });
+
+  test("DEV mode: keyboard Space on placeholder triggers tree load", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-kbd-space" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-kbd-space")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+
+      const ph = sidebar.querySelector<HTMLElement>(".archive-placeholder")!;
+      ph.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+
+      return {
+        groups: sidebar.querySelectorAll(".mix-tree-group").length,
+      };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.groups).toBe(2);
+  });
+
+  test("DEV mode: other keyboard keys on placeholder are ignored", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-kbd-other" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-kbd-other")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+
+      const ph = sidebar.querySelector<HTMLElement>(".archive-placeholder")!;
+      ph.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+
+      return {
+        groups: sidebar.querySelectorAll(".mix-tree-group").length,
+        stillAwaiting: sidebar.querySelector(".archive-tree-content")?.classList.contains("is-awaiting-click"),
+      };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.groups).toBe(0);
+    expect(result.stillAwaiting).toBe(true);
+  });
+
+  test("DEV mode: empty mixLibrary renders no-files empty state", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-empty" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-empty")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: [], onSelectFile: () => {} });
+      sidebar.click();
+
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
+      return {
+        emptyText: content.querySelector(".archive-placeholder")?.textContent,
+        groups: content.querySelectorAll(".mix-tree-group").length,
+      };
+    }, MFB_MOD);
+
+    expect(result.emptyText).toBe("No .mix files found");
+    expect(result.groups).toBe(0);
+  });
+
+  test("DEV mode: group item count badge shows correct number", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-badge" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-badge")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+      sidebar.click();
+
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
+      const badges = [...content.querySelectorAll(".mix-tree-count")].map((el) => el.textContent);
+      return badges;
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result).toEqual(["2", "1"]);
+  });
+
+  test("initMixFileBrowser is a no-op when archive-tree-content is missing", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+      const sidebar = document.createElement("aside");
+      sidebar.className = "archive-sidebar";
+      // Note: no .archive-tree-content child
+      document.body.appendChild(sidebar);
+
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: [], onSelectFile: () => {} });
+      sidebar.click();
+      return { groups: sidebar.querySelectorAll(".mix-tree-group").length };
+    }, MFB_MOD);
+
+    expect(result.groups).toBe(0);
+  });
+
+  test("DEV mode: URL source encodes product ID and filename", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const lib = [{
+        id: "Dance_eJay1",
+        name: "Dance eJay 1",
+        mixes: [{ filename: "my mix.MIX", sizeBytes: 100, format: "A" as const }],
+      }];
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-encode" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const refs: Array<{ source: { type: string; url?: string } }> = [];
+      const sidebar = host.querySelector<HTMLElement>("#at-encode")!;
+      initMixFileBrowser(sidebar, {
+        isDev: true,
+        mixLibrary: lib,
+        onSelectFile: (ref: unknown) => { refs.push(ref as typeof refs[0]); },
+      });
+
+      sidebar.click();
+      const item = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
+      item.click();
+
+      return refs[0]?.source;
+    }, MFB_MOD);
+
+    expect(result?.type).toBe("url");
+    expect(result?.url).toBe("/mix/Dance_eJay1/my%20mix.MIX");
+  });
+
+  // ── formatMetaTooltip ──────────────────────────────────────────────────────
+
+  test("formatMetaTooltip: returns empty string when meta is undefined", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { formatMetaTooltip } = await import(/* @vite-ignore */ modPath);
+      return formatMetaTooltip(undefined);
+    }, MFB_MOD);
+    expect(result).toBe("");
+  });
+
+  test("formatMetaTooltip: returns tooltip with BPM and track count", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { formatMetaTooltip } = await import(/* @vite-ignore */ modPath);
+      return formatMetaTooltip({ bpm: 140, trackCount: 20, catalogs: [] });
+    }, MFB_MOD);
+    expect(result).toContain("BPM: 140");
+    expect(result).toContain("20 tracks");
+  });
+
+  test("formatMetaTooltip: includes adjusted BPM when different from bpm", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { formatMetaTooltip } = await import(/* @vite-ignore */ modPath);
+      return formatMetaTooltip({ bpm: 140, bpmAdjusted: 120, trackCount: 5, catalogs: [] });
+    }, MFB_MOD);
+    expect(result).toContain("120 adjusted");
+  });
+
+  test("formatMetaTooltip: includes title and author when present", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { formatMetaTooltip } = await import(/* @vite-ignore */ modPath);
+      return formatMetaTooltip({
+        bpm: 130, trackCount: 10, catalogs: [],
+        title: "My Mix", author: "DJ Test",
+      });
+    }, MFB_MOD);
+    expect(result).toContain('"My Mix"');
+    expect(result).toContain("by DJ Test");
+  });
+
+  // ── buildMetaRows ──────────────────────────────────────────────────────────
+
+  test("buildMetaRows: returns file and product rows when meta is undefined", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { buildMetaRows } = await import(/* @vite-ignore */ modPath);
+      return buildMetaRows("test.MIX", "Dance eJay 1", undefined);
+    }, MFB_MOD);
+    expect(result).toEqual([["File", "test.MIX"], ["Product", "Dance eJay 1"]]);
+  });
+
+  test("buildMetaRows: returns all fields when meta has full data", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { buildMetaRows } = await import(/* @vite-ignore */ modPath);
+      return buildMetaRows("test.MIX", "Rave", {
+        bpm: 155, bpmAdjusted: 140, trackCount: 30,
+        catalogs: ["Rave", "Techno"],
+        title: "Hard Rain", author: "DJ X",
+        tickerText: ["Line one", "Line two"],
+      });
+    }, MFB_MOD);
+    const keys = result.map(([k]: [string, string]) => k);
+    expect(keys).toContain("BPM");
+    expect(keys).toContain("Tracks");
+    expect(keys).toContain("Title");
+    expect(keys).toContain("Author");
+    expect(keys).toContain("Ticker");
+    expect(keys).toContain("Sample packs");
+    // BPM row should show both values when adjusted differs
+    const bpmRow = result.find(([k]: [string, string]) => k === "BPM");
+    expect(bpmRow?.[1]).toContain("155");
+    expect(bpmRow?.[1]).toContain("140");
+  });
+
+  test("buildMetaRows: format row shows em-dash when catalogs is empty", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { buildMetaRows } = await import(/* @vite-ignore */ modPath);
+      return buildMetaRows("x.MIX", "Rave", { bpm: 170, trackCount: 8, catalogs: [] });
+    }, MFB_MOD);
+    const formatRow = result.find(([k]: [string, string]) => k === "Format");
+    expect(formatRow?.[1]).toBe("—");
+  });
+
+  // ── popup lifecycle ────────────────────────────────────────────────────────
+
+  test("DEV mode: clicking a .mix file with meta shows .mix-meta-popup", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser, isMixMetaPopupVisible } = await import(/* @vite-ignore */ modPath);
+
+      const lib = [{
+        id: "Dance_eJay1",
+        name: "Dance eJay 1",
+        mixes: [{
+          filename: "START.MIX", sizeBytes: 100, format: "A" as const,
+          meta: { bpm: 140, trackCount: 20, catalogs: ["Dance eJay 1"] },
+        }],
+      }];
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-popup-open" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load</p>
+          </div>
+        </aside>`;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-popup-open")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: lib, onSelectFile: () => {} });
+      sidebar.click();
+
+      const item = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
+      item.click();
+
+      return {
+        popupVisible: isMixMetaPopupVisible(),
+        popupInBody: document.getElementById("mix-meta-popup") !== null,
+      };
+    }, MFB_MOD);
+
+    expect(result.popupVisible).toBe(true);
+    expect(result.popupInBody).toBe(true);
+  });
+
+  test("DEV mode: clicking a second .mix file replaces the popup", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const lib = [{
+        id: "Dance_eJay1",
+        name: "Dance eJay 1",
+        mixes: [
+          { filename: "A.MIX", sizeBytes: 10, format: "A" as const, meta: { bpm: 130, trackCount: 15, catalogs: [] } },
+          { filename: "B.MIX", sizeBytes: 10, format: "A" as const, meta: { bpm: 140, trackCount: 22, catalogs: [] } },
+        ],
+      }];
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-popup-replace" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content"><p class="archive-placeholder">Load</p></div>
+        </aside>`;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-popup-replace")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: lib, onSelectFile: () => {} });
+      sidebar.click();
+
+      const [btnA, btnB] = Array.from(sidebar.querySelectorAll<HTMLButtonElement>(".mix-tree-item"));
+      btnA.click();
+      const firstId = document.getElementById("mix-meta-popup")?.id;
+      btnB.click();
+      const popupCount = document.querySelectorAll("#mix-meta-popup").length;
+      const tableText = document.getElementById("mix-meta-popup")?.textContent ?? "";
+
+      return { firstId, popupCount, tableText };
+    }, MFB_MOD);
+
+    expect(result.firstId).toBe("mix-meta-popup");
+    expect(result.popupCount).toBe(1);
+    expect(result.tableText).toContain("22"); // B.MIX track count
+  });
+
+  test("dismissMixMetaPopup: removes popup when called directly", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { showMixMetaPopup, dismissMixMetaPopup, isMixMetaPopupVisible } =
+        await import(/* @vite-ignore */ modPath);
+
+      const anchor = document.createElement("button");
+      document.body.appendChild(anchor);
+      showMixMetaPopup("test.MIX", "Rave", { bpm: 170, trackCount: 5, catalogs: [] }, anchor);
+      const before = isMixMetaPopupVisible();
+      dismissMixMetaPopup();
+      const after = isMixMetaPopupVisible();
+      return { before, after };
+    }, MFB_MOD);
+
+    expect(result.before).toBe(true);
+    expect(result.after).toBe(false);
+  });
+
+  test("dismissMixMetaPopup: is safe when no popup exists", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { dismissMixMetaPopup, isMixMetaPopupVisible } = await import(/* @vite-ignore */ modPath);
+      dismissMixMetaPopup(); // should not throw
+      return isMixMetaPopupVisible();
+    }, MFB_MOD);
+    expect(result).toBe(false);
+  });
+
+  test("DEV mode: mix file with no meta does not show popup", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser, isMixMetaPopupVisible } = await import(/* @vite-ignore */ modPath);
+
+      const lib = [{
+        id: "Dance_eJay1",
+        name: "Dance eJay 1",
+        mixes: [{ filename: "NO_META.MIX", sizeBytes: 10, format: "A" as const }],
+      }];
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-no-meta" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content"><p class="archive-placeholder">Load</p></div>
+        </aside>`;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-no-meta")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: lib, onSelectFile: () => {} });
+      sidebar.click();
+
+      const item = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
+      item.click();
+
+      return isMixMetaPopupVisible();
+    }, MFB_MOD);
+
+    expect(result).toBe(false);
+  });
+
+  test("DEV mode: .mix-tree-item tooltip uses metadata when present", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const lib = [{
+        id: "Dance_eJay1",
+        name: "Dance eJay 1",
+        mixes: [{
+          filename: "T.MIX", sizeBytes: 10, format: "A" as const,
+          meta: { bpm: 99, trackCount: 7, catalogs: [] },
+        }],
+      }];
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-tooltip" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content"><p class="archive-placeholder">Load</p></div>
+        </aside>`;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-tooltip")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: lib, onSelectFile: () => {} });
+      sidebar.click();
+
+      const item = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
+      return item.title;
+    }, MFB_MOD);
+
+    expect(result).toContain("BPM: 99");
+    expect(result).toContain("7 tracks");
+  });
+
+  test("DEV mode: .mix-tree-item tooltip falls back to filename when no meta", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const lib = [{
+        id: "Dance_eJay1",
+        name: "Dance eJay 1",
+        mixes: [{ filename: "FALLBACK.MIX", sizeBytes: 10, format: "A" as const }],
+      }];
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-tooltip-fb" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content"><p class="archive-placeholder">Load</p></div>
+        </aside>`;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-tooltip-fb")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: lib, onSelectFile: () => {} });
+      sidebar.click();
+
+      const item = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
+      return item.title;
+    }, MFB_MOD);
+
+    expect(result).toBe("FALLBACK.MIX");
+  });
+
+  test("DEV mode: clicking a group header dismisses popup", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser, isMixMetaPopupVisible } = await import(/* @vite-ignore */ modPath);
+
+      const lib = [{
+        id: "Dance_eJay1",
+        name: "Dance eJay 1",
+        mixes: [{ filename: "A.MIX", sizeBytes: 10, format: "A" as const,
+          meta: { bpm: 130, trackCount: 5, catalogs: [] } }],
+      }];
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-header-dismiss" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content"><p class="archive-placeholder">Load</p></div>
+        </aside>`;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#at-header-dismiss")!;
+      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: lib, onSelectFile: () => {} });
+      sidebar.click();
+
+      const item = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
+      item.click();
+      const visibleAfterFileClick = isMixMetaPopupVisible();
+
+      const headerBtn = sidebar.querySelector<HTMLButtonElement>(".mix-tree-group-header")!;
+      headerBtn.click(); // collapse the group — should dismiss popup
+      const visibleAfterHeaderClick = isMixMetaPopupVisible();
+
+      return { visibleAfterFileClick, visibleAfterHeaderClick };
+    }, MFB_MOD);
+
+    expect(result.visibleAfterFileClick).toBe(true);
+    expect(result.visibleAfterHeaderClick).toBe(false);
+  });
+
+  test("PROD mode: archive-root picker groups product and userdata mixes and parses metadata", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser, isMixMetaPopupVisible } = await import(/* @vite-ignore */ modPath);
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitForTree = async (sidebar: HTMLElement): Promise<void> => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (
+            sidebar.querySelector(".mix-tree-group-label") ||
+            sidebar.querySelector(".archive-tree-empty")
+          ) {
+            return;
+          }
+          await flush();
+        }
+      };
+
+      const makeFileHandle = (name: string, bytes: number[]) => ({
+        kind: "file",
+        name,
+        async getFile() {
+          return new File([new Uint8Array(bytes)], name, { type: "application/octet-stream" });
+        },
+      });
+
+      const makeDirHandle = (name: string, children: Record<string, unknown>) => ({
+        kind: "directory",
+        name,
+        async *entries() {
+          for (const [childName, handle] of Object.entries(children)) {
+            yield [childName, handle];
+          }
+        },
+      });
+
+      const archiveRoot = makeDirHandle("archive", {
+        Dance_eJay1: makeDirHandle("Dance_eJay1", {
+          MIX: makeDirHandle("MIX", {
+            "START.MIX": makeFileHandle("START.MIX", [0x06, 0x0a, 0x00, 0x00]),
+          }),
+        }),
+        _userdata: makeDirHandle("_userdata", {
+          sets: makeDirHandle("sets", {
+            "USER.MIX": makeFileHandle("USER.MIX", [0x07, 0x0a, 0x00, 0x00]),
+          }),
+        }),
+      });
+
+      (window as typeof window & { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => archiveRoot;
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="archive-tree" class="archive-sidebar">
+          <div class="archive-header">
+            <span class="archive-title">Mix Archive</span>
+          </div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const refs: Array<{ label: string; group: string; source: { type: string } }> = [];
+      const sidebar = host.querySelector<HTMLElement>("#archive-tree")!;
+      initMixFileBrowser(sidebar, {
+        isDev: false,
+        onSelectFile: (ref: unknown) => {
+          refs.push(ref as typeof refs[number]);
+        },
+      });
+
+      sidebar.click();
+      await waitForTree(sidebar);
+
+      const groupLabels = [...sidebar.querySelectorAll<HTMLElement>(".mix-tree-group-label")].map((node) => node.textContent ?? "");
+      const firstItem = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
+      const firstTooltip = firstItem.title;
+      firstItem.click();
+
+      return {
+        groupLabels,
+        firstTooltip,
+        popupVisible: isMixMetaPopupVisible(),
+        popupText: document.getElementById("mix-meta-popup")?.textContent ?? "",
+        selected: refs[0],
+      };
+    }, MFB_MOD);
+
+    expect(result.groupLabels).toEqual(["Dance eJay 1", "User: sets"]);
+    expect(result.firstTooltip).toContain("BPM: 140");
+    expect(result.firstTooltip).toContain("0 tracks");
+    expect(result.popupVisible).toBe(true);
+    expect(result.popupText).toContain("START.MIX");
+    expect(result.selected).toMatchObject({
+      label: "START.MIX",
+      group: "Dance eJay 1",
+      source: { type: "handle" },
+    });
+  });
+
+  test("PROD mode: selecting a product folder keeps the product group instead of collapsing to MIX", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitForTree = async (sidebar: HTMLElement): Promise<void> => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (
+            sidebar.querySelector(".mix-tree-group-label") ||
+            sidebar.querySelector(".archive-tree-empty")
+          ) {
+            return;
+          }
+          await flush();
+        }
+      };
+
+      const makeFileHandle = (name: string, bytes: number[]) => ({
+        kind: "file",
+        name,
+        async getFile() {
+          return new File([new Uint8Array(bytes)], name, { type: "application/octet-stream" });
+        },
+      });
+
+      const makeDirHandle = (name: string, children: Record<string, unknown>) => ({
+        kind: "directory",
+        name,
+        async *entries() {
+          for (const [childName, handle] of Object.entries(children)) {
+            yield [childName, handle];
+          }
+        },
+      });
+
+      const productRoot = makeDirHandle("Dance_eJay1", {
+        MIX: makeDirHandle("MIX", {
+          "START.MIX": makeFileHandle("START.MIX", [0x06, 0x0a, 0x00, 0x00]),
+        }),
+      });
+
+      (window as typeof window & { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => productRoot;
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="archive-tree" class="archive-sidebar">
+          <div class="archive-header">
+            <span class="archive-title">Mix Archive</span>
+          </div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const sidebar = host.querySelector<HTMLElement>("#archive-tree")!;
+      initMixFileBrowser(sidebar, {
+        isDev: false,
+        onSelectFile: () => {},
+      });
+
+      sidebar.click();
+      await waitForTree(sidebar);
+
+      return {
+        groupLabels: [...sidebar.querySelectorAll<HTMLElement>(".mix-tree-group-label")].map((node) => node.textContent ?? ""),
+        archiveInfo: sidebar.querySelector<HTMLElement>(".archive-folder-info")?.textContent ?? "",
+      };
+    }, MFB_MOD);
+
+    expect(result.groupLabels).toEqual(["Dance eJay 1"]);
+    expect(result.archiveInfo).toBe("Dance_eJay1");
   });
 });

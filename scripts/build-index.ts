@@ -7,23 +7,30 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
-import { detectFormat } from "./mix-parser.js";
+import { detectFormat, parseMix } from "./mix-parser.js";
 import type { MixFormat } from "./mix-types.js";
 import {
   buildCategoryEntries,
   buildDefaultCategoryConfig,
   CATEGORY_CONFIG_FILENAME,
+  EMBEDDED_MIX_MANIFEST_FILENAME,
   humanizeIdentifier,
+  mergeSamplesByAudioPath,
   normalizeCategoryConfig,
+  parseEmbeddedMixManifest,
+  embeddedMixSamplesFromManifest,
+  UNSORTED_CATEGORY_ID,
 } from "../src/data.js";
 import type {
   CategoryEntry,
   IndexData,
   MixFileEntry,
+  MixFileMeta,
   MixLibraryEntry,
   Sample,
   SampleLookupEntry,
 } from "../src/data.js";
+import { irToMeta } from "./extract-mix-metadata.js";
 
 // Re-export the shared schema so existing consumers (tests, callers) can
 // keep importing it from this module without reaching into `src/`.
@@ -31,6 +38,7 @@ export type {
   CategoryEntry,
   IndexData,
   MixFileEntry,
+  MixFileMeta,
   MixLibraryEntry,
   Sample,
   SampleLookupEntry,
@@ -115,6 +123,19 @@ function readRootCatalogSamples(outputDir: string): RawSample[] {
   }
 
   return [];
+}
+
+function readEmbeddedMixManifestSamples(outputDir: string): RawSample[] {
+  const manifestPath = join(outputDir, UNSORTED_CATEGORY_ID, EMBEDDED_MIX_MANIFEST_FILENAME);
+  if (!existsSync(manifestPath)) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(manifestPath, "utf-8"));
+    const manifest = parseEmbeddedMixManifest(parsed);
+    return manifest ? embeddedMixSamplesFromManifest(manifest) : [];
+  } catch {
+    return [];
+  }
 }
 
 function readCategoryConfig(outputDir: string): { categories: CategoryEntry[] } | null {
@@ -207,8 +228,15 @@ export function findMixSubdir(productArchivePath: string): string | null {
  * Scan a `.mix` directory and return one inventory entry per valid file.
  * Files smaller than `MIN_MIX_SIZE` and files that `detectFormat()` cannot
  * classify are skipped with a warning so the index stays clean.
+ * Each entry is enriched with parsed `MixFileMeta` when the file parses
+ * successfully.
+ *
+ * @param mixDir Absolute path to the directory that contains `.mix` files.
+ * @param productId Optional product identifier forwarded to `parseMix` so the
+ * parser can apply product-specific quirks when decoding the mix grid. When
+ * omitted, `parseMix` uses heuristic format detection alone.
  */
-export function scanMixDir(mixDir: string): MixFileEntry[] {
+export function scanMixDir(mixDir: string, productId?: string): MixFileEntry[] {
   let entries: string[];
   try {
     entries = readdirSync(mixDir);
@@ -231,9 +259,16 @@ export function scanMixDir(mixDir: string): MixFileEntry[] {
       console.warn(`WARNING: ${full} is ${size} bytes — skipping (below ${MIN_MIX_SIZE}-byte minimum)`);
       continue;
     }
+    let buf: Buffer;
+    try {
+      buf = readFileSync(full);
+    } catch {
+      console.warn(`WARNING: could not read ${full} — skipping`);
+      continue;
+    }
     let format: MixFormat | null;
     try {
-      format = detectFormat(readFileSync(full));
+      format = detectFormat(buf);
     } catch {
       format = null;
     }
@@ -241,7 +276,18 @@ export function scanMixDir(mixDir: string): MixFileEntry[] {
       console.warn(`WARNING: ${full} has an unrecognised format — skipping`);
       continue;
     }
-    mixes.push({ filename: entry, sizeBytes: size, format });
+    let meta: MixFileMeta | undefined;
+    try {
+      const ir = parseMix(buf, productId);
+      const extracted = irToMeta(ir);
+      if (extracted) meta = extracted;
+    } catch (err) {
+      // Metadata extraction failures are non-fatal — entry still included.
+      console.warn(`WARNING: could not extract metadata from ${full}: ${String(err)}`);
+    }
+    const fileEntry: MixFileEntry = { filename: entry, sizeBytes: size, format };
+    if (meta) fileEntry.meta = meta;
+    mixes.push(fileEntry);
   }
   return mixes;
 }
@@ -259,13 +305,103 @@ export function collectProductMixes(productId: string, archiveDir: string): MixF
   if (!existsSync(productArchivePath)) return [];
   const mixDir = findMixSubdir(productArchivePath);
   if (!mixDir) return [];
-  return scanMixDir(mixDir);
+  return scanMixDir(mixDir, productId);
+}
+
+/**
+ * Humanize a single `_userdata` path segment. Leading underscores are
+ * stripped (e.g. `_unsorted` → "Unsorted") before the segment is passed
+ * through `humanizeIdentifier` so that names like `Dance2` render as
+ * "Dance 2".
+ */
+function humanizeUserdataSegment(seg: string): string {
+  return humanizeIdentifier(seg.startsWith("_") ? seg.slice(1) : seg, { compactDmkit: true });
+}
+
+/**
+ * Derive a human-readable label for a `_userdata` group from its path
+ * segments relative to `archive/_userdata`. Segments are joined with " – "
+ * and prefixed with "User: " to distinguish them from product archives.
+ * Example: ["Dance and House", "Dance2"] → "User: Dance and House – Dance 2"
+ */
+export function userdataGroupLabel(relParts: string[]): string {
+  return `User: ${relParts.map(humanizeUserdataSegment).join(" \u2013 ")}`;
+}
+
+/**
+ * Recursively walk `dir` looking for subdirectories that directly contain
+ * at least one `.mix` file. Results are appended to `results` with the
+ * relative path from the starting directory recorded as `relParts`.
+ */
+function collectMixLeafDirs(
+  dir: string,
+  relParts: string[],
+  results: Array<{ relParts: string[]; absPath: string }>,
+): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  let hasMix = false;
+  const subdirs: string[] = [];
+  for (const entry of entries) {
+    const full = join(dir, entry);
+    try {
+      const st = statSync(full);
+      if (st.isDirectory()) {
+        subdirs.push(entry);
+      } else if (st.isFile() && /\.mix$/i.test(entry)) {
+        hasMix = true;
+      }
+    } catch {
+      // Unreadable entry — skip.
+    }
+  }
+  if (hasMix && relParts.length > 0) {
+    results.push({ relParts, absPath: dir });
+  }
+  for (const sub of subdirs) {
+    collectMixLeafDirs(join(dir, sub), [...relParts, sub], results);
+  }
+}
+
+const USERDATA_SUBDIR = "_userdata";
+
+/**
+ * Scan `archive/_userdata` for subdirectory groups that directly contain
+ * `.mix` files and return a `MixLibraryEntry` for each. Group IDs use the
+ * form `_userdata/<relPath>` so `resolveMixUrl` can reconstruct the
+ * file-system path from the URL (the browser percent-encodes the `/`).
+ */
+export function buildUserdataMixLibrary(archiveDir: string): MixLibraryEntry[] {
+  const userdataDir = join(archiveDir, USERDATA_SUBDIR);
+  if (!existsSync(userdataDir)) return [];
+
+  const found: Array<{ relParts: string[]; absPath: string }> = [];
+  collectMixLeafDirs(userdataDir, [], found);
+  found.sort((a, b) => a.relParts.join("/").localeCompare(b.relParts.join("/")));
+
+  const entries: MixLibraryEntry[] = [];
+  for (const { relParts, absPath } of found) {
+    const mixes = scanMixDir(absPath);
+    if (mixes.length === 0) continue;
+    entries.push({
+      id: `${USERDATA_SUBDIR}/${relParts.join("/")}`,
+      name: userdataGroupLabel(relParts),
+      mixes,
+    });
+  }
+  return entries;
 }
 
 /**
  * Walk every product registered in `ARCHIVE_MIX_DIRS` and build the full
  * `.mix` library. Products whose archive folder is missing or whose MIX
  * directory is empty are omitted so the browser UI never sees dead entries.
+ * User-created mixes from `archive/_userdata` are appended after the product
+ * entries.
  */
 export function buildMixLibrary(archiveDir: string = ARCHIVE_DIR): MixLibraryEntry[] {
   const entries: MixLibraryEntry[] = [];
@@ -274,6 +410,7 @@ export function buildMixLibrary(archiveDir: string = ARCHIVE_DIR): MixLibraryEnt
     if (mixes.length === 0) continue;
     entries.push({ id: productId, name: deriveDisplayName(productId), mixes });
   }
+  entries.push(...buildUserdataMixLibrary(archiveDir));
   return entries;
 }
 
@@ -287,7 +424,8 @@ export function buildIndex(
   }
 
   const rawSamples = readRootCatalogSamples(outputDir);
-  const samples = rawSamples.length > 0 ? rawSamples : scanNormalizedSamples(outputDir);
+  const scannedSamples = rawSamples.length > 0 ? rawSamples : scanNormalizedSamples(outputDir);
+  const samples = mergeSamplesByAudioPath(scannedSamples, readEmbeddedMixManifestSamples(outputDir));
   const configuredCategories = readCategoryConfig(outputDir)?.categories ?? buildCategoryEntries([], buildDefaultCategoryConfig().categories);
   const categories = buildCategoryEntries(
     samples,
@@ -312,8 +450,7 @@ export function buildIndex(
  * Returns an empty object when the metadata file is missing or unparseable.
  */
 export function buildSampleIndex(outputDir: string): Record<string, SampleLookupEntry> {
-  const metaPath = join(outputDir, "metadata.json");
-  if (!existsSync(metaPath)) return {};
+  if (!existsSync(outputDir)) return {};
 
   interface MetaSample {
     filename?: string;
@@ -324,17 +461,14 @@ export function buildSampleIndex(outputDir: string): Record<string, SampleLookup
     source?: string;
   }
 
-  let meta: { samples?: MetaSample[] };
-  try {
-    meta = JSON.parse(readFileSync(metaPath, "utf-8"));
-  } catch {
-    return {};
-  }
-  if (!Array.isArray(meta.samples)) return {};
+  const baseSamples = readRootCatalogSamples(outputDir);
+  const scannedSamples = baseSamples.length > 0 ? baseSamples : scanNormalizedSamples(outputDir);
+  const samples = mergeSamplesByAudioPath(scannedSamples, readEmbeddedMixManifestSamples(outputDir)) as MetaSample[];
+  if (samples.length === 0) return {};
 
   const index: Record<string, SampleLookupEntry> = {};
 
-  for (const sample of meta.samples) {
+  for (const sample of samples) {
     const product = sample.product;
     if (!product) continue;
 

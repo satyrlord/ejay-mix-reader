@@ -260,6 +260,12 @@ export class MixChannel {
       anySoloed: this.anySoloed,
     });
   }
+
+  /** Disconnect the gain→panner chain. Call when the channel is no longer needed. */
+  dispose(): void {
+    this.gain.disconnect?.();
+    this.panner.disconnect?.();
+  }
 }
 
 /**
@@ -346,6 +352,11 @@ export class DrumMachine {
   get padCount(): number {
     return this.pads.size;
   }
+
+  /** Release all registered pad configs. */
+  dispose(): void {
+    this.pads.clear();
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -356,6 +367,8 @@ export interface EffectHandle {
   readonly kind: EffectKind;
   readonly input: AudioNodeLike;
   readonly output: AudioNodeLike;
+  /** Release any internal node connections (e.g. feedback loops). */
+  dispose?(): void;
 }
 
 /**
@@ -387,7 +400,7 @@ export function createEffect(ctx: AudioContextLike, kind: EffectKind): EffectHan
       feedback.gain.value = 0.4;
       delay.connect(feedback);
       feedback.connect(delay);
-      return { kind, input: delay, output: delay };
+      return { kind, input: delay, output: delay, dispose: () => { feedback.disconnect?.(); } };
     }
     case "reverb": {
       const convolver = ctx.createConvolver();

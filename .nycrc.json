@@ -6,6 +6,8 @@
     "src/library.ts",
     "src/player.ts",
     "src/render.ts",
+    "src/sample-grid-context-menu.ts",
+    "src/mix-file-browser.ts",
     "src/mix-player.ts",
     "src/mix-buffer.ts",
     "src/mix-parser.ts"

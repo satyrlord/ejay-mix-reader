@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { resolveMixUrl } from "../../vite.config.js";
+import { applySampleMoveToManifest, resolveMixUrl } from "../../vite.config.js";
 
 describe("resolveMixUrl", () => {
   let archiveRoot: string;
@@ -72,5 +72,84 @@ describe("resolveMixUrl", () => {
 
   it("returns null for URLs with additional path segments", () => {
     expect(resolveMixUrl("/mix/Dance_eJay1/nested/START.MIX", archiveRoot)).toBeNull();
+  });
+
+  describe("_userdata groups", () => {
+    beforeEach(() => {
+      mkdirSync(join(archiveRoot, "_userdata", "mysets"), { recursive: true });
+      writeFileSync(join(archiveRoot, "_userdata", "mysets", "track.mix"), "payload");
+    });
+
+    it("resolves a _userdata group URL", () => {
+      const resolved = resolveMixUrl("/mix/_userdata%2Fmysets/track.mix", archiveRoot);
+      expect(resolved).not.toBeNull();
+      expect(resolved?.productId).toBe("_userdata/mysets");
+      expect(resolved?.filename).toBe("track.mix");
+      expect(resolved?.absolutePath).toBe(resolve(archiveRoot, "_userdata", "mysets", "track.mix"));
+    });
+
+    it("productId encodes back to a URL that resolves to the same absolutePath", () => {
+      const resolved = resolveMixUrl("/mix/_userdata%2Fmysets/track.mix", archiveRoot);
+      expect(resolved).not.toBeNull();
+      const reconstructedUrl = `/mix/${encodeURIComponent(resolved!.productId)}/${resolved!.filename}`;
+      const roundtrip = resolveMixUrl(reconstructedUrl, archiveRoot);
+      expect(roundtrip?.absolutePath).toBe(resolved!.absolutePath);
+    });
+
+    it("resolves a nested _userdata path", () => {
+      mkdirSync(join(archiveRoot, "_userdata", "genre", "sub1"), { recursive: true });
+      writeFileSync(join(archiveRoot, "_userdata", "genre", "sub1", "a.mix"), "x");
+      const resolved = resolveMixUrl("/mix/_userdata%2Fgenre%2Fsub1/a.mix", archiveRoot);
+      expect(resolved).not.toBeNull();
+      expect(resolved?.productId).toBe("_userdata/genre/sub1");
+    });
+
+    it("rejects _userdata path traversal via .. in the relPath", () => {
+      expect(resolveMixUrl("/mix/_userdata%2F../Dance_eJay1%2FMIX/START.MIX", archiveRoot)).toBeNull();
+    });
+
+    it("rejects empty path segments in _userdata relPath", () => {
+      expect(resolveMixUrl("/mix/_userdata%2F%2Fmysets/track.mix", archiveRoot)).toBeNull();
+    });
+
+    it("returns null for a missing file in a _userdata group", () => {
+      expect(resolveMixUrl("/mix/_userdata%2Fmysets/missing.mix", archiveRoot)).toBeNull();
+    });
+  });
+});
+
+describe("applySampleMoveToManifest", () => {
+  it("updates the matching sample and rebuilds manifest aggregates", () => {
+    const manifest = {
+      total_samples: 99,
+      per_category: {
+        Bass: 1,
+        "Drum/kick": 1,
+      },
+      samples: [
+        { filename: "bass.wav", category: "Bass", subcategory: null },
+        { filename: "kick.wav", category: "Drum", subcategory: "kick" },
+      ],
+    };
+
+    const updated = applySampleMoveToManifest(manifest, {
+      filename: "kick.wav",
+      oldCategory: "Drum",
+      oldSubcategory: "kick",
+      newCategory: "Bass",
+      newSubcategory: "fills",
+    });
+
+    expect(updated).toBe(true);
+    expect(manifest.samples[1]).toMatchObject({
+      filename: "kick.wav",
+      category: "Bass",
+      subcategory: "fills",
+    });
+    expect(manifest.total_samples).toBe(2);
+    expect(manifest.per_category).toEqual({
+      Bass: 1,
+      "Bass/fills": 1,
+    });
   });
 });
