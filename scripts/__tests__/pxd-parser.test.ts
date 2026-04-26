@@ -319,6 +319,52 @@ describe("decodePxdFile", () => {
   it("returns null for garbage data", () => {
     expect(decodePxdFile(Buffer.from("garbage data that is not PXD"))).toBeNull();
   });
+
+  it("caps decodedSize to 8× the compressed length", () => {
+    const meta = "A";
+    const metaBuf = Buffer.from(meta, "ascii");
+    const header = Buffer.alloc(5 + metaBuf.length + 7);
+    header.write("tPxD", 0, "ascii");
+    header[4] = metaBuf.length;
+    metaBuf.copy(header, 5);
+    const metaEnd = 5 + metaBuf.length;
+    header[metaEnd] = 0x54;
+    header.writeUInt32LE(999_999, metaEnd + 1); // absurdly large claim
+    header.writeUInt16LE(0, metaEnd + 5);
+
+    const compressed = Buffer.from([0x80, 0x80, 0x80]); // 3 literal bytes
+    const full = Buffer.concat([header, compressed]);
+
+    const result = decodePxdFile(full);
+    expect(result).not.toBeNull();
+    // cap = min(999999, 8*3, 64MiB) = 24
+    expect(result!.decodedSize).toBe(24);
+    expect(result!.pcm).toHaveLength(24);
+  });
+
+  it("caps decodedSize to the 64 MiB hard ceiling", () => {
+    const MiB64 = 64 * 1024 * 1024;
+    const meta = "A";
+    const metaBuf = Buffer.from(meta, "ascii");
+    const header = Buffer.alloc(5 + metaBuf.length + 7);
+    header.write("tPxD", 0, "ascii");
+    header[4] = metaBuf.length;
+    metaBuf.copy(header, 5);
+    const metaEnd = 5 + metaBuf.length;
+    header[metaEnd] = 0x54;
+    header.writeUInt32LE(MiB64 + 1, metaEnd + 1); // just over the ceiling
+    header.writeUInt16LE(0, metaEnd + 5);
+
+    // compressed payload large enough that 8× expansion > 64 MiB
+    const compressed = Buffer.alloc(MiB64); // 64 MiB of zeros → 8× = 512 MiB
+    const full = Buffer.concat([header, compressed]);
+
+    const result = decodePxdFile(full);
+    expect(result).not.toBeNull();
+    // cap = min(MiB64+1, 8*MiB64, MiB64) = MiB64
+    expect(result!.decodedSize).toBe(MiB64);
+    expect(result!.pcm).toHaveLength(MiB64);
+  });
 });
 
 // ── parseMetadataFields ──────────────────────────────────────

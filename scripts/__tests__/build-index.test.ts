@@ -41,7 +41,7 @@ describe("deriveDisplayName", () => {
 
 describe("buildIndex", () => {
   it("returns empty categories when outputDir does not exist", () => {
-    const result = buildIndex(join(tmpdir(), "build-index-missing-xyz"));
+    const result = buildIndex(join(tmpdir(), "build-index-missing-xyz"), join(tmpdir(), "build-index-no-archive-xyz"));
     expect(result.categories).toEqual([]);
   });
 
@@ -74,7 +74,7 @@ describe("buildIndex", () => {
         }),
       );
 
-      const result = buildIndex(root);
+      const result = buildIndex(root, join(root, "archive"));
       expect(result.categories.find((entry) => entry.id === "Loop")).toEqual(
         expect.objectContaining({ sampleCount: 1 }),
       );
@@ -106,7 +106,7 @@ describe("buildIndex", () => {
         }),
       );
 
-      const result = buildIndex(root);
+      const result = buildIndex(root, join(root, "archive"));
       expect(result.categories[0].id).toBe("Loop");
       expect(result.categories.find((entry) => entry.id === "Drum")).toEqual(
         expect.objectContaining({
@@ -131,7 +131,7 @@ describe("buildIndex", () => {
       writeFileSync(join(root, "Drum", "kick", "b.wav"), "x");
       writeFileSync(join(root, "Voice", "misc", "vox.wav"), "x");
 
-      const result = buildIndex(root);
+      const result = buildIndex(root, join(root, "archive"));
       expect(result.categories.find((entry) => entry.id === "Drum")).toEqual(
         expect.objectContaining({ sampleCount: 2 }),
       );
@@ -154,7 +154,7 @@ describe("buildIndex", () => {
       mkdirSync(join(root, "Bass"), { recursive: true });
       writeFileSync(join(root, "Bass", "bass.wav"), "x");
 
-      const result = buildIndex(root);
+      const result = buildIndex(root, join(root, "archive"));
       expect(result.categories.find((entry) => entry.id === "Bass")).toEqual(
         expect.objectContaining({ sampleCount: 1 }),
       );

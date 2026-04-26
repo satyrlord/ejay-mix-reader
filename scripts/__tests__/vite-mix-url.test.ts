@@ -4,7 +4,7 @@ import { join, resolve } from "path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { applySampleMoveToManifest, resolveMixUrl } from "../../vite.config.js";
+import { applySampleMoveToManifest, resolveMixUrl, validateSampleMovePaths } from "../dev-server/index.js";
 
 describe("resolveMixUrl", () => {
   let archiveRoot: string;
@@ -68,6 +68,10 @@ describe("resolveMixUrl", () => {
   it("returns null when the archive path is a directory", () => {
     mkdirSync(join(archiveRoot, "Dance_eJay1", "MIX", "folder.mix"));
     expect(resolveMixUrl("/mix/Dance_eJay1/folder.mix", archiveRoot)).toBeNull();
+  });
+
+  it("returns null for __proto__ as productId (prototype-pollution guard)", () => {
+    expect(resolveMixUrl("/mix/__proto__/START.MIX", archiveRoot)).toBeNull();
   });
 
   it("returns null for URLs with additional path segments", () => {
@@ -151,5 +155,86 @@ describe("applySampleMoveToManifest", () => {
       Bass: 1,
       "Bass/fills": 1,
     });
+  });
+});
+
+describe("validateSampleMovePaths", () => {
+  let outputRoot: string;
+
+  beforeEach(() => {
+    outputRoot = mkdtempSync(join(tmpdir(), "sample-move-"));
+  });
+
+  afterEach(() => {
+    rmSync(outputRoot, { recursive: true, force: true });
+  });
+
+  it("returns null for valid inputs without subcategories", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum", null, "Bass", null)).toBeNull();
+  });
+
+  it("returns null for valid inputs with subcategories", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum", "Perc", "Bass", "fills")).toBeNull();
+  });
+
+  it("accepts filenames with legitimate embedded .. (e.g. VXB010..wav)", () => {
+    expect(validateSampleMovePaths(outputRoot, "VXB010..wav", "Drum", null, "Bass", null)).toBeNull();
+  });
+
+  it("rejects .. in oldCategory", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "..", null, "Bass", null)).toBe("Invalid path component");
+  });
+
+  it("rejects .. in newCategory", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum", null, "..", null)).toBe("Invalid path component");
+  });
+
+  it("rejects .. in subcategory fields", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum", "..", "Bass", null)).toBe("Invalid path component");
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum", null, "Bass", "..")).toBe("Invalid path component");
+  });
+
+  it("rejects / in category or subcategory", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum/evil", null, "Bass", null)).toBe("Invalid path component");
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum", "sub/evil", "Bass", null)).toBe("Invalid path component");
+  });
+
+  it("rejects \\\\ in category or subcategory", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum\\evil", null, "Bass", null)).toBe("Invalid path component");
+  });
+
+  it("rejects : in category (drive-letter injection)", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "C:", null, "Bass", null)).toBe("Invalid path component");
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum", null, "C:", null)).toBe("Invalid path component");
+  });
+
+  it("rejects * ? < > \\\" | in category (shell-special characters)", () => {
+    for (const ch of ["*", "?", "<", ">", '"', "|"]) {
+      expect(
+        validateSampleMovePaths(outputRoot, "kick.wav", `Drum${ch}`, null, "Bass", null),
+        `char: ${ch}`,
+      ).toBe("Invalid path component");
+    }
+  });
+
+  it("rejects / or \\\\ in filename", () => {
+    expect(validateSampleMovePaths(outputRoot, "sub/kick.wav", "Drum", null, "Bass", null)).toBe("Invalid path component");
+    expect(validateSampleMovePaths(outputRoot, "sub\\kick.wav", "Drum", null, "Bass", null)).toBe("Invalid path component");
+  });
+
+  it("rejects shell-special characters in filename", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick*.wav", "Drum", null, "Bass", null)).toBe("Invalid path component");
+  });
+
+  it("rejects a literal .. filename (containment guard)", () => {
+    // ".." alone as filename would path.resolve to the parent category directory
+    expect(validateSampleMovePaths(outputRoot, "..", "Drum", null, "Bass", null)).toBe("Invalid path component");
+  });
+
+  it("rejects a category value that would resolve outside outputRoot (drive-letter, containment)", () => {
+    // "C:" passes the character-class check on POSIX but should fail the
+    // UNSAFE_SEGMENT_CHARS check on all platforms (`:` is in the set).
+    // This test confirms the colon rejection specifically.
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "C:", null, "Drum", null)).toBe("Invalid path component");
   });
 });

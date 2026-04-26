@@ -41,15 +41,15 @@ async function collectCategorySamples(
 
     if (!name.toLowerCase().endsWith(".wav")) continue;
 
-    const subcategory = pathParts.length > 0 ? pathParts[0] : null;
-    const nestedFilename = pathParts.length > 1
-      ? `${pathParts.slice(1).join("/")}/${name}`
+    const [subcategory, ...rest] = pathParts;
+    const nestedFilename = rest.length > 0
+      ? `${rest.join("/")}/${name}`
       : name;
 
     samples.push({
       filename: nestedFilename,
       category: categoryName,
-      subcategory,
+      subcategory: subcategory ?? null,
       alias: name.replace(/\.wav$/i, ""),
     });
   }

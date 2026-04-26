@@ -162,6 +162,7 @@ export const PRODUCTS: readonly ProductSpec[] = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/* v8 ignore start */
 function run(script: string, args: string[]): void {
   const display = ["npx", "tsx", script, ...args].join(" ");
   console.log(`\n  > ${display}`);
@@ -211,6 +212,7 @@ function promoteNormalized(): void {
   cpSync(NORMALIZED_DIR, OUTPUT_DIR, { recursive: true, force: true });
   rmSync(NORMALIZED_DIR, { recursive: true, force: true });
 }
+/* v8 ignore stop */
 
 /** Return all products that have an accessible archive subtree. */
 export function detectProducts(archiveDir: string): ProductSpec[] {

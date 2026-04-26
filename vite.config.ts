@@ -13,15 +13,32 @@ import istanbulPluginRaw, { type IstanbulPluginOptions } from "vite-plugin-istan
 const istanbulPlugin = istanbulPluginRaw as unknown as (opts?: IstanbulPluginOptions) => Plugin;
 
 import { ARCHIVE_MIX_DIRS, buildUserdataMixLibrary } from "./scripts/build-index.js";
+import {
+  applySampleMoveToManifest,
+  createCategoryConfigMiddleware,
+  resolveMixUrl,
+  validateSampleMovePaths,
+} from "./scripts/dev-server/index.js";
+import type {
+  SampleMetadataManifest,
+  SampleMoveRequest,
+} from "./scripts/dev-server/index.js";
 import { buildDisplayVersion } from "./scripts/version.js";
-import { CATEGORY_CONFIG_FILENAME, CATEGORY_CONFIG_UPDATED_EVENT, normalizeCategoryConfig, SAMPLE_METADATA_UPDATED_EVENT } from "./src/data.js";
+import { CATEGORY_CONFIG_FILENAME, CATEGORY_CONFIG_UPDATED_EVENT, SAMPLE_METADATA_UPDATED_EVENT } from "./src/data.js";
+
+export { applySampleMoveToManifest, resolveMixUrl, validateSampleMovePaths } from "./scripts/dev-server/index.js";
+export { buildPerCategorySummary } from "./scripts/dev-server/index.js";
 
 const COVERAGE_SOURCE_FILES = [
   "src/main.ts",
   "src/data.ts",
   "src/library.ts",
   "src/player.ts",
-  "src/render.ts",
+  "src/render/icons.ts",
+  "src/render/transport.ts",
+  "src/render/sidebar.ts",
+  "src/render/grid.ts",
+  "src/render/home.ts",
   "src/sample-grid-context-menu.ts",
   "src/mix-file-browser.ts",
   "src/mix-player.ts",
@@ -161,67 +178,6 @@ function blockingWarmup(files: readonly string[]): import("vite").Plugin {
 }
 
 /**
- * Resolve a `/mix/<productId>/<filename>` request URL to an on-disk archive
- * path. Returns `null` for any URL that is not a mix request, mentions an
- * unknown product, tries to traverse directories, or points at a file that
- * does not exist on disk. The caller should respond 404 whenever `null` is
- * returned so the middleware remains safe against path-traversal attacks.
- *
- * User-created mixes stored under `archive/_userdata` use IDs of the form
- * `_userdata/<relPath>` (percent-encoded as a single URL segment by the
- * browser). The resolved path is verified to remain within
- * `archiveRoot/_userdata/` to prevent traversal attacks.
- */
-export function resolveMixUrl(
-  url: string,
-  archiveRoot: string,
-): { absolutePath: string; productId: string; filename: string } | null {
-  const match = /^\/mix\/([^/?#]+)\/([^/?#]+)(?:[?#].*)?$/.exec(url);
-  if (!match) return null;
-  const [, rawProductId, rawFilename] = match;
-  let productId: string;
-  let filename: string;
-  try {
-    productId = decodeURIComponent(rawProductId);
-    filename = decodeURIComponent(rawFilename);
-  } catch {
-    return null;
-  }
-  if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) return null;
-  if (!/\.mix$/i.test(filename)) return null;
-
-  // Handle _userdata groups: productId = "_userdata/<relPath>"
-  if (productId.startsWith("_userdata/")) {
-    const relPath = productId.slice("_userdata/".length);
-    const parts = relPath.split("/");
-    if (parts.length === 0 || parts.some((p) => p === ".." || p === "." || p === "")) return null;
-    const absolutePath = resolve(archiveRoot, "_userdata", ...parts, filename);
-    const expectedPrefix = resolve(archiveRoot, "_userdata") + (process.platform === "win32" ? "\\" : "/");
-    if (!absolutePath.startsWith(expectedPrefix)) return null;
-    if (!existsSync(absolutePath)) return null;
-    try {
-      if (!statSync(absolutePath).isFile()) return null;
-    } catch {
-      return null;
-    }
-    return { absolutePath, productId, filename };
-  }
-
-  const layout = ARCHIVE_MIX_DIRS[productId];
-  if (!layout) return null;
-  const absolutePath = resolve(archiveRoot, layout.archiveDir, layout.mixSubdir, filename);
-  const expectedPrefix = resolve(archiveRoot, layout.archiveDir, layout.mixSubdir) + (process.platform === "win32" ? "\\" : "/");
-  if (!absolutePath.startsWith(expectedPrefix)) return null;
-  if (!existsSync(absolutePath)) return null;
-  try {
-    if (!statSync(absolutePath).isFile()) return null;
-  } catch {
-    return null;
-  }
-  return { absolutePath, productId, filename };
-}
-
-/**
  * Dev-server plugin that exposes `archive/<product>/<MIX>/` folders at a
  * safe, allow-listed URL space (`/mix/<productId>/<filename>`). The full
  * archive tree is NOT served — only files whose product appears in the
@@ -294,57 +250,11 @@ function manageCategoryConfig(outputRoot: string): Plugin {
       server.watcher.on("change", handleWatchedConfigChange);
       server.watcher.on("unlink", handleWatchedConfigChange);
 
-      server.middlewares.use((req, res, next) => {
-        if (req.url !== "/__category-config") {
-          next();
-          return;
-        }
-
-        if (req.method !== "PUT") {
-          res.statusCode = 405;
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          res.end("Method not allowed");
-          return;
-        }
-
-        const MAX_BODY_BYTES = 1_048_576; // 1 MiB
-        let body = "";
-        let bodyTooLarge = false;
-        req.setEncoding("utf8");
-        req.on("data", (chunk) => {
-          body += chunk;
-          if (body.length > MAX_BODY_BYTES) {
-            bodyTooLarge = true;
-            res.statusCode = 413;
-            res.setHeader("Content-Type", "text/plain; charset=utf-8");
-            res.end("Request entity too large");
-            req.destroy();
-          }
-        });
-        req.on("end", () => {
-          if (bodyTooLarge) return;
-          try {
-            const parsed: unknown = JSON.parse(body);
-            const config = normalizeCategoryConfig(parsed);
-            if (!config) {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "text/plain; charset=utf-8");
-              res.end("Invalid category config");
-              return;
-            }
-
-            writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-            res.statusCode = 204;
-            emitCategoryConfigUpdated();
-            res.end();
-          } catch (error) {
-            server.config.logger.warn(`[manage-category-config] Failed to write ${configPath}: ${String(error)}`);
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "text/plain; charset=utf-8");
-            res.end("Internal error");
-          }
-        });
-      });
+      server.middlewares.use(createCategoryConfigMiddleware(
+        configPath,
+        emitCategoryConfigUpdated,
+        (msg) => server.config.logger.warn(msg),
+      ));
     },
   };
 }
@@ -419,65 +329,6 @@ function copyMixFilesPlugin(archiveRoot: string): Plugin {
   };
 }
 
-type SampleMetadataRecord = Record<string, unknown>;
-
-type SampleMetadataManifest = {
-  samples: SampleMetadataRecord[];
-  total_samples?: number;
-  per_category?: Record<string, number>;
-} & Record<string, unknown>;
-
-type SampleMoveRequest = {
-  filename: string;
-  oldCategory: string;
-  oldSubcategory: string | null;
-  newCategory: string;
-  newSubcategory: string | null;
-};
-
-export function buildPerCategorySummary(samples: SampleMetadataRecord[]): Record<string, number> {
-  const perCategory: Record<string, number> = {};
-
-  for (const sample of samples) {
-    const category = typeof sample["category"] === "string" && sample["category"].trim() !== ""
-      ? sample["category"]
-      : "Unsorted";
-    const subcategory = typeof sample["subcategory"] === "string" && sample["subcategory"].trim() !== ""
-      ? sample["subcategory"]
-      : null;
-    const key = subcategory ? `${category}/${subcategory}` : category;
-    perCategory[key] = (perCategory[key] ?? 0) + 1;
-  }
-
-  return perCategory;
-}
-
-export function applySampleMoveToManifest(
-  manifest: SampleMetadataManifest,
-  move: SampleMoveRequest,
-): boolean {
-  let updated = false;
-
-  for (const sample of manifest.samples) {
-    const sampleOldCategory = typeof sample["category"] === "string" ? sample["category"] : "";
-    const sampleOldSubcategory = typeof sample["subcategory"] === "string" ? sample["subcategory"] : null;
-    if (
-      sample["filename"] === move.filename &&
-      sampleOldCategory === move.oldCategory &&
-      sampleOldSubcategory === (move.oldSubcategory ?? null)
-    ) {
-      sample["category"] = move.newCategory;
-      sample["subcategory"] = move.newSubcategory ?? null;
-      updated = true;
-      break;
-    }
-  }
-
-  manifest.total_samples = manifest.samples.length;
-  manifest.per_category = buildPerCategorySummary(manifest.samples);
-  return updated;
-}
-
 /**
  * Dev-server endpoint for moving a sample from one category/subcategory to another.
  * Moves the WAV file on disk and patches output/metadata.json in place.
@@ -531,26 +382,19 @@ function manageSampleMetadata(outputRoot: string): Plugin {
 
             const { filename, oldCategory, oldSubcategory, newCategory, newSubcategory } = parsed as SampleMoveRequest;
 
-            // Security: reject path-traversal in category/subcategory fields.
-            // ".." is only dangerous in directory-segment fields; a filename may
-            // legitimately contain ".." (e.g. "VXB010..wav") so we only check
-            // for directory separators there.
-            for (const field of [oldCategory, oldSubcategory ?? "", newCategory, newSubcategory ?? ""]) {
-              if (field.includes("..") || field.includes("/") || field.includes("\\")) {
-                res.statusCode = 400;
-                res.setHeader("Content-Type", "text/plain; charset=utf-8");
-                res.end("Invalid path component");
-                return;
-              }
-            }
-            if (filename.includes("/") || filename.includes("\\")) {
+            // Security: validate all path components and enforce containment within
+            // outputRoot before touching the filesystem.
+            const validationError = validateSampleMovePaths(
+              outputRoot, filename, oldCategory, oldSubcategory, newCategory, newSubcategory,
+            );
+            if (validationError !== null) {
               res.statusCode = 400;
               res.setHeader("Content-Type", "text/plain; charset=utf-8");
-              res.end("Invalid path component");
+              res.end(validationError);
               return;
             }
 
-            // Build source and destination paths
+            // Build source and destination paths (already validated above)
             const oldParts = [outputRoot, oldCategory, ...(oldSubcategory ? [oldSubcategory] : []), filename];
             const newParts = [outputRoot, newCategory, ...(newSubcategory ? [newSubcategory] : []), filename];
             const oldWav = resolve(...(oldParts as [string, ...string[]]));

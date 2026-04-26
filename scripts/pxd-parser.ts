@@ -245,20 +245,35 @@ export interface PxdDecodeResult {
   unknownField: number;
 }
 
+/** Maximum plausible expansion ratio: 1 compressed byte → 5 decoded bytes
+ *  (dictionary back-reference or silence run). 8× gives headroom while
+ *  still rejecting maliciously large `decodedSize` headers. */
+const PXD_MAX_EXPANSION = 8;
+/** Hard ceiling on a single decoded PXD audio buffer (64 MiB). */
+const PXD_MAX_ALLOC_BYTES = 64 * 1024 * 1024;
+
 /**
  * Decode a complete PXD file.
  * Returns null for WAV/invalid files.
+ *
+ * `decodedSize` in the result reflects the capped allocation size, which
+ * matches the actual length of the returned PCM buffer.
  */
 export function decodePxdFile(data: Buffer): PxdDecodeResult | null {
   const header = parsePxdHeader(data);
   if (!header) return null;
 
   const compressed = data.subarray(header.audioOffset);
-  const pcm = decodePxdAudio(compressed, header.decodedSize);
+  const safeDecodedSize = Math.min(
+    header.decodedSize,
+    PXD_MAX_EXPANSION * compressed.length,
+    PXD_MAX_ALLOC_BYTES,
+  );
+  const pcm = decodePxdAudio(compressed, safeDecodedSize);
   return {
     pcm,
     metadataText: header.metadataText,
-    decodedSize: header.decodedSize,
+    decodedSize: safeDecodedSize,
     unknownField: header.unknownField,
   };
 }

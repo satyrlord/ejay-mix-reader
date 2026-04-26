@@ -36,10 +36,11 @@ export const APP_SIG_HIPHOP1 = 0x0a08;
 
 const FORMAT_A_SIGS = new Set([APP_SIG_DANCE1, APP_SIG_RAVE, APP_SIG_HIPHOP1]);
 
-const FA_HEADER_BYTES = 4;
-const FA_ROW_BYTES    = 16;
-const FA_CELL_BYTES   = 2;
-const FA_ZERO_GAP     = 32;
+export const FA_HEADER_BYTES = 4;
+export const FA_ROW_BYTES    = 16;
+export const FA_CELL_BYTES   = 2;
+export const FA_COLS         = FA_ROW_BYTES / FA_CELL_BYTES; // 8
+export const FA_ZERO_GAP     = 32;
 
 const IMPLICIT_BPM: Record<number, number> = {
   [APP_SIG_DANCE1]:  140,

@@ -68,61 +68,74 @@ interface AppState {
   gridSortDir: GridSortDir;
 }
 
-const state: AppState = {
-  library: null,
-  categoryConfig: buildDefaultCategoryConfig(),
-  categories: [],
-  activeCategory: null,
-  samples: [],
-  tabs: [],
-  activeTab: null,
-  bpm: null,
-  sampleBubbleZoomScale: 1,
-  isAddingSubcategory: false,
-  subcategoryDraft: "",
-  searchQuery: "",
-  gridSortKey: DEFAULT_GRID_SORT_KEY,
-  gridSortDir: DEFAULT_GRID_SORT_DIR,
-};
-
 const SAMPLE_BUBBLE_ZOOM_CSS_VAR = "--sample-bubble-zoom-scale";
 const SAMPLE_BUBBLE_ZOOM_STEP = 0.1;
 const SAMPLE_BUBBLE_ZOOM_MIN = 0.5;
 const SAMPLE_BUBBLE_ZOOM_MAX = 2;
 
-const player = new Player();
-let slots: SpaShellSlots | null = null;
-let progressUpdateIntervalId: number | null = null;
-const noop = (): void => {};
-let stopCategoryConfigWatch: () => void = noop;
-let categoryConfigRefreshInFlight = false;
-const subcategoryOperationsInFlight = new Set<SubcategoryOperation>();
-let cleanupSubcategoryContextMenu: () => void = noop;
-let currentGridSamples: Sample[] = [];
-
 const SUBCATEGORY_CONTEXT_MENU_ID = "subcategory-context-menu";
 
-const appElement = document.getElementById("app");
-/* istanbul ignore next -- index.html always provides #app */
-if (!appElement) throw new Error("Missing #app element");
-const app = appElement;
+const isDev = import.meta.env.DEV;
 
-const sampleGridContextMenu = createSampleGridContextMenuController({
-  getCategories: () => state.categories,
-  getCurrentGridSamples: () => currentGridSamples,
-  getSortState: () => ({ key: state.gridSortKey, dir: state.gridSortDir }),
-  setSortState: (key, dir) => {
-    state.gridSortKey = key;
-    state.gridSortDir = dir;
-  },
-  refreshSamples,
-  onMoveSample: (sample, newCategory, newSubcategory) => {
-    void handleMoveSample(sample, newCategory, newSubcategory);
-  },
-  closeOtherMenus: () => {
+const noop = (): void => {};
+
+function createAppController(app: HTMLElement): () => void {
+  const state: AppState = {
+    library: null,
+    categoryConfig: buildDefaultCategoryConfig(),
+    categories: [],
+    activeCategory: null,
+    samples: [],
+    tabs: [],
+    activeTab: null,
+    bpm: null,
+    sampleBubbleZoomScale: 1,
+    isAddingSubcategory: false,
+    subcategoryDraft: "",
+    searchQuery: "",
+    gridSortKey: DEFAULT_GRID_SORT_KEY,
+    gridSortDir: DEFAULT_GRID_SORT_DIR,
+  };
+
+  const player = new Player();
+  let slots: SpaShellSlots | null = null;
+  let progressUpdateIntervalId: number | null = null;
+  let stopCategoryConfigWatch: () => void = noop;
+  let categoryConfigRefreshInFlight = false;
+  const subcategoryOperationsInFlight = new Set<SubcategoryOperation>();
+  let cleanupSubcategoryContextMenu: () => void = noop;
+  let currentGridSamples: Sample[] = [];
+
+  const sampleGridContextMenu = createSampleGridContextMenuController({
+    getCategories: () => state.categories,
+    getCurrentGridSamples: () => currentGridSamples,
+    getSortState: () => ({ key: state.gridSortKey, dir: state.gridSortDir }),
+    setSortState: (key, dir) => {
+      state.gridSortKey = key;
+      state.gridSortDir = dir;
+    },
+    refreshSamples,
+    onMoveSample: (sample, newCategory, newSubcategory) => {
+      void handleMoveSample(sample, newCategory, newSubcategory);
+    },
+    closeOtherMenus: () => {
+      closeSubcategoryContextMenu();
+    },
+  });
+
+  let disposed = false;
+
+  function cleanup(): void {
+    if (disposed) return;
+    disposed = true;
+    clearCategoryConfigWatcher();
+    clearProgressUpdateInterval();
     closeSubcategoryContextMenu();
-  },
-});
+    closeSampleContextMenu();
+    player.destroy();
+    /* istanbul ignore next -- browser coverage boots the library before unload */
+    state.library?.dispose();
+  }
 
 function clearProgressUpdateInterval(): void {
   if (progressUpdateIntervalId === null) return;
@@ -160,19 +173,17 @@ function completeSubcategoryOperation(operation: SubcategoryOperation): void {
   subcategoryOperationsInFlight.delete(operation);
 }
 
-player.onStateChange((playerState) => {
-  setTransportBuildLabelAudioPlaying("sample", playerState === "playing");
-  updatePlayingBlock(player.activePath);
-  updateTransport(player.activePath, player);
+  player.onStateChange((playerState) => {
+    setTransportBuildLabelAudioPlaying("sample", playerState === "playing");
+    updatePlayingBlock(player.activePath);
+    updateTransport(player.activePath, player);
 
-  clearProgressUpdateInterval();
-  if (playerState === "playing") {
-    const intervalMs = calcProgressInterval(player.duration);
-    progressUpdateIntervalId = window.setInterval(() => updateTransport(player.activePath, player), intervalMs);
-  }
-});
-
-const isDev = import.meta.env.DEV;
+    clearProgressUpdateInterval();
+    if (playerState === "playing") {
+      const intervalMs = calcProgressInterval(player.duration);
+      progressUpdateIntervalId = window.setInterval(() => updateTransport(player.activePath, player), intervalMs);
+    }
+  });
 
 /* istanbul ignore next -- production-only home flow is not exercised by the dev-server coverage harness */
 function showHome(): void {
@@ -371,16 +382,6 @@ function renderEmptyState(message: string): void {
   empty.textContent = message;
   currentSlots.grid.appendChild(empty);
 }
-
-window.addEventListener("beforeunload", () => {
-  clearCategoryConfigWatcher();
-  clearProgressUpdateInterval();
-  closeSubcategoryContextMenu();
-  closeSampleContextMenu();
-  player.destroy();
-  /* istanbul ignore next -- browser coverage boots the library before unload */
-  state.library?.dispose();
-});
 
 function applyCategoryConfig(config: CategoryConfig, preferredTabId: string | null = null): void {
   state.categoryConfig = config;
@@ -740,9 +741,20 @@ async function handleRemoveSubcategory(tab: CategoryTab): Promise<void> {
   }
 }
 
-/* istanbul ignore next -- browser coverage runs against the dev server, so DEV is always true here */
-if (isDev) {
-  void startWithFetchLibrary();
-} else {
-  showHome();
+  /* istanbul ignore next -- browser coverage runs against the dev server, so DEV is always true here */
+  if (isDev) {
+    void startWithFetchLibrary();
+  } else {
+    showHome();
+  }
+
+  return cleanup;
 }
+
+const appElement = document.getElementById("app");
+/* istanbul ignore next -- index.html always provides #app */
+if (!appElement) throw new Error("Missing #app element");
+const cleanupApp = createAppController(appElement);
+
+window.addEventListener("beforeunload", cleanupApp, { once: true });
+import.meta.hot?.dispose(cleanupApp);
