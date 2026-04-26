@@ -15,6 +15,7 @@ describe("irToMeta", () => {
 
   it("maps bpm, trackCount, and catalogs from a minimal IR", () => {
     const ir = {
+      appId: 0x00000a19,
       bpm: 140,
       bpmAdjusted: null as number | null,
       tracks: [1, 2, 3] as unknown[],
@@ -28,6 +29,7 @@ describe("irToMeta", () => {
 
     const meta = irToMeta(ir);
     expect(meta).not.toBeNull();
+    expect(meta?.appId).toBe(0x00000a19);
     expect(meta?.bpm).toBe(140);
     expect(meta?.trackCount).toBe(3);
     expect(meta?.catalogs).toEqual(["Dance eJay 1"]);
@@ -39,7 +41,7 @@ describe("irToMeta", () => {
 
   it("populates bpmAdjusted only when different from bpm", () => {
     const ir = {
-      bpm: 140, bpmAdjusted: 120 as number | null, tracks: [],
+      appId: 0x00000a19, bpm: 140, bpmAdjusted: 120 as number | null, tracks: [],
       catalogs: [], title: null, author: null, tickerText: [], format: "A" as const, registration: null,
     } as unknown as Parameters<typeof irToMeta>[0];
     expect(irToMeta(ir)?.bpmAdjusted).toBe(120);
@@ -47,7 +49,7 @@ describe("irToMeta", () => {
 
   it("omits bpmAdjusted when it equals bpm", () => {
     const ir = {
-      bpm: 140, bpmAdjusted: 140 as number | null, tracks: [],
+      appId: 0x00000a19, bpm: 140, bpmAdjusted: 140 as number | null, tracks: [],
       catalogs: [], title: null, author: null, tickerText: [], format: "A" as const, registration: null,
     } as unknown as Parameters<typeof irToMeta>[0];
     expect(irToMeta(ir)?.bpmAdjusted).toBeUndefined();
@@ -55,7 +57,7 @@ describe("irToMeta", () => {
 
   it("populates title and author when present", () => {
     const ir = {
-      bpm: 130, bpmAdjusted: null as number | null, tracks: [],
+      appId: 0x00000a19, bpm: 130, bpmAdjusted: null as number | null, tracks: [],
       catalogs: [], title: "My Track", author: "DJ Test", tickerText: [], format: "A" as const, registration: null,
     } as unknown as Parameters<typeof irToMeta>[0];
     const meta = irToMeta(ir);
@@ -65,7 +67,7 @@ describe("irToMeta", () => {
 
   it("populates tickerText when non-empty", () => {
     const ir = {
-      bpm: 130, bpmAdjusted: null as number | null, tracks: [],
+      appId: 0x00000a19, bpm: 130, bpmAdjusted: null as number | null, tracks: [],
       catalogs: [], title: null, author: null, tickerText: ["line 1", "line 2"], format: "A" as const, registration: null,
     } as unknown as Parameters<typeof irToMeta>[0];
     expect(irToMeta(ir)?.tickerText).toEqual(["line 1", "line 2"]);

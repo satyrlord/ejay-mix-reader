@@ -47,6 +47,7 @@ export function irToMeta(ir: ReturnType<typeof parseMix>): MixFileMeta | null {
 
   const meta: MixFileMeta = {
     format: ir.format,
+    appId: ir.appId,
     bpm: ir.bpm,
     trackCount: ir.tracks.length,
     catalogs: ir.catalogs.map((c) => c.name),

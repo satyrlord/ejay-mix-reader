@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   beatsToSeconds,
+  buildMixPlaybackPlan,
   buildImpulseResponse,
   buildOverdriveCurve,
   createEffect,
@@ -28,6 +29,8 @@ import {
   type StereoPannerNodeLike,
   type WaveShaperNodeLike,
 } from "../mix-player.js";
+import type { SampleLookupEntry } from "../data.js";
+import type { MixIR } from "../mix-types.js";
 
 /* -------------------------------------------------------------------------- */
 /* Mock AudioContext                                                          */
@@ -179,6 +182,396 @@ describe("effectiveGain", () => {
   });
   it("passes through volume in the normal case", () => {
     expect(effectiveGain({ volume: 50, muted: false, soloed: false, anySoloed: false })).toBe(0.5);
+  });
+});
+
+describe("buildMixPlaybackPlan", () => {
+  function makeMix(overrides: Partial<MixIR> = {}): MixIR {
+    return {
+      format: "B",
+      product: "Dance_eJay2",
+      appId: 0x00000a19,
+      bpm: 140,
+      bpmAdjusted: null,
+      author: null,
+      title: null,
+      registration: null,
+      mixer: { channels: [], eq: [], compressor: null, stereoWide: null, raw: {} },
+      drumMachine: null,
+      tickerText: [],
+      catalogs: [{ name: "Dance eJay 2.0", idRangeStart: 0, idRangeEnd: 5000 }],
+      tracks: [],
+      ...overrides,
+    };
+  }
+
+  it("maps tracks to a schedulable plan and resolves by sample id first", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Dance_eJay2: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: { "1930": "Drum/kick.wav" },
+        byGen1Id: {},
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      tracks: [
+        {
+          beat: 4,
+          channel: 2,
+          sampleRef: {
+            rawId: 1930,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: 1024,
+          },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(plan.events).toHaveLength(1);
+    expect(plan.resolvedEvents).toBe(1);
+    expect(plan.unresolvedEvents).toBe(0);
+    expect(plan.loopBeats).toBe(5);
+    expect(plan.channelIds).toEqual(["lane-2"]);
+    expect(plan.events[0]).toMatchObject({
+      beat: 4,
+      channelId: "lane-2",
+      audioUrl: "output/Drum/kick.wav",
+      resolved: true,
+      displayLabel: "#1930",
+    });
+  });
+
+  it("falls back to internal name and display-name lookup when no sample id match exists", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Dance_eJay3: {
+        byAlias: { kick28: "Drum/kick28.wav" },
+        bySource: {},
+        byStem: { d5mg539: "Drum/internal.wav" },
+        byInternalName: { d5mg539: "Drum/internal.wav" },
+        bySampleId: {},
+        byGen1Id: {},
+      },
+    };
+
+    const internalPlan = buildMixPlaybackPlan(makeMix({
+      format: "C",
+      product: "Dance_eJay3",
+      appId: 0x00002571,
+      tracks: [
+        {
+          beat: null,
+          channel: null,
+          sampleRef: {
+            rawId: 0,
+            internalName: "D5MG539",
+            displayName: null,
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(internalPlan.events[0]).toMatchObject({
+      channelId: "track-0",
+      beat: 0,
+      audioUrl: "output/Drum/internal.wav",
+      resolved: true,
+      displayLabel: "D5MG539",
+    });
+
+    const displayPlan = buildMixPlaybackPlan(makeMix({
+      format: "C",
+      product: "Dance_eJay3",
+      appId: 0x00002571,
+      tracks: [
+        {
+          beat: null,
+          channel: null,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: "kick28",
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(displayPlan.events[0]).toMatchObject({
+      audioUrl: "output/Drum/kick28.wav",
+      resolved: true,
+      displayLabel: "kick28",
+    });
+  });
+
+  it("uses product fallbacks and keeps unresolved events in the plan", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Dance_eJay3: {
+        byAlias: { minrim01: "Drum/minrim01.wav" },
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {},
+        byGen1Id: {},
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      format: "C",
+      product: "Techno_eJay3",
+      appId: 0x00002572,
+      catalogs: [{ name: "Techno eJay 3.0", idRangeStart: 0, idRangeEnd: 4000 }],
+      tracks: [
+        {
+          beat: null,
+          channel: null,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: "minrim01",
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+        {
+          beat: null,
+          channel: null,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(plan.resolvedEvents).toBe(1);
+    expect(plan.unresolvedEvents).toBe(1);
+    expect(plan.events[0]?.audioUrl).toBe("output/Drum/minrim01.wav");
+    expect(plan.events[1]).toMatchObject({
+      audioUrl: null,
+      resolved: false,
+      displayLabel: "Unknown sample",
+    });
+  });
+
+  it("resolves Gen 1 raw ids from precomputed catalog mappings and canonical product labels", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Dance_eJay1: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {},
+        byGen1Id: { "1": "Drum/gen1.wav" },
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      format: "A",
+      product: "Dance_eJay_10",
+      appId: 0x02f60006,
+      catalogs: [],
+      tracks: [
+        {
+          beat: 0,
+          channel: 0,
+          sampleRef: {
+            rawId: 1,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(plan.events[0]).toMatchObject({
+      beat: 0,
+      channelId: "lane-0",
+      audioUrl: "output/Drum/gen1.wav",
+      resolved: true,
+      displayLabel: "#1",
+    });
+  });
+
+  it("keeps unknown products unchanged and resolves them from the matching product index", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Custom_Product: {
+        byAlias: { custom: "Loop/custom.wav" },
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {},
+        byGen1Id: {},
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      product: "Custom_Product",
+      catalogs: [],
+      tracks: [
+        {
+          beat: 1,
+          channel: 4,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: "custom",
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(plan.events[0]).toMatchObject({
+      beat: 1,
+      channelId: "lane-4",
+      audioUrl: "output/Loop/custom.wav",
+      resolved: true,
+      displayLabel: "custom",
+    });
+  });
+
+  it("uses catalog hints and filename stems to resolve hinted expansion samples", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Dance_eJay2: {
+        byAlias: {},
+        bySource: {},
+        byStem: {
+          lead: "Loop/lead.wav",
+          vox: "Voice/vox.wav",
+        },
+        byInternalName: {},
+        bySampleId: {},
+        byGen1Id: {},
+      },
+      SampleKit_DMKIT1: {
+        byAlias: {},
+        bySource: {},
+        byStem: {
+          pad: "Pads/pad.wav",
+        },
+        byInternalName: {},
+        bySampleId: {},
+        byGen1Id: {},
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      product: "Custom_Product",
+      catalogs: [
+        { name: "Dance eJay 2", idRangeStart: 0, idRangeEnd: 5000 },
+        { name: "DanceMachine Sample Kit Vol. 1", idRangeStart: 0, idRangeEnd: 5000 },
+      ],
+      tracks: [
+        {
+          beat: 0,
+          channel: 0,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: "path/to/lead.wav",
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+        {
+          beat: 1,
+          channel: 1,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: "pad.wav",
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+        {
+          beat: 2,
+          channel: 2,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: "vox",
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(plan.events.map((event) => event.audioUrl)).toEqual([
+      "output/Loop/lead.wav",
+      "output/Pads/pad.wav",
+      "output/Voice/vox.wav",
+    ]);
+    expect(plan.resolvedEvents).toBe(3);
+    expect(plan.unresolvedEvents).toBe(0);
+  });
+
+  it("normalizes invalid beats and channels and keeps empty indexes unresolved", () => {
+    const plan = buildMixPlaybackPlan(makeMix({
+      product: "Custom_Product",
+      catalogs: [],
+      tracks: [
+        {
+          beat: Number.NaN,
+          channel: Number.POSITIVE_INFINITY,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: "bad-1",
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+        {
+          beat: Number.POSITIVE_INFINITY,
+          channel: Number.NaN,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    }), {});
+
+    expect(plan.channelIds).toEqual(["track-0", "track-1"]);
+    expect(plan.events).toEqual([
+      expect.objectContaining({
+        beat: 0,
+        channelId: "track-0",
+        audioUrl: null,
+        resolved: false,
+        displayLabel: "bad-1",
+      }),
+      expect.objectContaining({
+        beat: 0,
+        channelId: "track-1",
+        audioUrl: null,
+        resolved: false,
+        displayLabel: "Unknown sample",
+      }),
+    ]);
+    expect(plan.resolvedEvents).toBe(0);
+    expect(plan.unresolvedEvents).toBe(2);
+    expect(plan.loopBeats).toBe(1);
   });
 });
 

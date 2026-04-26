@@ -29,19 +29,9 @@ import {
   parseFormatB as _parseFormatB,
   parseFormatC as _parseFormatC,
   parseFormatD as _parseFormatD,
-  parseMixerKV,
   parseCatalogs as _parseCatalogs,
   locateGridTrailer as _locateGridTrailer,
   extractAsciiStrings as _extractAsciiStrings,
-  MIN_FILE_SIZE,
-  APP_SIG_DANCE1,
-  APP_SIG_RAVE,
-  APP_SIG_HIPHOP1,
-  FA_HEADER_BYTES,
-  FA_ROW_BYTES,
-  FA_CELL_BYTES,
-  FA_COLS,
-  FA_ZERO_GAP,
 } from "../src/mix-parser.js";
 
 import type {
@@ -64,6 +54,7 @@ export { MixBuffer } from "../src/mix-parser.js";
 
 export {
   MIN_FILE_SIZE,
+  APP_ID_PRODUCTS,
   APP_SIG_DANCE1,
   APP_SIG_RAVE,
   APP_SIG_HIPHOP1,
@@ -72,6 +63,12 @@ export {
   FA_CELL_BYTES,
   FA_COLS,
   FA_ZERO_GAP,
+  FA_NUM_ROWS,
+  FA_GRID_BYTES,
+  FA_GRID1_START,
+  FA_GRID2_START,
+  FA_TRAILER_OFFSET,
+  FA_TRAILER_MARKER,
   parseMixerKV,
 } from "../src/mix-parser.js";
 

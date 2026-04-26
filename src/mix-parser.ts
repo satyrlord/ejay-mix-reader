@@ -36,10 +36,33 @@ export const APP_SIG_HIPHOP1 = 0x0a08;
 
 const FORMAT_A_SIGS = new Set([APP_SIG_DANCE1, APP_SIG_RAVE, APP_SIG_HIPHOP1]);
 
-export const FA_HEADER_BYTES = 4;
+export const FA_HEADER_BYTES = 2;
 export const FA_ROW_BYTES    = 16;
 export const FA_CELL_BYTES   = 2;
 export const FA_COLS         = FA_ROW_BYTES / FA_CELL_BYTES; // 8
+
+/**
+ * Universal Gen 1 grid row count, established empirically across all archived
+ * Format A `.mix` files and confirmed against the decompiled VB6 source.
+ * Both Grid 1 (placements) and Grid 2 (per-cell metadata) are exactly this
+ * many rows, regardless of product.
+ */
+export const FA_NUM_ROWS     = 351;
+export const FA_GRID_BYTES   = FA_ROW_BYTES * FA_NUM_ROWS;          // 5616
+export const FA_GRID1_START  = FA_HEADER_BYTES;                     // 2
+export const FA_GRID2_START  = FA_GRID1_START + FA_GRID_BYTES;      // 5618 (0x15F2)
+export const FA_TRAILER_OFFSET = FA_GRID1_START + FA_GRID_BYTES * 2; // 11234 (0x2BE2)
+export const FA_TRAILER_MARKER = 0x0a08;
+
+/**
+ * Legacy zero-gap heuristic threshold. The current parser only uses this for
+ * short / synthetic buffers that do not contain the deterministic dual-grid
+ * layout; full-size archive files are parsed by offset arithmetic instead.
+ * Kept exported for the forensics tool (`scripts/mix-grid-analyzer.ts`) and
+ * existing tests.
+ *
+ * @deprecated Prefer the deterministic `FA_TRAILER_OFFSET` constant.
+ */
 export const FA_ZERO_GAP     = 32;
 
 const IMPLICIT_BPM: Record<number, number> = {
@@ -54,10 +77,24 @@ const FORMAT_A_PRODUCTS: Record<number, string> = {
   [APP_SIG_HIPHOP1]: "HipHop_eJay1",
 };
 
-const APP_ID_PRODUCTS: Record<number, string> = {
+// Observed archive appIds differ from the early low-word placeholders the
+// parser originally used for Gen 2/3. Keep both so catalog-less files can
+// still infer a product whether they carry the archive-observed ids or the
+// older low-word variants.
+export const APP_ID_PRODUCTS: Record<number, string> = {
+  0x00000889: "Techno_eJay",
   0x00000a06: "Dance_eJay1",
   0x00000a07: "Rave",
   0x00000a08: "HipHop_eJay1",
+  0x00000a19: "Dance_eJay2",
+  0x000011d6: "House_eJay",
+  0x000011e9: "HipHop_eJay2",
+  0x000015dc: "HipHop_eJay4",
+  0x00002571: "Dance_eJay3",
+  0x00002572: "Techno_eJay3",
+  0x00002573: "HipHop_eJay3",
+  0x00002964: "Xtreme_eJay",
+  0x00002d41: "Dance_eJay4",
   0x00000a09: "Dance_eJay2",
   0x00000a0a: "Dance_eJay3",
   0x00000a0b: "Techno_eJay",
@@ -137,12 +174,30 @@ export function parseMix(buf: MixBuffer, productHint?: string): MixIR | null {
 
 export function parseFormatA(buf: MixBuffer, productHint?: string): MixIR {
   const appSig = buf.readUInt16LE(0);
-  const headerAux = buf.readUInt16LE(2);
 
   const product = productHint ?? FORMAT_A_PRODUCTS[appSig] ?? "Unknown_Gen1";
   const bpm = IMPLICIT_BPM[appSig] ?? 140;
 
-  const { gridEnd, trailerStart } = locateGridTrailer(buf, FA_HEADER_BYTES, FA_ZERO_GAP);
+  // Real Gen 1 files carry two sequential 8×351 uint16 grids:
+  //   [ uint16 appSig | Grid 1 (5616 B) | Grid 2 (5616 B) | optional trailer ]
+  // The trailer (when present) is marked by `uint16 0x0A08` at offset 11234.
+  // Synthetic / short buffers used by tests fall back to the legacy zero-gap
+  // heuristic so we keep parsing them without inflating their size.
+  const hasFullLayout = buf.length >= FA_TRAILER_OFFSET;
+
+  let gridEnd: number;
+  let grid2: number[] | undefined;
+
+  if (hasFullLayout) {
+    gridEnd = FA_GRID2_START - 1;
+    const cells = new Array<number>(FA_NUM_ROWS * FA_COLS);
+    for (let i = 0; i < cells.length; i++) {
+      cells[i] = buf.readUInt16LE(FA_GRID2_START + i * FA_CELL_BYTES);
+    }
+    grid2 = cells;
+  } else {
+    ({ gridEnd } = locateGridTrailer(buf, FA_HEADER_BYTES, FA_ZERO_GAP));
+  }
 
   const tracks: TrackPlacement[] = [];
   const cellUpperBound = gridEnd >= FA_HEADER_BYTES
@@ -171,7 +226,7 @@ export function parseFormatA(buf: MixBuffer, productHint?: string): MixIR {
   return {
     format: "A",
     product,
-    appId: ((headerAux * 0x10000) + appSig) >>> 0,
+    appId: appSig,
     bpm,
     bpmAdjusted: null,
     author: null,
@@ -182,6 +237,7 @@ export function parseFormatA(buf: MixBuffer, productHint?: string): MixIR {
     drumMachine: null,
     tickerText: [],
     catalogs: [],
+    formatAGrid2: grid2,
   };
 }
 

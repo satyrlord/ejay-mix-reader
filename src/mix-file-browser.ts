@@ -24,6 +24,8 @@ export interface MixFileRef {
   label: string;
   /** The product name / folder group this file belongs to. */
   group: string;
+  /** Canonical group id used by `/mix/` URLs and mix parsing hints. */
+  productId: string;
   /** How to obtain the raw file bytes. */
   source: MixFileSource;
 }
@@ -41,7 +43,7 @@ export interface MixFileBrowserOptions {
    * Required (and only used) when `isDev` is `true`.
    */
   mixLibrary?: MixLibraryEntry[];
-  /** Called when the user clicks a .mix file in the tree. */
+  /** Called when the user double-clicks a .mix file in the tree. */
   onSelectFile: (ref: MixFileRef) => void;
 }
 
@@ -234,6 +236,7 @@ function mixMetaFromIr(ir: ReturnType<typeof parseMixBrowser>): MixFileMeta | un
 
   const meta: MixFileMeta = {
     format: ir.format,
+    appId: ir.appId,
     bpm: ir.bpm,
     trackCount: ir.tracks.length,
     catalogs: ir.catalogs.map((catalog) => catalog.name),
@@ -348,6 +351,9 @@ export function buildMetaRows(
     ["Product", group],
   ];
   if (meta) {
+    if (typeof meta.appId === "number") {
+      rows.push(["App ID", `0x${meta.appId.toString(16).padStart(8, "0")}`]);
+    }
     rows.push(["Format", meta.format ? mixFormatLabel(meta.format) : "—"]);
     const bpmStr =
       meta.bpmAdjusted && meta.bpmAdjusted !== meta.bpm
@@ -525,6 +531,19 @@ function renderTreeGroups(
       renderTreeGroups(content, groups, state, onSelect);
     });
 
+
+  function activateTreeFile(
+    content: HTMLElement,
+    state: BrowserState,
+    key: string,
+    button: HTMLButtonElement,
+  ): void {
+    state.activeKey = key;
+    for (const active of content.querySelectorAll<HTMLButtonElement>(".mix-tree-item.is-active")) {
+      active.classList.remove("is-active");
+    }
+    button.classList.add("is-active");
+  }
     for (const file of group.files) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -543,10 +562,15 @@ function renderTreeGroups(
 
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        state.activeKey = file.key;
-        onSelect({ label: file.label, group: group.label, source: file.source });
+        activateTreeFile(content, state, file.key, btn);
         showMixMetaPopup(file.label, group.label, file.meta, btn);
-        renderTreeGroups(content, groups, state, onSelect);
+      });
+
+      btn.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        activateTreeFile(content, state, file.key, btn);
+        dismissMixMetaPopup();
+        onSelect({ label: file.label, group: group.label, productId: group.id, source: file.source });
       });
 
       itemsEl.appendChild(btn);

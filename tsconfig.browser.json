@@ -9,5 +9,6 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "src/sample-grid-context-menu.ts", "src/**/*.d.ts"]
+  "include": ["src/**/*.ts", "src/sample-grid-context-menu.ts", "src/**/*.d.ts"],
+  "exclude": ["src/__tests__/**"]
 }

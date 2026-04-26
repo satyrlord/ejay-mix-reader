@@ -219,7 +219,6 @@ describe("runRecovery", () => {
       writeFileSync(join(externalB, "Effect", "badfx.wav"), Buffer.from("not-a-wav", "utf8"));
 
       const hints: Array<string | undefined> = [];
-      const warnings: string[] = [];
       const result = runRecovery(
         {
           archiveDir,

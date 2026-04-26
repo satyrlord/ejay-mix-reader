@@ -20,16 +20,23 @@ material that is not itself a shipped eJay title.
 | 2 | Dance eJay 2 | `Dance_eJay2` | Dance | 2 | Individual PXD + packed archive | `DANCE20.INF`, `DANCESK4-6.INF` |
 | 3 | Dance eJay 3 | `Dance_eJay3` | Dance | 3 | Packed archive | `dance30.inf` |
 | 4 | Dance eJay 4 | `Dance_eJay4` | Dance | 3 | Packed archive | `DANCE40.inf` |
-| 5 | Dance SuperPack | `Dance_SuperPack` | Dance | 1+ | Individual PXD + WAV + bundled sample-kit content | — |
-| 6 | Generation Pack 1 | `GenerationPack1` | Multi | 1 | PXD banks (Dance/Rave/HipHop) + WAV bonus folders | — |
-| 7 | HipHop eJay 2 | `HipHop 2` | HipHop | 2 | Packed archive | `HipHop20.inf` |
-| 8 | HipHop eJay 3 | `HipHop 3` | HipHop | 3 | Packed archive | `hiphop30.inf` |
-| 9 | HipHop eJay 4 | `HipHop 4` | HipHop | 3 | Packed archive + WAV | `HipHop40.inf` |
-| 10 | House eJay | `House_eJay` | House | 3 | Packed archive | `HOUSE10.inf` |
-| 11 | Rave eJay | `Rave` | Rave | 1 | Individual PXD | — |
-| 12 | Techno eJay | `TECHNO_EJAY` | Techno | 2 | Individual PXD + packed archive | `RAVE20.INF` |
-| 13 | Techno eJay 3 | `Techno 3` | Techno | 3 | Packed archive | `rave30.inf` |
-| 14 | Xtreme eJay | `Xtreme_eJay` | Xtreme | 3 | Packed archive | `xejay10.inf` |
+| 5 | HipHop eJay 1 | `HipHop 1` | HipHop | 1 | Individual PXD | — |
+| 6 | HipHop eJay 2 | `HipHop 2` | HipHop | 2 | Packed archive | `HipHop20.inf` |
+| 7 | HipHop eJay 3 | `HipHop 3` | HipHop | 3 | Packed archive | `hiphop30.inf` |
+| 8 | HipHop eJay 4 | `HipHop 4` | HipHop | 3 | Packed archive + WAV | `HipHop40.inf` |
+| 9 | House eJay | `House_eJay` | House | 3 | Packed archive | `HOUSE10.inf` |
+| 10 | Rave eJay | `Rave` | Rave | 1 | Individual PXD | — |
+| 11 | Techno eJay | `TECHNO_EJAY` | Techno | 2 | Individual PXD + packed archive | `RAVE20.INF` |
+| 12 | Techno eJay 3 | `Techno 3` | Techno | 3 | Packed archive | `rave30.inf` |
+| 13 | Xtreme eJay | `Xtreme_eJay` | Xtreme | 3 | Packed archive | `xejay10.inf` |
+
+> **April 2026 cleanup**: `Dance_SuperPack/` and `GenerationPack1/`
+> (Dance / Rave / HipHop sub-folders) were removed from the archive
+> because their MAX/PXD content duplicated Dance eJay 1, Rave eJay,
+> and HipHop eJay 1 respectively. Earlier revisions of this document
+> listed them as products 5, 6 and the Gen-1 catalog table still
+> mentions them historically; the canonical Gen 1 mixes are preserved
+> in the corresponding base-product folders.
 
 **Generation key:**
 
@@ -74,8 +81,7 @@ tsx scripts/pxd-parser.ts path/to/file.pxd --output output/test
 - Product BPM is not always stored in the source files. The enrichment step
   therefore applies product-specific implicit BPM values when it backfills
   `bpm` and recomputes `beats`.
-- Gen 1 Rave eJay and Generation Pack 1 Rave both use an implicit BPM of 180,
-  not 140. This affects beat counts, one-shot detection, and any downstream
+- Gen 1 Rave eJay uses an implicit BPM of 180, not 140. This affects beat counts, one-shot detection, and any downstream
   analysis that derives timing from `duration_sec`.
 - In the normalized metadata, `beats = 0` is a deliberate one-shot sentinel.
   Enrichment should preserve that value instead of recomputing it to a
@@ -275,11 +281,21 @@ Product-specific codes are handled by dedicated regex+map in
 
 ## Gen 1 Sample-ID Catalogs (`MAX`, `Pxddance`, `PXD.TXT`)
 
-Gen 1 products (Dance eJay 1, Dance SuperPack, Rave eJay, GenerationPack 1 —
-Dance / Rave / HipHop) store the authoritative `uint16 sample_id → pxd_path`
-mapping used by `.mix` files in a plain-text catalog called **`MAX`**
-(`MAX.TXT` on Dance eJay 1). **Line number N = sample ID N** — there is no
-`bank_index × bank_size + file_index` formula; the table is a direct lookup.
+Gen 1 products (Dance eJay 1, Rave eJay, HipHop eJay 1) store the authoritative
+`uint16 sample_id → pxd_path` mapping used by `.mix` files in a plain-text
+catalog called **`MAX`** (`MAX.TXT` on Dance eJay 1). **Line number N = sample
+ID N** — there is no `bank_index × bank_size + file_index` formula; the table
+is a direct lookup.
+
+> **Cross-product loadability (Format A `.mix`)**: Rave eJay and HipHop eJay 1
+> loaders accept `.mix` files with any of the three Gen 1 app signatures
+> (`0x0A06`, `0x0A07`, `0x0A08`). Dance eJay 1's loader only accepts
+> `0x0A06`. As a result, Dance 1 `.mix` files can be opened in any Gen 1
+> product, but Rave and HipHop 1 `.mix` files cannot be opened in Dance 1.
+> The eJay parser accepts all three signatures. SuperPack and Generation Pack 1
+> source folders were removed during the April 2026 archive cleanup; their MAX
+> catalogs no longer ship with the archive but are documented for historical
+> reference below.
 
 This section documents the catalog files themselves. For the verified Gen 1
 `.mix` grid layout, trailer structure, overflow handling, and resolver notes,

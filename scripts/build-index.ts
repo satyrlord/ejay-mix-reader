@@ -8,6 +8,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 import { detectFormat, parseMix } from "./mix-parser.js";
+import { canonicalizeProduct, loadGen1Catalogs, PRODUCT_FALLBACKS } from "./mix-resolver.js";
 import type { MixFormat } from "./mix-types.js";
 import {
   buildCategoryEntries,
@@ -75,7 +76,7 @@ export const ARCHIVE_MIX_DIRS: Record<string, { archiveDir: string; mixSubdir: s
   Xtreme_eJay:     { archiveDir: "Xtreme_eJay",     mixSubdir: "mix" },
 };
 
-interface RawSample extends Sample {}
+type RawSample = Sample;
 
 interface RawMetadata {
   samples: RawSample[];
@@ -436,7 +437,7 @@ export function buildIndex(
     })),
   );
 
-  const sampleIndex = buildSampleIndex(outputDir);
+  const sampleIndex = buildSampleIndex(outputDir, archiveDir);
 
   return {
     categories,
@@ -449,7 +450,10 @@ export function buildIndex(
  * Build per-product sample lookup maps from the shared `output/metadata.json`.
  * Returns an empty object when the metadata file is missing or unparseable.
  */
-export function buildSampleIndex(outputDir: string): Record<string, SampleLookupEntry> {
+export function buildSampleIndex(
+  outputDir: string,
+  archiveDir: string = ARCHIVE_DIR,
+): Record<string, SampleLookupEntry> {
   if (!existsSync(outputDir)) return {};
 
   interface MetaSample {
@@ -459,6 +463,8 @@ export function buildSampleIndex(outputDir: string): Record<string, SampleLookup
     subcategory?: string;
     product?: string;
     source?: string;
+    internal_name?: string;
+    sample_id?: number;
   }
 
   const baseSamples = readRootCatalogSamples(outputDir);
@@ -473,7 +479,14 @@ export function buildSampleIndex(outputDir: string): Record<string, SampleLookup
     if (!product) continue;
 
     if (!index[product]) {
-      index[product] = { byAlias: {}, bySource: {}, byStem: {} };
+      index[product] = {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {},
+        byGen1Id: {},
+      };
     }
     const entry = index[product];
 
@@ -490,8 +503,24 @@ export function buildSampleIndex(outputDir: string): Record<string, SampleLookup
       entry.byAlias[sample.alias.toLowerCase()] = relPath;
     }
 
+    if (typeof sample.internal_name === "string" && sample.internal_name.length > 0) {
+      entry.byInternalName[sample.internal_name.toLowerCase()] = relPath;
+    }
+
+    if (typeof sample.sample_id === "number" && Number.isFinite(sample.sample_id)) {
+      entry.bySampleId[String(sample.sample_id)] = relPath;
+    }
+
     if (sample.source) {
-      entry.bySource[sample.source.replace(/\\/g, "/").toLowerCase()] = relPath;
+      const normalizedSource = sample.source.replace(/\\/g, "/").toLowerCase();
+      entry.bySource[normalizedSource] = relPath;
+
+      const sourceBase = normalizedSource.split("/").pop() ?? normalizedSource;
+      const sourceDot = sourceBase.lastIndexOf(".");
+      const sourceStem = (sourceDot >= 0 ? sourceBase.slice(0, sourceDot) : sourceBase).toLowerCase();
+      if (!entry.byStem[sourceStem]) {
+        entry.byStem[sourceStem] = relPath;
+      }
     }
 
     const dot = filename.lastIndexOf(".");
@@ -501,7 +530,65 @@ export function buildSampleIndex(outputDir: string): Record<string, SampleLookup
     }
   }
 
+  appendGen1Lookups(index, archiveDir);
+
   return index;
+}
+
+const GEN1_BROWSER_CATALOG_ALIASES: Record<string, string> = {
+  HipHop_eJay1: "GenerationPack1_HipHop",
+};
+
+function appendGen1Lookups(
+  index: Record<string, SampleLookupEntry>,
+  archiveDir: string,
+): void {
+  if (!existsSync(archiveDir) || Object.keys(index).length === 0) {
+    return;
+  }
+
+  const gen1Catalogs = loadGen1Catalogs(archiveDir);
+  for (const [alias, canonical] of Object.entries(GEN1_BROWSER_CATALOG_ALIASES)) {
+    if (!gen1Catalogs.has(alias) && gen1Catalogs.has(canonical)) {
+      gen1Catalogs.set(alias, gen1Catalogs.get(canonical)!);
+    }
+  }
+
+  for (const product of Object.keys(index)) {
+    const canonicalProduct = canonicalizeProduct(product);
+    const order = [canonicalProduct, ...(PRODUCT_FALLBACKS[canonicalProduct] ?? [])]
+      .filter((value, position, list) => list.indexOf(value) === position);
+    const byGen1Id = index[product].byGen1Id ?? (index[product].byGen1Id = {});
+
+    for (const catalogProduct of order) {
+      const gen1 = gen1Catalogs.get(catalogProduct);
+      if (!gen1) continue;
+
+      for (const entry of gen1.entries) {
+        if (!entry.path || byGen1Id[String(entry.id)]) continue;
+
+        const fileStem = entry.file?.toLowerCase() ?? null;
+        for (const targetProduct of order) {
+          const target = index[targetProduct];
+          if (!target) continue;
+
+          const bySource = target.bySource[entry.path];
+          if (bySource) {
+            byGen1Id[String(entry.id)] = bySource;
+            break;
+          }
+
+          if (fileStem) {
+            const byStem = target.byStem[fileStem];
+            if (byStem) {
+              byGen1Id[String(entry.id)] = byStem;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 /* v8 ignore start -- CLI entrypoint, exercised via `npm run build`. */

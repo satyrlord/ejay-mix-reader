@@ -27,6 +27,16 @@ export interface MixIR {
   drumMachine: DrumMachineState | null; // only Format D
   tickerText: string[];               // scrolling text messages (Format B only)
   catalogs: CatalogEntry[];           // referenced sample packs
+
+  /**
+   * Format A only: row-major copy of the second 8×N uint16 grid that follows
+   * Grid 1 in Gen 1 `.mix` files (decompiled VB6 writes it from `Me+0x60C`).
+   * Length is `FA_NUM_ROWS * FA_COLS` (= 2808) for full-size files, `undefined`
+   * for short/synthetic buffers that do not contain the dual-grid layout.
+   * Semantics are still under investigation — likely a per-cell duration or
+   * variant override — so consumers should treat it as opaque metadata.
+   */
+  formatAGrid2?: number[];
 }
 
 // ── Catalog ──────────────────────────────────────────────────

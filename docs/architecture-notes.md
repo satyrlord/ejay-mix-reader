@@ -19,10 +19,13 @@ src/app.css                ← shared stylesheet (Tailwind import, DaisyUI theme
                               custom component CSS)
 src/data.ts                ← data loading and product/sample catalog access
 src/library.ts             ← library/domain helpers used by the browser UI
-src/main.ts                ← browser entry point and app renderer
+src/main.ts                ← browser entry point and app controller; wires the
+                              mix browser, sequencer viewport, and playback
+                              transport
 src/mix-buffer.ts          ← browser Buffer/DataView wrapper for MIX parsing
-src/mix-parser.ts          ← browser-side `.mix` parser emitting MixIR
-src/mix-player.ts          ← browser MIX loader and Web Audio helpers
+src/mix-parser.ts          ← canonical browser-side `.mix` parser emitting MixIR
+src/mix-player.ts          ← browser playback-plan builder, sample resolver,
+                              and Web Audio scheduling helpers
 src/player.ts              ← browser audio playback helpers for sample preview
 src/render.ts              ← DOM rendering for the browser UI
 src/sample-grid-context-menu.ts ← sample-grid right-click controller for
@@ -178,12 +181,13 @@ The app is a single-page application with two states:
 The browser shell is split into three stacked regions above the fixed transport
 bar:
 
-- **Top editor area** — A live `Mix Archive` browser on the left and a
-  sequencer/timeline placeholder on the right. In dev mode, the archive tree
-  loads from `data/index.json`; in production-style folder picks it prompts for
-  an `archive/` root via the File System Access API or a `webkitdirectory`
-  fallback. Clicking a `.mix` item opens a metadata popup, but loading the mix
-  into the sequencer is still pending.
+- **Top editor area** — A live `Mix Archive` browser on the left and a real
+  sequencer timeline on the right. In dev mode, the archive tree loads from
+  `data/index.json`; in production-style folder picks it prompts for an
+  `archive/` root via the File System Access API or a `webkitdirectory`
+  fallback. Clicking a `.mix` item opens a metadata popup, parses the file,
+  and renders a fixed-width beat timeline with a moving playhead and
+  horizontal auto-scroll.
 - **Middle context strip** — Current mix status text plus subcategory tabs,
   sample search input, sample-bubble zoom controls, and the BPM filter.
 - **Bottom browser area** — A category sidebar and a lane-based sample grid.
@@ -206,6 +210,59 @@ apply the change in-memory only.
   shown as tabs within a category and is sourced from `output/categories.json`
   when available.
 - Audio `channels` still refers to mono/stereo metadata in `metadata.json`.
+
+## MIX Playback Contract
+
+The browser runtime treats `.mix` playback as a three-stage flow:
+
+1. `src/mix-file-browser.ts` emits a `MixFileRef` with a canonical `productId`
+   plus a byte source (`/mix/` URL, File System Access handle, or picked file).
+2. `src/main.ts` reads the bytes, calls `parseMixBrowser(...)`, and converts the
+   resulting `MixIR` into a `MixPlaybackPlan` via `buildMixPlaybackPlan(...)`.
+3. The sequencer renders that plan as a horizontally scrollable DAW-style
+   viewport. Pressing Play lazily creates or resumes `AudioContext`, fetches
+   and decodes resolved WAVs, schedules them through `MixPlayerHost`, and keeps
+   the playhead moving even when some or all events are still silent.
+
+The plan contract is intentionally small and browser-safe:
+
+- `beat` maps to a zero-based beat offset. When a format does not expose a
+  recoverable beat, the browser falls back to beat `0`.
+- `channel` maps to `lane-<index>` when known; otherwise the browser falls back
+  to `track-<placement index>` so every parsed event still gets a visible row.
+- `loopBeats` is `max(event.beat) + 1`, clamped to at least `1`.
+- Missing sample references remain visible as dashed timeline blocks and play
+  silence rather than aborting the load.
+
+### Browser Sample Resolution
+
+`data/index.json` carries a browser-ready `sampleIndex` keyed by product id.
+Each product entry contains five lookup maps:
+
+- `bySampleId` for Gen 2/3 numeric sample ids.
+- `byInternalName` for PXD stems such as `D5MG539`.
+- `byAlias` for human labels such as `kick28`.
+- `byStem` for filename-stem fallback.
+- `bySource` for Gen 1 source-path lookups and diagnostics.
+
+The browser lookup order is: primary product, catalog-derived product hints,
+product fallbacks, then any already-populated `resolvedPath`. Older checked-in
+indexes may omit `bySampleId` and `byInternalName`; the runtime tolerates that
+shape and degrades to the older alias/stem path.
+
+### Preload Strategy
+
+The current browser uses **on-demand fetch and decode**, not eager preload.
+
+- Selecting a `.mix` parses bytes and renders the timeline only.
+- Pressing Play fetches only the distinct resolved `audioUrl` entries needed by
+  the current plan.
+- Decoded buffers are cached in-memory for the life of the page so repeat plays
+  do not re-fetch or re-decode the same WAVs.
+
+This keeps the initial editor response fast for long mixes and avoids decoding
+silent or unresolved events up front. The tradeoff is that the first Play on a
+mix still pays the decode cost for whichever events resolve successfully.
 
 ## Language Constraints
 

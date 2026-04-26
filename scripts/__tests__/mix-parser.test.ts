@@ -73,7 +73,7 @@ function buildCatalogEntry(name: string, start: number, end: number, withUnknown
 describe("mix-parser constants", () => {
   it("uses the documented Gen 1 layout", () => {
     expect(MIN_FILE_SIZE).toBe(4);
-    expect(FA_HEADER_BYTES).toBe(4);
+    expect(FA_HEADER_BYTES).toBe(2);
     expect(FA_ROW_BYTES).toBe(16);
     expect(FA_CELL_BYTES).toBe(2);
     expect(FA_COLS).toBe(8);
@@ -304,8 +304,9 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
     expect(mix!.format).toBe("A");
     expect(mix!.product).toBe("Dance_eJay1");
     expect(mix!.tracks).toHaveLength(189);
-    expect(mix!.tracks[0]).toMatchObject({ beat: 0, channel: 0, sampleRef: { rawId: 1186 } });
-    expect(mix!.tracks.at(-1)).toMatchObject({ beat: 82, channel: 4, sampleRef: { rawId: 1922 } });
+    // First/last cells reflect the deterministic 8-column Grid 1 (FA_HEADER_BYTES=2).
+    expect(mix!.tracks[0]).toMatchObject({ beat: 0, channel: 1, sampleRef: { rawId: 1186 } });
+    expect(mix!.tracks.at(-1)).toMatchObject({ beat: 82, channel: 5, sampleRef: { rawId: 1922 } });
   });
 
   it("parses Dance eJay 2 STEP.MIX as Format B", () => {

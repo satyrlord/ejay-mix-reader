@@ -88,6 +88,8 @@ export type MixFormat = "A" | "B" | "C" | "D";
  */
 export interface MixFileMeta {
   format?: MixFormat;
+  /** Raw 32-bit application id from the MIX header. Format A keeps the aux word in the high 16 bits. */
+  appId?: number;
   bpm: number;
   bpmAdjusted?: number | null;
   title?: string | null;
@@ -138,6 +140,9 @@ export interface SampleLookupEntry {
   byAlias: Record<string, string>;
   bySource: Record<string, string>;
   byStem: Record<string, string>;
+  byInternalName: Record<string, string>;
+  bySampleId: Record<string, string>;
+  byGen1Id?: Record<string, string>;
 }
 
 export interface Sample {

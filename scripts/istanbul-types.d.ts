@@ -3,7 +3,7 @@ declare module "istanbul-lib-coverage" {
 }
 
 declare module "istanbul-lib-report" {
-  export function createContext(options: { dir: string; coverageMap: unknown }): { };
+  export function createContext(options: { dir: string; coverageMap: unknown }): object;
 }
 
 declare module "istanbul-reports" {

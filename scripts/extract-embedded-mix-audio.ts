@@ -72,7 +72,7 @@ export interface ExtractEmbeddedMixAudioOptions {
   dryRun?: boolean;
 }
 
-export interface EmbeddedMixManifestEntry extends ExtractedEmbeddedMixWav {}
+export type EmbeddedMixManifestEntry = ExtractedEmbeddedMixWav;
 
 export interface EmbeddedMixOutputSummary {
   uniqueOutputs: number;

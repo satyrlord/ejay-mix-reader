@@ -8,6 +8,9 @@
 // the small `AudioContextLike` interface so they can be exercised with
 // either a real `AudioContext` or a lightweight stub.
 
+import type { SampleLookupEntry } from "./data.js";
+import type { CatalogEntry, MixIR, SampleRef } from "./mix-types.js";
+
 /* -------------------------------------------------------------------------- */
 /* Pure helpers                                                               */
 /* -------------------------------------------------------------------------- */
@@ -81,6 +84,208 @@ export type EffectKind =
 export const EQ10_FREQUENCIES: readonly number[] = [
   31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000,
 ];
+
+export interface MixPlaybackPlanEvent {
+  id: string;
+  beat: number;
+  channelId: string;
+  displayLabel: string;
+  audioUrl: string | null;
+  sampleRef: SampleRef;
+  resolved: boolean;
+}
+
+export interface MixPlaybackPlan {
+  bpm: number;
+  loopBeats: number;
+  sourceTrackCount: number;
+  resolvedEvents: number;
+  unresolvedEvents: number;
+  channelIds: string[];
+  events: MixPlaybackPlanEvent[];
+}
+
+const MIX_PLAYBACK_PRODUCT_ALIASES: Record<string, string> = {
+  Dance_eJay_10: "Dance_eJay1",
+  Dance_eJay_20: "Dance_eJay2",
+  Dance_eJay_30: "Dance_eJay3",
+  Dance_eJay_3: "Dance_eJay3",
+  Dance_eJay_40: "Dance_eJay4",
+  Dance_eJay_SuperPack: "Dance_SuperPack",
+  Techno_eJay_30: "Techno_eJay3",
+  Techno_eJay_40: "Techno_eJay",
+  Techno_eJay_: "Techno_eJay",
+  HipHop_eJay_20: "HipHop_eJay2",
+  HipHop_eJay_30: "HipHop_eJay3",
+  HipHop_eJay_40: "HipHop_eJay4",
+  House_eJay_10: "House_eJay",
+  Xtreme_eJay_10: "Xtreme_eJay",
+  Rave_eJay_101: "Rave",
+  Rave_eJay: "Rave",
+  eurokick5: "Techno_eJay",
+  EUROKICK5: "Techno_eJay",
+};
+
+const MIX_PLAYBACK_PRODUCT_FALLBACKS: Record<string, string[]> = {
+  Dance_eJay1: ["Dance_SuperPack", "SampleKit_DMKIT1", "SampleKit_DMKIT2"],
+  Dance_eJay4: ["Dance_eJay3"],
+  Dance_SuperPack: ["Dance_eJay1", "SampleKit_DMKIT1", "SampleKit_DMKIT2"],
+  GenerationPack1_Dance: ["Dance_SuperPack", "Dance_eJay1", "SampleKit_DMKIT1", "SampleKit_DMKIT2"],
+  GenerationPack1_Rave: ["Rave"],
+  GenerationPack1_HipHop: ["HipHop_eJay2", "HipHop_eJay3"],
+  HipHop_eJay1: ["GenerationPack1_HipHop", "HipHop_eJay2", "HipHop_eJay3"],
+  HipHop_eJay3: ["Dance_eJay3"],
+  Techno_eJay3: ["Dance_eJay3"],
+};
+
+const MIX_PLAYBACK_CATALOG_HINTS: Array<{ match: RegExp; product: string }> = [
+  { match: /DanceMachine\s*Sample[-\s]*Kit\s*Vol\.?\s*1/i, product: "SampleKit_DMKIT1" },
+  { match: /DanceMachine\s*Sample[-\s]*Kit\s*Vol\.?\s*2/i, product: "SampleKit_DMKIT2" },
+  { match: /Space\s*Sounds/i, product: "SampleKit_DMKIT3" },
+  { match: /Dance\s*eJay\s*1/i, product: "Dance_eJay1" },
+  { match: /Dance\s*eJay\s*2/i, product: "Dance_eJay2" },
+  { match: /Dance\s*eJay\s*3/i, product: "Dance_eJay3" },
+  { match: /Dance\s*eJay\s*4/i, product: "Dance_eJay4" },
+  { match: /Dance\s*SuperPack|Super\s*Pack/i, product: "Dance_SuperPack" },
+  { match: /HipHop\s*eJay\s*2/i, product: "HipHop_eJay2" },
+  { match: /HipHop\s*eJay\s*3/i, product: "HipHop_eJay3" },
+  { match: /HipHop\s*eJay\s*4/i, product: "HipHop_eJay4" },
+  { match: /House\s*eJay/i, product: "House_eJay" },
+  { match: /Rave\s*eJay|Rave/i, product: "Rave" },
+  { match: /Techno\s*eJay\s*3/i, product: "Techno_eJay3" },
+  { match: /Techno\s*eJay/i, product: "Techno_eJay" },
+  { match: /Xtreme\s*eJay/i, product: "Xtreme_eJay" },
+];
+
+function canonicalPlaybackProduct(product: string): string {
+  return MIX_PLAYBACK_PRODUCT_ALIASES[product] ?? product;
+}
+
+function catalogProducts(catalogs: CatalogEntry[]): string[] {
+  const products: string[] = [];
+  for (const catalog of catalogs) {
+    for (const hint of MIX_PLAYBACK_CATALOG_HINTS) {
+      if (hint.match.test(catalog.name) && !products.includes(hint.product)) {
+        products.push(hint.product);
+      }
+    }
+  }
+  return products;
+}
+
+function playbackLookupOrder(mix: MixIR): string[] {
+  const products = [canonicalPlaybackProduct(mix.product)];
+  for (const product of catalogProducts(mix.catalogs)) {
+    if (!products.includes(product)) products.push(product);
+  }
+  for (const product of MIX_PLAYBACK_PRODUCT_FALLBACKS[products[0]] ?? []) {
+    if (!products.includes(product)) products.push(product);
+  }
+  return products;
+}
+
+function sampleLabel(ref: SampleRef): string {
+  if (ref.displayName) return ref.displayName;
+  if (ref.internalName) return ref.internalName;
+  if (ref.rawId > 0) return `#${ref.rawId}`;
+  return "Unknown sample";
+}
+
+function stem(value: string): string {
+  const basename = value.replace(/^.*[\\/]/, "");
+  const dot = basename.lastIndexOf(".");
+  return (dot >= 0 ? basename.slice(0, dot) : basename).toLowerCase();
+}
+
+function resolveSampleAudioUrl(
+  ref: SampleRef,
+  sampleIndex: Record<string, SampleLookupEntry> | undefined,
+  products: string[],
+): string | null {
+  if (!sampleIndex) return null;
+
+  for (const product of products) {
+    const entry = sampleIndex[product] ?? sampleIndex[canonicalPlaybackProduct(product)];
+    if (!entry) continue;
+
+    if (ref.rawId > 0) {
+      const bySampleId = entry.bySampleId?.[String(ref.rawId)];
+      if (bySampleId) return `output/${bySampleId}`;
+
+      const byGen1Id = entry.byGen1Id?.[String(ref.rawId)];
+      if (byGen1Id) return `output/${byGen1Id}`;
+    }
+
+    if (ref.internalName) {
+      const normalizedInternalName = ref.internalName.toLowerCase();
+      const byInternalName = entry.byInternalName?.[normalizedInternalName];
+      if (byInternalName) return `output/${byInternalName}`;
+
+      const byStem = entry.byStem[stem(normalizedInternalName)];
+      if (byStem) return `output/${byStem}`;
+    }
+
+    if (ref.displayName) {
+      const normalizedDisplayName = ref.displayName.toLowerCase();
+      const byAlias = entry.byAlias[normalizedDisplayName];
+      if (byAlias) return `output/${byAlias}`;
+
+      const byStem = entry.byStem[stem(normalizedDisplayName)];
+      if (byStem) return `output/${byStem}`;
+    }
+
+    if (ref.resolvedPath) {
+      return ref.resolvedPath.startsWith("output/") ? ref.resolvedPath : `output/${ref.resolvedPath}`;
+    }
+  }
+
+  return ref.resolvedPath
+    ? (ref.resolvedPath.startsWith("output/") ? ref.resolvedPath : `output/${ref.resolvedPath}`)
+    : null;
+}
+
+export function buildMixPlaybackPlan(
+  mix: MixIR,
+  sampleIndex?: Record<string, SampleLookupEntry>,
+): MixPlaybackPlan {
+  const products = playbackLookupOrder(mix);
+  const channelIds: string[] = [];
+  const events = mix.tracks.map((track, index) => {
+    const beat = typeof track.beat === "number" && Number.isFinite(track.beat)
+      ? Math.max(0, track.beat)
+      : 0;
+    const channelId = typeof track.channel === "number" && Number.isFinite(track.channel)
+      ? `lane-${track.channel}`
+      : `track-${index}`;
+    if (!channelIds.includes(channelId)) {
+      channelIds.push(channelId);
+    }
+
+    const audioUrl = resolveSampleAudioUrl(track.sampleRef, sampleIndex, products);
+    return {
+      id: `${channelId}:${beat}:${index}`,
+      beat,
+      channelId,
+      displayLabel: sampleLabel(track.sampleRef),
+      audioUrl,
+      sampleRef: track.sampleRef,
+      resolved: audioUrl !== null,
+    } satisfies MixPlaybackPlanEvent;
+  }).sort((left, right) => left.beat - right.beat || left.channelId.localeCompare(right.channelId));
+
+  const resolvedEvents = events.filter((event) => event.resolved).length;
+  const maxBeat = events.reduce((highest, event) => Math.max(highest, event.beat), 0);
+
+  return {
+    bpm: mix.bpm,
+    loopBeats: Math.max(1, maxBeat + 1),
+    sourceTrackCount: mix.tracks.length,
+    resolvedEvents,
+    unresolvedEvents: events.length - resolvedEvents,
+    channelIds,
+    events,
+  };
+}
 
 /**
  * Build a symmetric soft-clipping `WaveShaper` curve for overdrive. The

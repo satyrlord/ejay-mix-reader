@@ -423,23 +423,9 @@ describe("runCli", () => {
 // ── Live archive spot-checks (skipped when archive/ is absent) ──
 
 describe.skipIf(!hasArchive)("live archive spot-checks", () => {
-  it("Dance SuperPack builds the extended 5050-ID catalog and resolves known refs", () => {
-    const cat = runCli({
-      product: "Dance_SuperPack",
-      archiveRoot: ARCHIVE,
-      outputRoot: mkdtempSync(join(tmpdir(), "gen1-live-")),
-    });
-    expect(cat.totalIds).toBe(5050);
-    // IDs observed in the hex dump of Dance 1 START.MIX.
-    expect(cat.entries[1231].path).toBe("ai/bvjp.pxd");
-    expect(cat.entries[746].path).toBe("bt/bcsp.pxd");
-    expect(cat.entries[1919].path).toBe("dmkit2/04/fx316.pxd");
-    expect(cat.entries[3400].path).toBe("01/rap301.pxd");
-    expect(cat.entries[3900].path).toBe("01/bass301.pxd");
-    expect(cat.entries[4500].path).toBe("dmkit3/01/d4sp001l.pxd");
-    // Pxddance enrichment should populate the base-kit range.
-    expect(cat.entries[1231].category).not.toBeNull();
-  });
+  // Dance_SuperPack was removed from the archive in April 2026 (folder no
+  // longer present). The catalog/resolver code paths still exist but the
+  // archive-spot-check that depended on the on-disk MAX file has been removed.
 
   it("Rave MAX parses to 3146 unquoted entries", () => {
     const cat = runCli({
@@ -452,15 +438,8 @@ describe.skipIf(!hasArchive)("live archive spot-checks", () => {
     expect(cat.entries[0].bank).toBe("BA");
   });
 
-  it("GP1-HipHop MAX parses to 1381 entries", () => {
-    const cat = runCli({
-      product: "GenerationPack1_HipHop",
-      archiveRoot: ARCHIVE,
-      outputRoot: mkdtempSync(join(tmpdir(), "gen1-live-")),
-    });
-    expect(cat.totalIds).toBe(1381);
-    expect(cat.entries[0].path).toBe("ba/h1bs005.pxd");
-  });
+  // GenerationPack1 was removed from the archive in April 2026; the
+  // GP1-HipHop catalog spot-check has been removed along with the folder.
 
   it("Dance eJay 1 MAX.TXT enriches categories from PXD.TXT", () => {
     const cat = runCli({

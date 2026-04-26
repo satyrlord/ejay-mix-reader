@@ -3,6 +3,7 @@ import { test, expect } from "./baseFixtures.js";
 test.describe("browser coverage gap", () => {
   const BUFFER_MOD = "/src/mix-buffer.ts";
   const PARSER_MOD = "/src/mix-parser.ts";
+  const MIX_PLAYER_MOD = "/src/mix-player.ts";
   const MIX_FILE_BROWSER_MOD = "/src/mix-file-browser.ts";
 
   test("mix-buffer executes browser-only wrapper paths", async ({ page }) => {
@@ -63,7 +64,7 @@ test.describe("browser coverage gap", () => {
 
     const result = await page.evaluate(async (modPath) => {
       const mod = await import(/* @vite-ignore */ modPath);
-      const formatAHeaderBytes = 4;
+      const formatAHeaderBytes = 2;
       const formatARowBytes = 16;
       const formatACellBytes = 2;
       const formatAZeroGap = 32;
@@ -485,7 +486,7 @@ test.describe("browser coverage gap", () => {
       { beat: 0, channel: 1, rawId: 1231 },
       { beat: 1, channel: 3, rawId: 746 },
     ]);
-    expect(result.syntheticA.boundary.gridEnd).toBe(27);
+    expect(result.syntheticA.boundary.gridEnd).toBe(25);
     expect(result.syntheticA.boundary.trailerStart - result.syntheticA.boundary.gridEnd).toBeGreaterThan(32);
     expect(result.syntheticA.asciiStrings).toEqual(["Dance eJay 1.01", "VOL1"]);
     expect(result.syntheticCBrowser).toEqual({ format: "C", product: "Browser_Hint" });
@@ -622,6 +623,1179 @@ test.describe("browser coverage gap", () => {
       trackCount: 0,
       hasVideoMix: false,
     });
+  });
+
+  test("mix-player executes playback-plan, graph, and fetch helper paths in the browser", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (modPath) => {
+      const mod = await import(/* @vite-ignore */ modPath);
+
+      const connections: string[] = [];
+      const disconnects: string[] = [];
+      const starts: number[] = [];
+      const stops: number[] = [];
+      const fetchUrls: string[] = [];
+
+      const connect = (label: string) => (destination: unknown) => {
+        connections.push(`${label}->${typeof destination}`);
+        return destination as object;
+      };
+
+      const makeGain = () => ({
+        gain: { value: 1 },
+        connect: connect("gain"),
+        disconnect: () => { disconnects.push("gain"); },
+      });
+
+      const makePanner = () => ({
+        pan: { value: 0 },
+        connect: connect("panner"),
+        disconnect: () => { disconnects.push("panner"); },
+      });
+
+      const makeDelay = () => ({
+        delayTime: { value: 0 },
+        connect: connect("delay"),
+        disconnect: () => { disconnects.push("delay"); },
+      });
+
+      const makeConvolver = () => ({
+        buffer: null,
+        connect: connect("convolver"),
+        disconnect: () => { disconnects.push("convolver"); },
+      });
+
+      const makeCompressor = () => ({
+        threshold: { value: -24 },
+        ratio: { value: 12 },
+        connect: connect("compressor"),
+        disconnect: () => { disconnects.push("compressor"); },
+      });
+
+      const makeBiquad = () => ({
+        type: "peaking",
+        frequency: { value: 1000 },
+        Q: { value: 1 },
+        gain: { value: 0 },
+        connect: connect("biquad"),
+        disconnect: () => { disconnects.push("biquad"); },
+      });
+
+      const makeWaveShaper = () => ({
+        curve: null,
+        oversample: "none" as const,
+        connect: connect("waveshaper"),
+        disconnect: () => { disconnects.push("waveshaper"); },
+      });
+
+      const makeOscillator = () => ({
+        type: "sine",
+        frequency: { value: 440 },
+        connect: connect("oscillator"),
+        disconnect: () => { disconnects.push("oscillator"); },
+        start: (when?: number) => { starts.push(when ?? -1); },
+        stop: (when?: number) => { stops.push(when ?? -1); },
+      });
+
+      const makeAnalyser = () => ({
+        fftSize: 2048,
+        frequencyBinCount: 1024,
+        connect: connect("analyser"),
+        disconnect: () => { disconnects.push("analyser"); },
+      });
+
+      const makeSource = () => ({
+        buffer: null,
+        playbackRate: { value: 1 },
+        connect: connect("source"),
+        disconnect: () => { disconnects.push("source"); },
+        start: (when?: number) => { starts.push(when ?? -1); },
+        stop: (when?: number) => { stops.push(when ?? -1); },
+      });
+
+      const ctx = {
+        sampleRate: 44100,
+        currentTime: 2,
+        destination: { connect: connect("destination"), disconnect: () => { disconnects.push("destination"); } },
+        createGain: makeGain,
+        createStereoPanner: makePanner,
+        createDelay: () => makeDelay(),
+        createConvolver: makeConvolver,
+        createDynamicsCompressor: makeCompressor,
+        createBuffer: (_channels: number, length: number) => ({
+          getChannelData: () => new Float32Array(length),
+        }),
+        createBufferSource: makeSource,
+        createBiquadFilter: makeBiquad,
+        createWaveShaper: makeWaveShaper,
+        createOscillator: makeOscillator,
+        createAnalyser: makeAnalyser,
+        decodeAudioData: async (data: ArrayBuffer) => ({ decodedBytes: data.byteLength }),
+      };
+
+      const mix = {
+        format: "D",
+        product: "Dance_eJay_10",
+        appId: 0x02f60006,
+        bpm: 120,
+        bpmAdjusted: null,
+        author: null,
+        title: null,
+        registration: null,
+        mixer: { channels: [], eq: [], compressor: null, stereoWide: null, raw: {} },
+        drumMachine: null,
+        tickerText: [],
+        catalogs: [
+          { name: "DanceMachine Sample Kit Vol. 1", idRangeStart: 0, idRangeEnd: 100 },
+          { name: "Dance eJay 2", idRangeStart: 100, idRangeEnd: 200 },
+        ],
+        tracks: [
+          { beat: 0, channel: 0, sampleRef: { rawId: 7, internalName: null, displayName: null, resolvedPath: null, dataLength: null } },
+          { beat: 1, channel: 1, sampleRef: { rawId: 9, internalName: null, displayName: null, resolvedPath: null, dataLength: null } },
+          { beat: 2, channel: 2, sampleRef: { rawId: 0, internalName: "D5MG539", displayName: null, resolvedPath: null, dataLength: null } },
+          { beat: 3, channel: null, sampleRef: { rawId: 0, internalName: "folder/LEAD.WAV", displayName: null, resolvedPath: null, dataLength: null } },
+          { beat: 4, channel: Number.NaN, sampleRef: { rawId: 0, internalName: null, displayName: "kick28", resolvedPath: null, dataLength: null } },
+          { beat: Number.POSITIVE_INFINITY, channel: Number.POSITIVE_INFINITY, sampleRef: { rawId: 0, internalName: null, displayName: "sub/vox.wav", resolvedPath: null, dataLength: null } },
+          { beat: -2, channel: 4, sampleRef: { rawId: 0, internalName: null, displayName: null, resolvedPath: "Loop/fallback.wav", dataLength: null } },
+          { beat: 6, channel: 5, sampleRef: { rawId: 0, internalName: null, displayName: null, resolvedPath: "output/Loop/already.wav", dataLength: null } },
+          { beat: 7, channel: 6, sampleRef: { rawId: 0, internalName: null, displayName: null, resolvedPath: null, dataLength: null } },
+        ],
+      };
+
+      const sampleIndex = {
+        Dance_eJay1: {
+          byAlias: {},
+          bySource: {},
+          byStem: { lead: "Loop/lead.wav" },
+          byInternalName: { d5mg539: "Drum/internal.wav" },
+          bySampleId: { "7": "Drum/kick.wav" },
+          byGen1Id: { "9": "Drum/gen1.wav" },
+        },
+        SampleKit_DMKIT1: {
+          byAlias: { kick28: "Drum/kick28.wav" },
+          bySource: {},
+          byStem: { vox: "Voice/vox.wav" },
+          byInternalName: {},
+          bySampleId: {},
+          byGen1Id: {},
+        },
+        Dance_eJay2: {
+          byAlias: {},
+          bySource: {},
+          byStem: {},
+          byInternalName: {},
+          bySampleId: {},
+          byGen1Id: {},
+        },
+      };
+
+      const plan = mod.buildMixPlaybackPlan(mix, sampleIndex);
+      const emptyPlan = mod.buildMixPlaybackPlan({ ...mix, tracks: [] }, undefined);
+
+      const channel = new mod.MixChannel(ctx);
+      channel.setVolume(50);
+      channel.setPan(100);
+      channel.setMuted(true);
+      channel.setMuted(false);
+
+      const secondChannel = new mod.MixChannel(ctx);
+      const solo = new mod.SoloGroup();
+      solo.attach("a", channel);
+      solo.attach("b", secondChannel);
+      solo.setSoloed("a", true);
+      solo.setSoloed("missing", true);
+
+      const drum = new mod.DrumMachine(ctx, ctx.destination);
+      const missingPad = drum.trigger("ghost", 0);
+      drum.setPad("kick", { buffer: { id: "kick" }, semitones: 12, gain: 0.25 });
+      const triggeredPad = drum.trigger("kick", 0.5);
+      drum.dispose();
+
+      const effects = [
+        mod.createEffect(ctx, "compressor"),
+        mod.createEffect(ctx, "delay"),
+        mod.createEffect(ctx, "reverb"),
+        mod.createEffect(ctx, "overdrive"),
+        mod.createEffect(ctx, "eq10"),
+        mod.createEffect(ctx, "chorus"),
+        mod.createEffect(ctx, "midsweep"),
+        mod.createEffect(ctx, "harmonizer"),
+        mod.createEffect(ctx, "vocoder"),
+      ];
+      for (const effect of effects) {
+        effect.input.connect(effect.output);
+        effect.dispose?.();
+      }
+
+      const host = new mod.MixPlayerHost(ctx);
+      host.registerChannel("lane-0");
+      host.registerChannel("lane-1");
+      host.scheduleSample({ buffer: { id: 1 }, beat: 0, channelId: "lane-0", semitones: 12 });
+      host.scheduleSample({ buffer: { id: 2 }, beat: 1, channelId: "unknown" });
+      const started = host.play(120, 4);
+      host.stop();
+      host.clear();
+
+      const curve = mod.buildOverdriveCurve(32, 25);
+      const emptyCurve = mod.buildOverdriveCurve(0, 10);
+      const impulse = mod.buildImpulseResponse(8000, 0.25, 2);
+      const emptyImpulse = mod.buildImpulseResponse(0, 0.25, 2);
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        const url = String(input);
+        fetchUrls.push(url);
+        if (url.includes("bad%20file.mix")) {
+          return {
+            ok: false,
+            status: 404,
+            arrayBuffer: async () => new ArrayBuffer(0),
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+        } as Response;
+      };
+
+      const fetched = await mod.fetchMixBinary("Dance eJay 1", "START.MIX");
+      let fetchError = "";
+      try {
+        await mod.fetchMixBinary("Broken Product", "bad file.mix");
+      } catch (error) {
+        fetchError = error instanceof Error ? error.message : String(error);
+      }
+      globalThis.fetch = originalFetch;
+
+      channel.dispose();
+      secondChannel.dispose();
+
+      return {
+        plan: {
+          channelIds: plan.channelIds,
+          resolvedEvents: plan.resolvedEvents,
+          unresolvedEvents: plan.unresolvedEvents,
+          loopBeats: plan.loopBeats,
+          audioUrls: plan.events.map((event: { audioUrl: string | null }) => event.audioUrl),
+          labels: plan.events.map((event: { displayLabel: string }) => event.displayLabel),
+        },
+        emptyPlan: {
+          loopBeats: emptyPlan.loopBeats,
+          resolvedEvents: emptyPlan.resolvedEvents,
+          unresolvedEvents: emptyPlan.unresolvedEvents,
+        },
+        channelState: {
+          gain: channel.gain.gain.value,
+          pan: channel.panner.pan.value,
+          anySoloed: solo.anySoloed,
+          secondGain: secondChannel.gain.gain.value,
+        },
+        drumMachine: {
+          missingPad,
+          triggeredRate: triggeredPad?.playbackRate.value ?? null,
+          padCountAfterDispose: drum.padCount,
+        },
+        effects: effects.map((effect: { kind: string }) => effect.kind),
+        host: {
+          started,
+          scheduledCount: host.scheduledCount,
+          isPlaying: host.isPlaying,
+        },
+        helpers: {
+          beatsToSeconds: mod.beatsToSeconds(4, 120),
+          volumeToGain: mod.volumeToGain(150),
+          panToStereo: mod.panToStereo(0),
+          semitonesToRate: mod.semitonesToRate(12),
+          effectiveGain: mod.effectiveGain({ volume: 80, muted: false, soloed: true, anySoloed: true }),
+          curveLength: curve.length,
+          emptyCurveLength: emptyCurve.length,
+          impulseLength: impulse.length,
+          emptyImpulseLength: emptyImpulse.length,
+        },
+        fetch: {
+          urls: fetchUrls,
+          fetchedBytes: fetched.byteLength,
+          error: fetchError,
+        },
+        starts,
+        stops,
+        disconnectCount: disconnects.length,
+        connectionCount: connections.length,
+      };
+    }, MIX_PLAYER_MOD);
+
+    expect(result.plan.channelIds).toEqual([
+      "lane-0",
+      "lane-1",
+      "lane-2",
+      "track-3",
+      "track-4",
+      "track-5",
+      "lane-4",
+      "lane-5",
+      "lane-6",
+    ]);
+    expect(result.plan.resolvedEvents).toBe(8);
+    expect(result.plan.unresolvedEvents).toBe(1);
+    expect(result.plan.loopBeats).toBe(8);
+    expect(result.plan.audioUrls).toEqual([
+      "output/Drum/kick.wav",
+      "output/Loop/fallback.wav",
+      "output/Voice/vox.wav",
+      "output/Drum/gen1.wav",
+      "output/Drum/internal.wav",
+      "output/Loop/lead.wav",
+      "output/Drum/kick28.wav",
+      "output/Loop/already.wav",
+      null,
+    ]);
+    expect(result.plan.labels).toContain("#7");
+    expect(result.plan.labels).toContain("D5MG539");
+    expect(result.plan.labels).toContain("kick28");
+    expect(result.emptyPlan).toEqual({ loopBeats: 1, resolvedEvents: 0, unresolvedEvents: 0 });
+    expect(result.channelState).toEqual({ gain: 0.5, pan: 1, anySoloed: true, secondGain: 0 });
+    expect(result.drumMachine.missingPad).toBeNull();
+    expect(result.drumMachine.triggeredRate).toBeCloseTo(2);
+    expect(result.drumMachine.padCountAfterDispose).toBe(0);
+    expect(result.effects).toEqual([
+      "compressor",
+      "delay",
+      "reverb",
+      "overdrive",
+      "eq10",
+      "chorus",
+      "midsweep",
+      "harmonizer",
+      "vocoder",
+    ]);
+    expect(result.host).toEqual({ started: 1, scheduledCount: 0, isPlaying: false });
+    expect(result.helpers.beatsToSeconds).toBeCloseTo(2);
+    expect(result.helpers.volumeToGain).toBe(1);
+    expect(result.helpers.panToStereo).toBe(-1);
+    expect(result.helpers.semitonesToRate).toBeCloseTo(2);
+    expect(result.helpers.effectiveGain).toBeCloseTo(0.8);
+    expect(result.helpers.curveLength).toBe(32);
+    expect(result.helpers.emptyCurveLength).toBe(0);
+    expect(result.helpers.impulseLength).toBe(2000);
+    expect(result.helpers.emptyImpulseLength).toBe(0);
+    expect(result.fetch.urls).toEqual([
+      "/mix/Dance%20eJay%201/START.MIX",
+      "/mix/Broken%20Product/bad%20file.mix",
+    ]);
+    expect(result.fetch.fetchedBytes).toBe(4);
+    expect(result.fetch.error).toContain("HTTP 404");
+    expect(result.starts.length).toBeGreaterThanOrEqual(4);
+    expect(result.stops.length).toBeGreaterThanOrEqual(1);
+    expect(result.disconnectCount).toBeGreaterThan(0);
+    expect(result.connectionCount).toBeGreaterThan(0);
+  });
+
+  test("main covers mix selection failure, playback caching, and cleanup branches", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (libraryModPath) => {
+      const library = await import(/* @vite-ignore */ libraryModPath);
+
+      const asciiBytes = (value: string): number[] => [...value].map((char) => char.charCodeAt(0));
+      const buildFormatA = (appSig: number, cells: Array<{ row: number; col: number; id: number }>): Uint8Array => {
+        const headerBytes = 4;
+        const rowBytes = 16;
+        const cellBytes = 2;
+        const maxRow = cells.reduce((highest, cell) => Math.max(highest, cell.row), 0);
+        const bytes = new Uint8Array(headerBytes + ((maxRow + 1) * rowBytes));
+        const view = new DataView(bytes.buffer);
+        view.setUint16(0, appSig, true);
+        for (const cell of cells) {
+          const offset = headerBytes + (cell.row * rowBytes) + (cell.col * cellBytes);
+          view.setUint16(offset, cell.id, true);
+        }
+        return bytes;
+      };
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitFor = async (predicate: () => boolean, attempts = 40): Promise<void> => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (predicate()) return;
+          await flush();
+        }
+        throw new Error("Timed out waiting for predicate");
+      };
+
+      let audioFetchCount = 0;
+      let closedContexts = 0;
+      const originalFetch = globalThis.fetch;
+
+      class FakeAudioContext {
+        sampleRate = 44100;
+        currentTime = 1;
+        state: "running" | "suspended" | "closed" = "running";
+        destination = { connect: () => {}, disconnect: () => {} };
+
+        async resume(): Promise<void> {
+          this.state = "running";
+        }
+
+        async close(): Promise<void> {
+          this.state = "closed";
+          closedContexts += 1;
+        }
+
+        createGain() {
+          return { gain: { value: 1 }, connect: () => {}, disconnect: () => {} };
+        }
+
+        createStereoPanner() {
+          return { pan: { value: 0 }, connect: () => {}, disconnect: () => {} };
+        }
+
+        createBufferSource() {
+          return {
+            buffer: null,
+            playbackRate: { value: 1 },
+            connect: () => {},
+            disconnect: () => {},
+            start: () => {},
+            stop: () => {},
+          };
+        }
+
+        decodeAudioData(data: ArrayBuffer): Promise<unknown> {
+          return Promise.resolve({ decodedBytes: data.byteLength });
+        }
+      }
+
+      (window as typeof window & { AudioContext: typeof AudioContext }).AudioContext = FakeAudioContext as unknown as typeof AudioContext;
+
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"], sampleCount: 1 }],
+          mixLibrary: [
+            {
+              id: "_userdata/sets",
+              name: "User: sets",
+              mixes: [
+                { filename: "BAD.MIX", sizeBytes: 4, format: "A" },
+                { filename: "GOOD.MIX", sizeBytes: 36, format: "A" },
+              ],
+            },
+          ],
+          sampleIndex: {
+            Dance_eJay1: {
+              byAlias: {},
+              bySource: {},
+              byStem: {},
+              byInternalName: {},
+              bySampleId: {},
+              byGen1Id: { "42": "Drum/kick.wav", "300": "Drum/kick.wav" },
+            },
+          },
+        };
+      };
+
+      library.FetchLibrary.prototype.loadSamples = async function () {
+        return [{ filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 120, beats: 1 }];
+      };
+
+      library.FetchLibrary.prototype.loadCategoryConfig = async function () {
+        return { categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"] }] };
+      };
+
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.endsWith("/mix/_userdata%2Fsets/BAD.MIX")) {
+          return new Response(Uint8Array.from(asciiBytes("junk")), { status: 200 });
+        }
+        if (url.endsWith("/mix/_userdata%2Fsets/GOOD.MIX")) {
+          return new Response(buildFormatA(0x0a06, [
+            { row: 0, col: 0, id: 42 },
+            { row: 1, col: 0, id: 300 },
+          ]) as unknown as BodyInit, { status: 200 });
+        }
+        if (url.endsWith("output/Drum/kick.wav")) {
+          audioFetchCount += 1;
+          return new Response(Uint8Array.from([1, 2, 3, 4]), { status: 200 });
+        }
+        return originalFetch(input, init);
+      };
+
+      // @ts-expect-error Vite serves browser modules from /src during page-eval tests.
+      await import("/src/main.ts");
+      document.querySelector<HTMLElement>(".archive-sidebar")?.click();
+      await waitFor(() => document.querySelectorAll(".mix-tree-item").length === 2);
+
+      const items = [...document.querySelectorAll<HTMLButtonElement>(".mix-tree-item")];
+      const bad = items.find((item) => item.textContent?.includes("BAD.MIX"));
+      const good = items.find((item) => item.textContent?.includes("GOOD.MIX"));
+      if (!bad || !good) {
+        throw new Error("Expected mix tree items were not rendered");
+      }
+
+      bad.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await waitFor(() => (document.getElementById("error-toast")?.textContent ?? "").includes("Could not load selected .mix file."));
+
+      good.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await waitFor(() => (document.querySelector<HTMLElement>(".context-mix-name")?.textContent ?? "").includes("GOOD"));
+      await waitFor(() => document.querySelectorAll(".sequencer-event").length === 2);
+
+      const play = document.querySelector<HTMLButtonElement>(".seq-play-btn");
+      const stop = document.querySelector<HTMLButtonElement>(".seq-stop-btn");
+      if (!play || !stop) {
+        throw new Error("Missing transport buttons");
+      }
+
+      play.click();
+      await waitFor(() => stop.disabled === false);
+      stop.click();
+      await waitFor(() => stop.disabled === true);
+
+      play.click();
+      await waitFor(() => stop.disabled === false);
+      stop.click();
+      await waitFor(() => stop.disabled === true);
+
+      window.dispatchEvent(new Event("beforeunload"));
+      await flush();
+
+      globalThis.fetch = originalFetch;
+
+      return {
+        mixName: document.querySelector<HTMLElement>(".context-mix-name")?.textContent ?? "",
+        errorToast: document.getElementById("error-toast")?.textContent ?? "",
+        beatCount: document.querySelectorAll(".sequencer-beat-number").length,
+        eventCount: document.querySelectorAll(".sequencer-event").length,
+        audioFetchCount,
+        closedContexts,
+      };
+    }, "/src/library.ts");
+
+    expect(result.mixName).toContain("GOOD");
+    expect(result.errorToast).toContain("Could not load selected .mix file.");
+    expect(result.beatCount).toBeGreaterThan(0);
+    expect(result.eventCount).toBe(2);
+    expect(result.audioFetchCount).toBe(1);
+    expect(result.closedContexts).toBe(1);
+  });
+
+  test("main covers empty mixes and no-WebAudio playback warnings", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (libraryModPath) => {
+      const library = await import(/* @vite-ignore */ libraryModPath);
+
+      const buildFormatA = (appSig: number, cells: Array<{ row: number; col: number; id: number }>): Uint8Array => {
+        const headerBytes = 4;
+        const rowBytes = 16;
+        const cellBytes = 2;
+        const maxRow = cells.reduce((highest, cell) => Math.max(highest, cell.row), 0);
+        const bytes = new Uint8Array(headerBytes + ((maxRow + 1) * rowBytes));
+        const view = new DataView(bytes.buffer);
+        view.setUint16(0, appSig, true);
+        for (const cell of cells) {
+          const offset = headerBytes + (cell.row * rowBytes) + (cell.col * cellBytes);
+          view.setUint16(offset, cell.id, true);
+        }
+        return bytes;
+      };
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitFor = async (predicate: () => boolean, attempts = 40): Promise<void> => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (predicate()) return;
+          await flush();
+        }
+        throw new Error("Timed out waiting for predicate");
+      };
+
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"], sampleCount: 1 }],
+          mixLibrary: [
+            {
+              id: "Dance_eJay1",
+              name: "Dance eJay 1",
+              mixes: [
+                { filename: "EMPTY.MIX", sizeBytes: 4, format: "A" },
+                { filename: "NOWEB.MIX", sizeBytes: 20, format: "A" },
+              ],
+            },
+          ],
+          sampleIndex: {
+            Dance_eJay1: {
+              byAlias: {},
+              bySource: {},
+              byStem: {},
+              byInternalName: {},
+              bySampleId: {},
+              byGen1Id: { "300": "Drum/kick.wav" },
+            },
+          },
+        };
+      };
+
+      library.FetchLibrary.prototype.loadSamples = async function () {
+        return [{ filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 120, beats: 1 }];
+      };
+
+      library.FetchLibrary.prototype.loadCategoryConfig = async function () {
+        return { categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"] }] };
+      };
+
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.endsWith("/mix/Dance_eJay1/EMPTY.MIX")) {
+          return new Response(Uint8Array.from([0x06, 0x0a, 0x00, 0x00]), { status: 200 });
+        }
+        if (url.endsWith("/mix/Dance_eJay1/NOWEB.MIX")) {
+          return new Response(buildFormatA(0x0a06, [{ row: 0, col: 0, id: 300 }]) as unknown as BodyInit, { status: 200 });
+        }
+        return originalFetch(input, init);
+      };
+
+      delete (window as Window & { AudioContext?: typeof AudioContext }).AudioContext;
+      delete (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+      // @ts-expect-error Vite serves browser modules from /src during page-eval tests.
+      await import("/src/main.ts");
+      document.querySelector<HTMLElement>(".archive-sidebar")?.click();
+      await waitFor(() => document.querySelectorAll(".mix-tree-item").length === 2);
+
+      const items = [...document.querySelectorAll<HTMLButtonElement>(".mix-tree-item")];
+      const empty = items.find((item) => item.textContent?.includes("EMPTY.MIX"));
+      const noWeb = items.find((item) => item.textContent?.includes("NOWEB.MIX"));
+      if (!empty || !noWeb) {
+        throw new Error("Expected mix tree items were not rendered");
+      }
+
+      empty.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await waitFor(() => (document.querySelector<HTMLElement>(".sequencer-placeholder")?.textContent ?? "").includes("Parsed successfully"));
+
+      const play = document.querySelector<HTMLButtonElement>(".seq-play-btn");
+      const stop = document.querySelector<HTMLButtonElement>(".seq-stop-btn");
+      if (!play || !stop) {
+        throw new Error("Missing transport buttons");
+      }
+      const emptyPlaceholder = document.querySelector<HTMLElement>(".sequencer-placeholder")?.textContent ?? "";
+      const emptyPlayDisabled = play.disabled;
+
+      noWeb.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await waitFor(() => (document.querySelector<HTMLElement>(".context-mix-name")?.textContent ?? "").includes("NOWEB"));
+      await waitFor(() => play.disabled === false);
+
+      play.click();
+      await waitFor(() => stop.disabled === false);
+      await waitFor(() => (document.getElementById("error-toast")?.textContent ?? "").includes("Starting timeline playback without resolved audio"));
+      stop.click();
+      await waitFor(() => stop.disabled === true);
+
+      globalThis.fetch = originalFetch;
+
+      return {
+        emptyPlaceholder,
+        emptyPlayDisabled,
+        finalToast: document.getElementById("error-toast")?.textContent ?? "",
+        beatCount: document.querySelectorAll(".sequencer-beat-number").length,
+      };
+    }, "/src/library.ts");
+
+    expect(result.emptyPlaceholder).toContain("Parsed successfully");
+    expect(result.emptyPlayDisabled).toBe(true);
+    expect(result.finalToast).toContain("Starting timeline playback without resolved audio");
+    expect(result.beatCount).toBeGreaterThan(0);
+  });
+
+  test("main covers partial decode failures while playable events continue", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (libraryModPath) => {
+      const library = await import(/* @vite-ignore */ libraryModPath);
+
+      const buildFormatA = (appSig: number, cells: Array<{ row: number; col: number; id: number }>): Uint8Array => {
+        const headerBytes = 4;
+        const rowBytes = 16;
+        const cellBytes = 2;
+        const maxRow = cells.reduce((highest, cell) => Math.max(highest, cell.row), 0);
+        const bytes = new Uint8Array(headerBytes + ((maxRow + 1) * rowBytes));
+        const view = new DataView(bytes.buffer);
+        view.setUint16(0, appSig, true);
+        for (const cell of cells) {
+          const offset = headerBytes + (cell.row * rowBytes) + (cell.col * cellBytes);
+          view.setUint16(offset, cell.id, true);
+        }
+        return bytes;
+      };
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitFor = async (predicate: () => boolean, attempts = 40): Promise<void> => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (predicate()) return;
+          await flush();
+        }
+        throw new Error("Timed out waiting for predicate");
+      };
+
+      let audioFetchCount = 0;
+      const originalFetch = globalThis.fetch;
+
+      class FakeAudioContext {
+        sampleRate = 44100;
+        currentTime = 1;
+        state: "running" | "suspended" | "closed" = "running";
+        destination = { connect: () => {}, disconnect: () => {} };
+
+        async resume(): Promise<void> {
+          this.state = "running";
+        }
+
+        async close(): Promise<void> {
+          this.state = "closed";
+        }
+
+        createGain() {
+          return { gain: { value: 1 }, connect: () => {}, disconnect: () => {} };
+        }
+
+        createStereoPanner() {
+          return { pan: { value: 0 }, connect: () => {}, disconnect: () => {} };
+        }
+
+        createBufferSource() {
+          return {
+            buffer: null,
+            playbackRate: { value: 1 },
+            connect: () => {},
+            disconnect: () => {},
+            start: () => {},
+            stop: () => {},
+          };
+        }
+
+        decodeAudioData(data: ArrayBuffer): Promise<unknown> {
+          return Promise.resolve({ decodedBytes: data.byteLength });
+        }
+      }
+
+      (window as typeof window & { AudioContext: typeof AudioContext }).AudioContext = FakeAudioContext as unknown as typeof AudioContext;
+
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"], sampleCount: 1 }],
+          mixLibrary: [
+            {
+              id: "Dance_eJay1",
+              name: "Dance eJay 1",
+              mixes: [{ filename: "PARTIAL.MIX", sizeBytes: 36, format: "A" }],
+            },
+          ],
+          sampleIndex: {
+            Dance_eJay1: {
+              byAlias: {},
+              bySource: {},
+              byStem: {},
+              byInternalName: {},
+              bySampleId: {},
+              byGen1Id: { "42": "Drum/good.wav", "300": "Drum/bad.wav" },
+            },
+          },
+        };
+      };
+
+      library.FetchLibrary.prototype.loadSamples = async function () {
+        return [{ filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 120, beats: 1 }];
+      };
+
+      library.FetchLibrary.prototype.loadCategoryConfig = async function () {
+        return { categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"] }] };
+      };
+
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.endsWith("/mix/Dance_eJay1/PARTIAL.MIX")) {
+          return new Response(buildFormatA(0x0a06, [
+            { row: 0, col: 0, id: 42 },
+            { row: 1, col: 0, id: 300 },
+          ]) as unknown as BodyInit, { status: 200 });
+        }
+        if (url.endsWith("output/Drum/good.wav")) {
+          audioFetchCount += 1;
+          return new Response(Uint8Array.from([1, 2, 3, 4]), { status: 200 });
+        }
+        if (url.endsWith("output/Drum/bad.wav")) {
+          audioFetchCount += 1;
+          return new Response(Uint8Array.from([9, 9, 9]), { status: 500 });
+        }
+        return originalFetch(input, init);
+      };
+
+      // @ts-expect-error Vite serves browser modules from /src during page-eval tests.
+      await import("/src/main.ts");
+      document.querySelector<HTMLElement>(".archive-sidebar")?.click();
+      await waitFor(() => document.querySelectorAll(".mix-tree-item").length === 1);
+
+      const mixButton = document.querySelector<HTMLButtonElement>(".mix-tree-item");
+      const play = document.querySelector<HTMLButtonElement>(".seq-play-btn");
+      const stop = document.querySelector<HTMLButtonElement>(".seq-stop-btn");
+      if (!mixButton || !play || !stop) {
+        throw new Error("Missing mix tree or transport buttons");
+      }
+
+      mixButton.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await waitFor(() => (document.querySelector<HTMLElement>(".context-mix-name")?.textContent ?? "").includes("PARTIAL"));
+      await waitFor(() => document.querySelectorAll(".sequencer-event").length === 2);
+
+      play.click();
+      await waitFor(() => stop.disabled === false);
+      stop.click();
+      await waitFor(() => stop.disabled === true);
+
+      globalThis.fetch = originalFetch;
+
+      return {
+        audioFetchCount,
+        missingEventCount: document.querySelectorAll(".sequencer-event.is-missing").length,
+        transportLabel: document.querySelector<HTMLElement>(".seq-position")?.textContent ?? "",
+      };
+    }, "/src/library.ts");
+
+    expect(result.audioFetchCount).toBe(2);
+    expect(result.missingEventCount).toBe(0);
+    expect(result.transportLabel).toContain("ready");
+  });
+
+  test("main covers tab selection and watcher refresh no-op and error branches", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (libraryModPath) => {
+      const library = await import(/* @vite-ignore */ libraryModPath);
+      // @ts-expect-error Vite serves /src/data.ts during page-eval tests; not resolvable by tsc.
+      const data = await import(/* @vite-ignore */ "/src/data.ts");
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitFor = async (predicate: () => boolean, attempts = 40): Promise<void> => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (predicate()) return;
+          await flush();
+        }
+        throw new Error("Timed out waiting for predicate");
+      };
+
+      let loadSamplesCalls = 0;
+      let loadCategoryConfigCalls = 0;
+      const warnings: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (...args: unknown[]) => {
+        warnings.push(String(args[0] ?? ""));
+      };
+
+      const stableConfig = {
+        categories: [
+          { id: "Drum", name: "Drum", subcategories: ["kick", "snare"] },
+          { id: "Bass", name: "Bass", subcategories: ["unsorted"] },
+        ],
+      };
+
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "snare"], sampleCount: 2 },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          ],
+          mixLibrary: [],
+          sampleIndex: {},
+        };
+      };
+
+      library.FetchLibrary.prototype.loadSamples = async function (options?: { force?: boolean }) {
+        loadSamplesCalls += 1;
+        if (options?.force) {
+          throw new Error("forced refresh failed");
+        }
+        return [
+          { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 120, beats: 1 },
+          { filename: "snare.wav", alias: "Snare", category: "Drum", subcategory: "snare", bpm: 120, beats: 1 },
+          { filename: "bass.wav", alias: "Bass", category: "Bass", subcategory: "unsorted", bpm: 120, beats: 1 },
+        ];
+      };
+
+      library.FetchLibrary.prototype.loadCategoryConfig = async function () {
+        loadCategoryConfigCalls += 1;
+        return stableConfig;
+      };
+
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      // @ts-expect-error Vite serves browser modules from /src during page-eval tests.
+      await import("/src/main.ts");
+      await waitFor(() => document.querySelectorAll(".category-btn").length >= 2);
+
+      const loadJsonButton = document.querySelector<HTMLButtonElement>(".load-json-btn");
+      loadJsonButton?.click();
+
+      const snareTab = [...document.querySelectorAll<HTMLButtonElement>(".subcategory-tab")]
+        .find((button) => (button.textContent ?? "").includes("snare"));
+      if (!snareTab) {
+        throw new Error("Missing snare tab");
+      }
+      snareTab.click();
+
+      await waitFor(() => document.querySelector<HTMLButtonElement>(".subcategory-tab.is-active")?.textContent?.includes("snare") ?? false);
+      await waitFor(() => document.querySelectorAll("#sample-grid button").length === 1);
+
+      window.dispatchEvent(new Event(data.CATEGORY_CONFIG_UPDATED_EVENT));
+      window.dispatchEvent(new Event(data.SAMPLE_METADATA_UPDATED_EVENT));
+      await waitFor(() => loadCategoryConfigCalls > 1);
+      await waitFor(() => warnings.some((entry) => entry.includes("Failed to refresh sample metadata.")));
+
+      console.warn = originalWarn;
+
+      return {
+        activeTab: document.querySelector<HTMLButtonElement>(".subcategory-tab.is-active")?.textContent ?? "",
+        visibleSamples: [...document.querySelectorAll<HTMLElement>("#sample-grid button")].map((node) => node.textContent ?? ""),
+        loadSamplesCalls,
+        loadCategoryConfigCalls,
+        warnings,
+      };
+    }, "/src/library.ts");
+
+    expect(result.activeTab).toContain("snare");
+    expect(result.visibleSamples).toHaveLength(1);
+    expect(result.visibleSamples[0]).toContain("Snare");
+    expect(result.loadSamplesCalls).toBeGreaterThan(1);
+    expect(result.loadCategoryConfigCalls).toBeGreaterThan(1);
+    expect(result.warnings).toContain("Failed to refresh sample metadata.");
+  });
+
+  test("main covers the empty-library branch when no categories are available", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (libraryModPath) => {
+      const library = await import(/* @vite-ignore */ libraryModPath);
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitFor = async (predicate: () => boolean, attempts = 40): Promise<void> => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (predicate()) return;
+          await flush();
+        }
+        throw new Error("Timed out waiting for predicate");
+      };
+
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [],
+          mixLibrary: [],
+          sampleIndex: {},
+        };
+      };
+
+      library.FetchLibrary.prototype.loadSamples = async function () {
+        return [];
+      };
+
+      library.FetchLibrary.prototype.loadCategoryConfig = async function () {
+        return { categories: [] };
+      };
+
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      // @ts-expect-error Vite serves browser modules from /src during page-eval tests.
+      await import("/src/main.ts");
+      await waitFor(() => (document.querySelector<HTMLElement>(".sample-grid-empty")?.textContent ?? "").includes("No categories found in this library."));
+
+      return {
+        emptyMessage: document.querySelector<HTMLElement>(".sample-grid-empty")?.textContent ?? "",
+        categoryButtons: document.querySelectorAll(".category-btn").length,
+        activeCategoryButtons: document.querySelectorAll(".category-btn.is-active").length,
+      };
+    }, "/src/library.ts");
+
+    expect(result.emptyMessage).toContain("No categories found in this library.");
+    expect(result.categoryButtons).toBe(0);
+    expect(result.activeCategoryButtons).toBe(0);
+  });
+
+  test("main covers sample playback state transitions through the app shell", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (libraryModPath) => {
+      const library = await import(/* @vite-ignore */ libraryModPath);
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitFor = async (predicate: () => boolean, attempts = 40): Promise<void> => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (predicate()) return;
+          await flush();
+        }
+        throw new Error("Timed out waiting for predicate");
+      };
+
+      class FakeAudio {
+        src = "";
+        currentTime = 0;
+        duration = 4;
+        paused = true;
+        ended = false;
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        play(): Promise<void> {
+          this.paused = false;
+          return Promise.resolve();
+        }
+        pause(): void {
+          this.paused = true;
+        }
+      }
+
+      (window as unknown as { Audio: typeof Audio }).Audio = FakeAudio as unknown as typeof Audio;
+
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"], sampleCount: 1 }],
+          mixLibrary: [],
+          sampleIndex: {},
+        };
+      };
+
+      library.FetchLibrary.prototype.loadSamples = async function () {
+        return [{ filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 120, beats: 1 }];
+      };
+
+      library.FetchLibrary.prototype.loadCategoryConfig = async function () {
+        return { categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"] }] };
+      };
+
+      library.FetchLibrary.prototype.resolveAudioUrl = async function (sample: { filename: string }) {
+        return `mock://${sample.filename}`;
+      };
+
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      // @ts-expect-error Vite serves browser modules from /src during page-eval tests.
+      await import("/src/main.ts");
+      await waitFor(() => document.querySelectorAll(".sample-block").length === 1);
+
+      const block = document.querySelector<HTMLElement>(".sample-block");
+      if (!block) {
+        throw new Error("Missing sample block");
+      }
+      block.click();
+
+      await waitFor(() => (document.getElementById("transport-name")?.textContent ?? "") === "kick");
+      await waitFor(() => document.querySelector<HTMLElement>(".sample-block.is-playing") !== null);
+
+      return {
+        transportName: document.getElementById("transport-name")?.textContent ?? "",
+        playingBlocks: document.querySelectorAll(".sample-block.is-playing").length,
+        progressValue: Number((document.getElementById("transport-progress") as HTMLProgressElement | null)?.value ?? 0),
+      };
+    }, "/src/library.ts");
+
+    expect(result.transportName).toBe("kick");
+    expect(result.playingBlocks).toBe(1);
+    expect(result.progressValue).toBeGreaterThanOrEqual(0);
+  });
+
+  test("main covers exact-path startup when loadCategoryConfig is unavailable", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (libraryModPath) => {
+      const library = await import(/* @vite-ignore */ libraryModPath);
+      // @ts-expect-error Vite serves /src/data.ts during page-eval tests; not resolvable by tsc.
+      const data = await import(/* @vite-ignore */ "/src/data.ts");
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitFor = async (predicate: () => boolean, attempts = 40): Promise<void> => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (predicate()) return;
+          await flush();
+        }
+        throw new Error("Timed out waiting for predicate");
+      };
+
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [{ id: "Drum", name: "Drum", subcategories: ["kick"], sampleCount: 1 }],
+          mixLibrary: [],
+          sampleIndex: {},
+        };
+      };
+
+      library.FetchLibrary.prototype.loadSamples = async function () {
+        return [{ filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 120, beats: 1 }];
+      };
+
+      delete (library.FetchLibrary.prototype as { loadCategoryConfig?: unknown }).loadCategoryConfig;
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      // @ts-expect-error Vite serves browser modules from /src during page-eval tests.
+      await import("/src/main.ts");
+      await waitFor(() => document.querySelectorAll(".category-btn").length > 0);
+
+      window.dispatchEvent(new Event(data.CATEGORY_CONFIG_UPDATED_EVENT));
+      await flush();
+
+      return {
+        activeCategory: document.querySelector<HTMLElement>(".category-btn.is-active")?.textContent ?? "",
+        addButtonDisabled: document.getElementById("subcategory-add") instanceof HTMLButtonElement
+          ? (document.getElementById("subcategory-add") as HTMLButtonElement).disabled
+          : null,
+      };
+    }, "/src/library.ts");
+
+    expect(result.activeCategory).toContain("Drum");
+    expect(typeof result.addButtonDisabled).toBe("boolean");
   });
 
   test("mix-file-browser covers GenerationPack and userdata label branches", async ({ page }) => {

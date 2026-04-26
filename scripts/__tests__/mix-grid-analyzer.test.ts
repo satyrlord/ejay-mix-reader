@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "fs";
+import { existsSync } from "fs";
 import { resolve } from "path";
 import {
   FORMAT_A_CELL_BYTES,
@@ -256,23 +256,6 @@ describe.skipIf(!hasArchive)("archive spot-checks", () => {
     expect(a.trailer!.end).toBe(0x2c0a);
   });
 
-  it("parses GP1 HipHop START.MIX as uint16-cell Format A", () => {
-    const p = resolve(ARCHIVE, "GenerationPack1/HipHop/MIX/START.MIX");
-    const a = analyzeFile(p);
-    expect(a.product).toBe("hiphop");
-    expect(a.fileSize).toBe(12692);
-    // Grid cells are uint16 LE — well above the single-byte cap the old
-    // hypothesis assumed and within the first 12 bits of uint16 space.
-    expect(a.maxId).toBeGreaterThan(255);
-    expect(a.maxId).toBeLessThan(4096);
-    // HipHop mixes reference ids up to ~2071 but the Prereq 1 GP1-HipHop
-    // MAX catalog only declares 1381 entries. Most cells (>50%) still
-    // resolve inside that range; the remainder is tracked as a Prereq 5
-    // resolver follow-up (likely a parent catalog or shared ID space).
-    const inLocalCatalog = a.cells.filter((c) => c.id > 0 && c.id <= 1381).length;
-    expect(inLocalCatalog / a.cellCount).toBeGreaterThan(0.5);
-  });
-
   it("recovers the NODRUGS.MIX external WAV path reference", () => {
     const p = resolve(ARCHIVE, "Rave/MIX/NODRUGS.MIX");
     const a = analyzeFile(p);
@@ -281,14 +264,14 @@ describe.skipIf(!hasArchive)("archive spot-checks", () => {
     expect(joined).toMatch(/scool004\.wav/i);
   });
 
-  it("lists all six Gen 1 products when scanning archive/*/MIX", () => {
+  it("lists the Gen 1 products preserved in the streamlined archive layout", () => {
+    // Dance_SuperPack and GenerationPack1 were intentionally removed from the
+    // archive in April 2026; the remaining Gen 1 mix directories are listed
+    // here. HipHop 1 is the renamed home of the HipHop_eJay1 mixes.
     const dirs = [
       "Dance_eJay1/MIX",
-      "Dance_SuperPack/MIX",
       "Rave/MIX",
-      "GenerationPack1/Dance/MIX",
-      "GenerationPack1/Rave/MIX",
-      "GenerationPack1/HipHop/MIX",
+      "HipHop 1/MIX",
     ];
     for (const d of dirs) {
       const files = listMixFiles(resolve(ARCHIVE, d));

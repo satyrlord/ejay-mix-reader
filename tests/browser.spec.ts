@@ -1,4 +1,7 @@
 import { test, expect } from "./baseFixtures.js";
+import type { MixLibraryEntry } from "../src/data.js";
+
+const browserAppStartupTimeoutMs = process.env.VITE_COVERAGE === "true" ? 15_000 : 5_000;
 
 test.describe("data module edge cases", () => {
   const DATA_MOD = "/src/data.ts";
@@ -680,8 +683,8 @@ test.describe("library edge cases", () => {
       const { FetchLibrary } = await import(/* @vite-ignore */ modPath);
       const originalFetch = globalThis.fetch;
       let sampleFetches = 0;
-      let moveBodies: string[] = [];
-      let moveStatuses: number[] = [];
+      const moveBodies: string[] = [];
+      const moveStatuses: number[] = [];
 
       globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         const url =
@@ -2852,33 +2855,6 @@ test.describe("main edge cases", () => {
         await Promise.resolve();
       };
 
-      const waitForTree = async (sidebar: HTMLElement): Promise<void> => {
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          if (
-            sidebar.querySelector(".mix-tree-group-label") ||
-            sidebar.querySelector(".archive-tree-empty")
-          ) {
-            return;
-          }
-          await flush();
-        }
-      };
-
-      const dispatchContextMenu = (
-        controller: { handleContextMenu: (event: MouseEvent) => void },
-        target: HTMLElement,
-        init: MouseEventInit,
-      ): void => {
-        const event = new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          button: 2,
-          ...init,
-        });
-        target.dispatchEvent(event);
-        controller.handleContextMenu(event);
-      };
-
       const labels = (): string[] => [...document.querySelectorAll<HTMLElement>(".sample-block-label")]
         .map((entry) => entry.textContent ?? "");
 
@@ -3359,7 +3335,8 @@ test.describe("main edge cases", () => {
 
   test("the real app sample zoom controls adjust sample bubble sizing", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator(".sample-block").first()).toBeVisible();
+    await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
+    await expect(page.locator(".sample-block").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
 
     const readFontSize = async (): Promise<number> => page.locator(".sample-block").first().evaluate((element) => {
       return Number.parseFloat(window.getComputedStyle(element).fontSize);
@@ -3379,7 +3356,8 @@ test.describe("main edge cases", () => {
 
   test("the real app zoom-in is clamped at the maximum zoom level", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator(".sample-block").first()).toBeVisible();
+    await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
+    await expect(page.locator(".sample-block").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
 
     const readZoomScale = (): Promise<number> =>
       page.evaluate(() =>
@@ -3399,7 +3377,8 @@ test.describe("main edge cases", () => {
 
   test("the real app zoom-out is clamped at the minimum zoom level", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator(".sample-block").first()).toBeVisible();
+    await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
+    await expect(page.locator(".sample-block").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
 
     const readZoomScale = (): Promise<number> =>
       page.evaluate(() =>
@@ -3962,24 +3941,7 @@ test.describe("sample-grid-context-menu module", () => {
 test.describe("mix-file-browser module", () => {
   const MFB_MOD = "/src/mix-file-browser.ts";
 
-  /**
-   * Build a minimal archive-sidebar DOM fixture that matches what
-   * `renderArchivePlaceholder` produces in `render.ts`.
-   */
-  function buildArchiveSidebar(): string {
-    return `
-      <aside id="archive-tree" class="archive-sidebar">
-        <div class="archive-header">
-          <span class="archive-title">Mix Archive</span>
-        </div>
-        <div class="archive-tree-content">
-          <p class="archive-placeholder">Load a .mix file to begin</p>
-        </div>
-      </aside>
-    `;
-  }
-
-  const SAMPLE_LIBRARY = [
+  const SAMPLE_LIBRARY: MixLibraryEntry[] = [
     {
       id: "Dance_eJay1",
       name: "Dance eJay 1",
@@ -4155,10 +4117,13 @@ test.describe("mix-file-browser module", () => {
     expect(result.afterExpandHidden).toBe(false);
   });
 
-  test("DEV mode: clicking a .mix file calls onSelectFile with correct ref", async ({ page }) => {
+  test("DEV mode: single click shows metadata and double click calls onSelectFile", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(async ([modPath, library]) => {
-      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+      const { initMixFileBrowser, isMixMetaPopupVisible } = await import(/* @vite-ignore */ modPath);
+
+      const libraryWithMeta = structuredClone(library);
+      libraryWithMeta[0].mixes[0].meta = { bpm: 140, trackCount: 12, catalogs: ["Dance eJay 1"] };
 
       const host = document.createElement("div");
       host.innerHTML = `
@@ -4176,7 +4141,7 @@ test.describe("mix-file-browser module", () => {
       const sidebar = host.querySelector<HTMLElement>("#at-select")!;
       initMixFileBrowser(sidebar, {
         isDev: true,
-        mixLibrary: library,
+        mixLibrary: libraryWithMeta,
         onSelectFile: (ref: { label: string; group: string; source: unknown }) => { selectedRefs.push(ref); },
       });
 
@@ -4185,9 +4150,14 @@ test.describe("mix-file-browser module", () => {
       const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
       const firstFile = content.querySelector<HTMLButtonElement>(".mix-tree-item")!;
       firstFile.click();
+      const refCountAfterSingleClick = selectedRefs.length;
+      const popupVisibleAfterSingleClick = isMixMetaPopupVisible();
+      firstFile.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
 
       const active = content.querySelector(".mix-tree-item.is-active");
       return {
+        refCountAfterSingleClick,
+        popupVisibleAfterSingleClick,
         refCount: selectedRefs.length,
         label: selectedRefs[0]?.label,
         group: selectedRefs[0]?.group,
@@ -4196,6 +4166,8 @@ test.describe("mix-file-browser module", () => {
       };
     }, [MFB_MOD, SAMPLE_LIBRARY] as const);
 
+    expect(result.refCountAfterSingleClick).toBe(0);
+    expect(result.popupVisibleAfterSingleClick).toBe(true);
     expect(result.refCount).toBe(1);
     expect(result.label).toBe("START.MIX");
     expect(result.group).toBe("Dance eJay 1");
@@ -4433,7 +4405,7 @@ test.describe("mix-file-browser module", () => {
 
       sidebar.click();
       const item = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
-      item.click();
+      item.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
 
       return refs[0]?.source;
     }, MFB_MOD);
@@ -4501,6 +4473,7 @@ test.describe("mix-file-browser module", () => {
     const result = await page.evaluate(async (modPath) => {
       const { buildMetaRows } = await import(/* @vite-ignore */ modPath);
       return buildMetaRows("test.MIX", "Rave", {
+        appId: 0x000015dc,
         bpm: 155, bpmAdjusted: 140, trackCount: 30,
         catalogs: ["Rave", "Techno"],
         title: "Hard Rain", author: "DJ X",
@@ -4510,6 +4483,7 @@ test.describe("mix-file-browser module", () => {
     const keys = result.map(([k]: [string, string]) => k);
     expect(keys).toContain("BPM");
     expect(keys).toContain("Tracks");
+    expect(keys).toContain("App ID");
     expect(keys).toContain("Title");
     expect(keys).toContain("Author");
     expect(keys).toContain("Ticker");
@@ -4781,7 +4755,7 @@ test.describe("mix-file-browser module", () => {
   test("PROD mode: archive-root picker groups product and userdata mixes and parses metadata", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(async (modPath) => {
-      const { initMixFileBrowser, isMixMetaPopupVisible } = await import(/* @vite-ignore */ modPath);
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
 
       const flush = async (): Promise<void> => {
         await Promise.resolve();
@@ -4863,12 +4837,12 @@ test.describe("mix-file-browser module", () => {
       const firstItem = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
       const firstTooltip = firstItem.title;
       firstItem.click();
+      firstItem.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
 
       return {
         groupLabels,
         firstTooltip,
-        popupVisible: isMixMetaPopupVisible(),
-        popupText: document.getElementById("mix-meta-popup")?.textContent ?? "",
+        popupTextAfterSingleClick: document.getElementById("mix-meta-popup")?.textContent ?? "",
         selected: refs[0],
       };
     }, MFB_MOD);
@@ -4876,8 +4850,6 @@ test.describe("mix-file-browser module", () => {
     expect(result.groupLabels).toEqual(["Dance eJay 1", "User: sets"]);
     expect(result.firstTooltip).toContain("BPM: 140");
     expect(result.firstTooltip).toContain("0 tracks");
-    expect(result.popupVisible).toBe(true);
-    expect(result.popupText).toContain("START.MIX");
     expect(result.selected).toMatchObject({
       label: "START.MIX",
       group: "Dance eJay 1",

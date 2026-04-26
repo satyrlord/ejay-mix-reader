@@ -31,6 +31,9 @@
 
 :root {
   --panel-border: rgba(255, 255, 255, 0.14);
+  --header-ribbon-h: 2.2rem;
+  --header-ribbon-inner-h: calc(var(--header-ribbon-h) - 1px);
+  --header-ribbon-bg: linear-gradient(180deg, rgba(19, 24, 36, 0.98), rgba(11, 14, 22, 0.98));
   --channel-loop: #6aa6ff;
   --channel-drum: #5f9cf0;
   --channel-bass: #5f9cf0;
@@ -236,8 +239,9 @@ body {
 .archive-header {
   display: flex;
   align-items: center;
-  padding: 0.55rem 0.75rem;
-  background: rgba(15, 17, 25, 0.92);
+  height: var(--header-ribbon-h);
+  padding: 0 0.75rem;
+  background: var(--header-ribbon-bg);
   border-bottom: 1px solid var(--panel-border);
 }
 
@@ -492,44 +496,142 @@ body {
   display: grid;
   grid-template-rows: auto 1fr;
   min-height: 0;
+  position: relative;
   overflow-x: scroll;
   overflow-y: hidden;
+  scrollbar-color: rgba(61, 255, 137, 0.45) rgba(255, 255, 255, 0.08);
 }
 
 .sequencer-header {
-  display: flex;
-  gap: 0;
+  display: grid;
+  align-items: stretch;
+  height: var(--header-ribbon-h);
   min-width: 66rem;
-  padding: 0.25rem 0.4rem;
-  background: rgba(15, 17, 25, 0.92);
+  background: var(--header-ribbon-bg);
   border-bottom: 1px solid var(--panel-border);
 }
 
+.sequencer-header-spacer {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: block;
+  height: var(--header-ribbon-inner-h);
+  min-width: 10rem;
+  background: var(--header-ribbon-bg);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .sequencer-beat-number {
-  flex: 1 0 2rem;
-  min-width: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--header-ribbon-inner-h);
+  min-width: 0;
+  min-height: 0;
   text-align: center;
   font: 700 0.78rem var(--font-sans);
   font-variant-caps: all-small-caps;
   color: rgba(242, 241, 236, 0.45);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .sequencer-canvas {
   min-width: 66rem;
-  display: grid;
-  place-items: center;
+  position: relative;
+  display: block;
   overflow: hidden;
-  background: repeating-linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.03) 0px,
-    rgba(255, 255, 255, 0.03) 1px,
-    transparent 1px,
-    transparent 2rem
-  );
+  background: linear-gradient(180deg, rgba(7, 9, 14, 0.96), rgba(3, 5, 8, 0.98));
+}
+
+.sequencer-canvas.has-mix {
+  background: linear-gradient(180deg, rgba(9, 11, 16, 0.98), rgba(4, 6, 10, 0.98));
+}
+
+.sequencer-timeline {
+  position: relative;
+  min-height: 100%;
+}
+
+.sequencer-lanes {
+  display: grid;
+  grid-auto-rows: minmax(2.3rem, auto);
+}
+
+.sequencer-lane {
+  position: relative;
+  display: grid;
+  align-items: stretch;
+  min-height: 2.3rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background:
+    linear-gradient(90deg, rgba(10, 13, 20, 0.98) 0, rgba(10, 13, 20, 0.98) 10rem, transparent 10rem),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.035) 0,
+      rgba(255, 255, 255, 0.035) 1px,
+      transparent 1px,
+      transparent 3rem
+    );
+}
+
+.sequencer-lane-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 700 0.8rem var(--font-sans);
+  font-variant-caps: all-small-caps;
+  color: rgba(242, 241, 236, 0.68);
+  background: linear-gradient(180deg, rgba(18, 23, 35, 0.98), rgba(10, 13, 20, 0.98));
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sequencer-event {
+  align-self: center;
+  min-width: 0;
+  height: 1.55rem;
+  margin: 0.32rem 0.18rem;
+  border: 1px solid rgba(61, 255, 137, 0.28);
+  border-radius: 0.3rem;
+  padding: 0 0.32rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 700 0.68rem/1.45rem var(--font-sans);
+  font-variant-caps: all-small-caps;
+  color: rgba(242, 241, 236, 0.9);
+  background: linear-gradient(180deg, rgba(61, 255, 137, 0.24), rgba(61, 255, 137, 0.1));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.sequencer-event.is-missing {
+  border-style: dashed;
+  border-color: rgba(255, 181, 85, 0.42);
+  color: rgba(255, 210, 154, 0.9);
+  background: linear-gradient(180deg, rgba(255, 181, 85, 0.18), rgba(255, 181, 85, 0.07));
+}
+
+.sequencer-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(255, 112, 112, 0.95), rgba(255, 196, 109, 0.95));
+  box-shadow: 0 0 0 1px rgba(255, 112, 112, 0.15), 0 0 12px rgba(255, 120, 120, 0.35);
+  pointer-events: none;
+  z-index: 4;
+  transform: translateX(10rem);
 }
 
 .sequencer-placeholder {
-  margin: 0;
+  margin: 2.5rem 1rem;
   color: rgba(242, 241, 236, 0.3);
   font-size: 1.02rem;
 }

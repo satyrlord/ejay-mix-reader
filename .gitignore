@@ -21,6 +21,7 @@ output/
 *.dll
 *.csv
 *.log
+decompiled/
 
 # Node.js
 node_modules/

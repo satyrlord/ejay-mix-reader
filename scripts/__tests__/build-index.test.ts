@@ -602,11 +602,17 @@ describe("buildSampleIndex", () => {
       expect(d1.bySource["dance/kick.pxd"]).toBe("Drum/kick.wav");
       expect(d1.byStem["kick"]).toBe("Drum/kick.wav");
       expect(d1.byStem["pad"]).toBe("Pads/pad.wav");
+      expect(Object.keys(d1.byGen1Id ?? {})).toHaveLength(0);
+      expect(Object.keys(d1.byInternalName)).toHaveLength(0);
+      expect(Object.keys(d1.bySampleId)).toHaveLength(0);
 
       // Dance_eJay2 with subcategory
       const d2 = index.Dance_eJay2;
       expect(d2.byStem["bass01"]).toBe("Bass/Deep/bass01.wav");
       expect(Object.keys(d2.byAlias)).toHaveLength(0);
+      expect(Object.keys(d2.byGen1Id ?? {})).toHaveLength(0);
+      expect(Object.keys(d2.byInternalName)).toHaveLength(0);
+      expect(Object.keys(d2.bySampleId)).toHaveLength(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -625,6 +631,9 @@ describe("buildSampleIndex", () => {
 
       const index = buildSampleIndex(root);
       expect(index.P1.byStem["kick"]).toBe("Drum/kick.wav");
+      expect(Object.keys(index.P1.byGen1Id ?? {})).toHaveLength(0);
+      expect(Object.keys(index.P1.byInternalName)).toHaveLength(0);
+      expect(Object.keys(index.P1.bySampleId)).toHaveLength(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -652,6 +661,120 @@ describe("buildSampleIndex", () => {
       const index = buildSampleIndex(root);
       expect(index["Embedded MIX"].byStem["kick01"]).toBe("Unsorted/embedded mix/Kick01.wav");
       expect(index["Embedded MIX"].bySource["e:/samples/kick01.wav"]).toBe("Unsorted/embedded mix/Kick01.wav");
+      expect(Object.keys(index["Embedded MIX"].byGen1Id ?? {})).toHaveLength(0);
+      expect(Object.keys(index["Embedded MIX"].byInternalName)).toHaveLength(0);
+      expect(Object.keys(index["Embedded MIX"].bySampleId)).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("indexes internal names and numeric sample ids when metadata provides them", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-extra-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "kick.wav",
+            alias: "Kick One",
+            category: "Drum",
+            product: "Dance_eJay2",
+            internal_name: "D5MG539",
+            sample_id: 1930,
+          },
+        ],
+      }));
+
+      const index = buildSampleIndex(root);
+      expect(index.Dance_eJay2.byInternalName["d5mg539"]).toBe("Drum/kick.wav");
+      expect(index.Dance_eJay2.bySampleId["1930"]).toBe("Drum/kick.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("indexes source basenames into byStem for catalog fallback matching", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-source-stem-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "Dance_SuperPack__D6BS003.WAV",
+            category: "Bass",
+            product: "Dance_SuperPack",
+            source: "AA/D6BS003.PXD",
+          },
+        ],
+      }));
+
+      const index = buildSampleIndex(root);
+      expect(index.Dance_SuperPack.byStem["d6bs003"]).toBe("Bass/Dance_SuperPack__D6BS003.WAV");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("indexes Gen 1 raw ids from MAX catalogs", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-gen1-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "kick.wav",
+            category: "Drum",
+            product: "Dance_eJay1",
+            source: "AA/KICK.PXD",
+          },
+        ],
+      }));
+
+      const archiveDir = join(root, "archive");
+      const danceDir = join(archiveDir, "Dance_eJay1", "dance", "DMACHINE");
+      mkdirSync(danceDir, { recursive: true });
+      writeFileSync(join(danceDir, "MAX.TXT"), ['""', '"AA\\KICK.PXD"', ""].join("\r\n"));
+
+      const index = buildSampleIndex(root, archiveDir);
+      expect(index.Dance_eJay1.byGen1Id?.["1"]).toBe("Drum/kick.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("precomputes SuperPack sample-kit Gen 1 fallbacks", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-gen1-kit-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "placeholder.wav",
+            category: "Loop",
+            product: "Dance_SuperPack",
+          },
+          {
+            filename: "kit01.wav",
+            category: "Drum",
+            product: "SampleKit_DMKIT1",
+            source: "dmkit1/kit01.pxd",
+          },
+        ],
+      }));
+
+      const archiveDir = join(root, "archive");
+      const superPackDir = join(archiveDir, "Dance_SuperPack", "dance", "EJAY");
+      mkdirSync(superPackDir, { recursive: true });
+      writeFileSync(join(superPackDir, "MAX"), '""\r\n');
+      writeFileSync(join(superPackDir, "kit1.txt"), [
+        '"DMKIT1\\KIT01.PXD"',
+        '""',
+        '"drum"',
+        '"1"',
+        '"Grp. 1"',
+        '"Vers1"',
+        '',
+      ].join("\r\n"));
+
+      const index = buildSampleIndex(root, archiveDir);
+      expect(index.Dance_SuperPack.byGen1Id?.["3400"]).toBe("Drum/kit01.wav");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
