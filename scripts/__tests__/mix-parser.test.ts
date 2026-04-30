@@ -372,8 +372,9 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
     expect(mix!.tracks).toHaveLength(16);
     expect(mix!.catalogs).toHaveLength(8);
     expect(mix!.tracks[0].sampleRef.displayName).toBe("Kick90");
-    expect(mix!.tracks[0].beat).toBeNull();
-    expect(mix!.tracks[0].channel).toBeNull();
+    expect(mix!.tracks[0].beat).toBe(0);
+    expect(mix!.tracks[0].channel).toBe(0);
+    expect(mix!.tracks.every((track) => track.sampleRef.rawId === 0)).toBe(true);
     expect(mix!.tracks.at(-1)?.sampleRef.displayName).toBe("Perc159");
   });
 
@@ -400,19 +401,16 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
     });
   });
 
-  it("parses HipHop 4 START.MIX as late Gen 3 with drum machine state", () => {
+  it("parses HipHop 4 START.MIX as late Gen 3 with strict name-gated track recovery", () => {
     const mix = parseFile(resolveMixPath("HipHop_eJay4", "start.mix"));
     expect(mix).not.toBeNull();
     expect(mix!.format).toBe("D");
     expect(mix!.title).toBe("nothingbutCRAP");
     expect(mix!.author).toBe("laborda-gonzales");
-    expect(mix!.tracks).toHaveLength(16);
+    expect(mix!.tracks).toHaveLength(0);
     expect(mix!.catalogs).toHaveLength(7);
     expect(Object.keys(mix!.mixer.raw)).toHaveLength(502);
     expect(mix!.drumMachine?.pads).toHaveLength(16);
-    expect(mix!.tracks[0].beat).toBeNull();
-    expect(mix!.tracks[0].channel).toBeNull();
-    expect(mix!.tracks[0].sampleRef.displayName).toBeNull();
   });
 
   it("ignores Xtreme VideoMix payloads in audio-only parsing", () => {

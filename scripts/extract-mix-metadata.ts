@@ -28,6 +28,27 @@ const ARCHIVE_DIR = join(ROOT, "archive");
 const DATA_DIR = join(ROOT, "data");
 const OUT_FILE = join(DATA_DIR, "mix-metadata.json");
 
+const LANE_COUNT_BY_FORMAT = {
+  A: 8,
+  B: 17,
+  C: 32,
+  D: 32,
+} as const;
+
+function maxRecoveredBeat(tracks: Array<{ beat: number | null }>): number | null {
+  let maxBeat: number | null = null;
+  for (const track of tracks) {
+    if (
+      typeof track.beat === "number" &&
+      Number.isFinite(track.beat) &&
+      (maxBeat === null || track.beat > maxBeat)
+    ) {
+      maxBeat = track.beat;
+    }
+  }
+  return maxBeat;
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 export interface ExtractOptions {
@@ -59,6 +80,11 @@ export function irToMeta(ir: ReturnType<typeof parseMix>): MixFileMeta | null {
   if (ir.title) meta.title = ir.title;
   if (ir.author) meta.author = ir.author;
   if (ir.tickerText.length > 0) meta.tickerText = ir.tickerText;
+
+  meta.laneCount = LANE_COUNT_BY_FORMAT[ir.format];
+  const maxBeat = maxRecoveredBeat(ir.tracks);
+  meta.timelineRecovered = maxBeat !== null;
+  if (maxBeat !== null) meta.maxBeat = maxBeat;
 
   return meta;
 }

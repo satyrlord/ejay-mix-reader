@@ -20,13 +20,13 @@
  * labelled where the structure is known.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { basename, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 import { MixBuffer, detectFormat, parseCatalogs } from "../src/mix-parser.js";
-import { ARCHIVE_MIX_DIRS } from "./build-index.js";
+import { ARCHIVE_MIX_DIRS, resolveProductMixDir } from "./build-index.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ARCHIVE_DIR = join(ROOT, "archive");
@@ -285,26 +285,13 @@ function processFile(mixPath: string, productId: string, outDir: string): void {
 }
 
 function runForProduct(productId: string): void {
-  const layout = ARCHIVE_MIX_DIRS[productId];
-  if (!layout) {
-    console.warn(`Unknown product: ${productId}`);
-    return;
-  }
-  const productDir = join(ARCHIVE_DIR, layout.archiveDir);
-  if (!existsSync(productDir)) {
-    console.warn(`Archive folder missing: ${productDir}`);
+  const resolved = resolveProductMixDir(productId, ARCHIVE_DIR);
+  if (!resolved) {
+    console.warn(`Archive/MIX folder missing: ${productId}`);
     return;
   }
 
-  // Find the mix subdirectory (case-insensitive)
-  let mixDir: string | null = null;
-  for (const entry of readdirSync(productDir)) {
-    if (entry.toLowerCase() === "mix") {
-      const full = join(productDir, entry);
-      if (statSync(full).isDirectory()) { mixDir = full; break; }
-    }
-  }
-  if (!mixDir) return;
+  const mixDir = resolved.mixDir;
 
   const outDir = join(LOGS_DIR, productId);
   for (const entry of readdirSync(mixDir).sort()) {

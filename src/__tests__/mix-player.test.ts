@@ -264,6 +264,29 @@ describe("buildMixPlaybackPlan", () => {
     });
   });
 
+  it("prefers authoritative parser loopBeats over inferred fallback", () => {
+    const plan = buildMixPlaybackPlan(makeMix({
+      loopBeats: 13,
+      tracks: [
+        {
+          beat: 4,
+          channel: 2,
+          sampleRef: {
+            rawId: 1930,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: 1024,
+          },
+        },
+      ],
+    }));
+
+    // Inferred fallback would be 8 (maxBeat+1 rounded to 4-beat bar),
+    // but parser-provided loopBeats must win when available.
+    expect(plan.loopBeats).toBe(13);
+  });
+
   it("falls back to internal name and display-name lookup when no sample id match exists", () => {
     const sampleIndex: Record<string, SampleLookupEntry> = {
       Dance_eJay3: {

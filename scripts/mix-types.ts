@@ -21,6 +21,11 @@ export interface MixIR {
   author: string | null;              // null for Format A
   title: string | null;               // null for Format A
   registration: string | null;        // SKKENNUNG key (null for Format A)
+  /**
+   * Optional authoritative loop length in timeline units, when a format
+   * parser can recover one directly from on-disk metadata.
+   */
+  loopBeats?: number | null;
 
   tracks: TrackPlacement[];           // all sample placements on the timeline
   mixer: MixerState;                  // normalised mixer settings

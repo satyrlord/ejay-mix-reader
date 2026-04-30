@@ -170,6 +170,17 @@ Before Vite bundles the app, `scripts/build-index.ts` regenerates
 browser catalog, enriches each `.mix` entry with parsed `MixFileMeta`, and
 includes `_userdata` directories after the product archive groups.
 
+Timeline diagnostics strategy (Phase C decision):
+
+- `scripts/extract-mix-metadata.ts::irToMeta` is the canonical mapper from
+  `MixIR` to `MixFileMeta` and now includes `laneCount`,
+  `timelineRecovered`, and `maxBeat`.
+- `scripts/build-index.ts` and `npm run mix:meta` both consume that mapper,
+  so `data/index.json` and `data/mix-metadata.json` expose the same
+  diagnostics fields.
+- `src/mix-file-browser.ts::mixMetaFromIr` remains the runtime fallback for
+  local/FSA-selected files that do not come from prebuilt index metadata.
+
 During local development, the Vite server also exposes three project-specific
 endpoints:
 

@@ -9,8 +9,8 @@
   "registration": "0000000",
   "tracks": [
     {
-      "beat": null,
-      "channel": null,
+      "beat": -4,
+      "channel": 0,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -20,8 +20,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 12,
+      "channel": 1,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -31,8 +31,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 8,
+      "channel": 2,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -42,8 +42,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": -5,
+      "channel": 3,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -53,8 +53,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": -4,
+      "channel": 4,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -64,8 +64,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": -4,
+      "channel": 5,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -75,8 +75,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 4,
+      "channel": 6,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -86,8 +86,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 6,
+      "channel": 7,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -97,8 +97,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 0,
+      "channel": 8,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -108,8 +108,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 0,
+      "channel": 9,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -119,8 +119,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 0,
+      "channel": 10,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -130,8 +130,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 0,
+      "channel": 11,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -141,8 +141,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 0,
+      "channel": 12,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -152,8 +152,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 0,
+      "channel": 13,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -163,8 +163,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 0,
+      "channel": 14,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,
@@ -174,8 +174,8 @@
       }
     },
     {
-      "beat": null,
-      "channel": null,
+      "beat": 0,
+      "channel": 15,
       "sampleRef": {
         "rawId": 0,
         "internalName": null,

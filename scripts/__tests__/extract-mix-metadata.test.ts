@@ -37,6 +37,9 @@ describe("irToMeta", () => {
     expect(meta?.title).toBeUndefined();
     expect(meta?.author).toBeUndefined();
     expect(meta?.tickerText).toBeUndefined();
+    expect(meta?.laneCount).toBe(8);
+    expect(meta?.timelineRecovered).toBe(false);
+    expect(meta?.maxBeat).toBeUndefined();
   });
 
   it("populates bpmAdjusted only when different from bpm", () => {
@@ -71,6 +74,30 @@ describe("irToMeta", () => {
       catalogs: [], title: null, author: null, tickerText: ["line 1", "line 2"], format: "A" as const, registration: null,
     } as unknown as Parameters<typeof irToMeta>[0];
     expect(irToMeta(ir)?.tickerText).toEqual(["line 1", "line 2"]);
+  });
+
+  it("populates timeline diagnostics when beats are recovered", () => {
+    const ir = {
+      appId: 0x00002571,
+      bpm: 132,
+      bpmAdjusted: null as number | null,
+      tracks: [
+        { beat: null, channel: null, sampleRef: null },
+        { beat: 9, channel: 1, sampleRef: null },
+        { beat: 4, channel: 2, sampleRef: null },
+      ],
+      catalogs: [{ name: "Dance eJay 3" }],
+      title: null as string | null,
+      author: null as string | null,
+      tickerText: [] as string[],
+      format: "C" as const,
+      registration: null,
+    } as unknown as Parameters<typeof irToMeta>[0];
+
+    const meta = irToMeta(ir);
+    expect(meta?.laneCount).toBe(32);
+    expect(meta?.timelineRecovered).toBe(true);
+    expect(meta?.maxBeat).toBe(9);
   });
 });
 

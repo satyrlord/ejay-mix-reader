@@ -21,6 +21,14 @@
  */
 export const COVERAGE_SOURCE_FILES = [
   "src/main.ts",
+  "src/app-controller.ts",
+  "src/main-controller-types.ts",
+  "src/category-config-controller.ts",
+  "src/sample-browser-controller.ts",
+  "src/mix-playback-controller.ts",
+  "src/main-helpers/filter-sort.ts",
+  "src/main-helpers/subcategory-ops.ts",
+  "src/main-helpers/sequencer.ts",
   "src/data.ts",
   "src/library.ts",
   "src/player.ts",

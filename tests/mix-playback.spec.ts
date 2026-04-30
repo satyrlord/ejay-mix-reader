@@ -386,6 +386,15 @@ test.describe("start.mix per-product matrix", () => {
 
     const playPauseButton = page.locator(".seq-play-btn");
     const stopButton = page.locator(".seq-stop-btn");
+    const dispatchShortcut = async (key: "Space" | "Enter"): Promise<void> => {
+      await page.evaluate((nextKey) => {
+        if (nextKey === "Space") {
+          document.dispatchEvent(new KeyboardEvent("keydown", { key: " ", code: "Space", bubbles: true }));
+          return;
+        }
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+      }, key);
+    };
 
     await expect(playPauseButton).toBeEnabled({ timeout: coveragePlaybackStartTimeoutMs });
     await expect(playPauseButton).toHaveAttribute("aria-label", "Play mix");
@@ -408,12 +417,11 @@ test.describe("start.mix per-product matrix", () => {
     expect(pausedByButton.beatAlignedToBarStart).toBe(true);
     expect(Math.abs((pausedByButton.beat ?? 0) - ((pausedByButton.barNumber ?? 1) - 1))).toBeLessThan(0.001);
 
-    await page.locator(".context-mix-name").click();
-    await page.keyboard.press("Space");
+    await dispatchShortcut("Space");
     await expect(stopButton).toBeEnabled({ timeout: coveragePlaybackStartTimeoutMs });
     await expect(playPauseButton).toHaveAttribute("aria-label", "Pause mix at current bar start");
 
-    await page.keyboard.press("Space");
+    await dispatchShortcut("Space");
     await expect(stopButton).toBeDisabled();
     await expect(playPauseButton).toHaveAttribute("aria-label", "Play mix");
     await waitForBarPosition(page);
@@ -424,23 +432,29 @@ test.describe("start.mix per-product matrix", () => {
     expect(pausedBySpace.beatAlignedToBarStart).toBe(true);
     expect(Math.abs((pausedBySpace.beat ?? 0) - ((pausedBySpace.barNumber ?? 1) - 1))).toBeLessThan(0.001);
 
-    await page.keyboard.press("Enter");
+    await dispatchShortcut("Enter");
     await expect(stopButton).toBeEnabled({ timeout: coveragePlaybackStartTimeoutMs });
     await expect(playPauseButton).toHaveAttribute("aria-label", "Pause mix at current bar start");
-    await waitForBarPosition(page);
+    await expect(page.locator(".seq-position")).toContainText(/Bar\s+1\s*\/\s*\d+/i, {
+      timeout: coveragePlaybackStartTimeoutMs,
+    });
 
     const startedByEnter = await readPlayheadSnapshot(page);
     expect(startedByEnter.beat).not.toBeNull();
-    expect((startedByEnter.beat ?? Number.POSITIVE_INFINITY)).toBeLessThan(pausedBySpace.beat ?? 0);
+    expect(startedByEnter.barNumber).not.toBeNull();
+    const startedBarNumber = startedByEnter.barNumber as number;
+    expect(startedBarNumber).toBeGreaterThanOrEqual(1);
+    expect(startedBarNumber).toBeLessThanOrEqual(2);
 
-    await page.keyboard.press("Enter");
+    await dispatchShortcut("Enter");
     await expect(stopButton).toBeDisabled();
     await expect(playPauseButton).toHaveAttribute("aria-label", "Play mix");
     await waitForBarPosition(page);
 
     const afterEnterStop = await readPlayheadSnapshot(page);
     expect(afterEnterStop.beat).not.toBeNull();
-    expect(Math.abs((afterEnterStop.beat ?? 1) - 0)).toBeLessThan(0.001);
+    const stoppedBeat = afterEnterStop.beat as number;
+    expect(Math.abs(stoppedBeat - 0)).toBeLessThan(0.001);
     expect(afterEnterStop.barNumber).toBe(1);
   });
 

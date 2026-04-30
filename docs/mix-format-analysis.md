@@ -27,8 +27,8 @@ empty), not a collapsed 2-lane view.
 > Implication for the player: the sequencer view must source its lane count
 > from the parsed `MixIR.format` / `MixIR.product`, **not** from the set of
 > channels that happen to carry events. See
-> [`docs/refactor-plan.md`](refactor-plan.md) for the corresponding
-> rendering work.
+> [`docs/architecture-notes.md`](architecture-notes.md) for the corresponding
+> rendering/runtime wiring.
 
 ## File Inventory
 
@@ -677,8 +677,14 @@ Used by files such as `start.mix` in Dance eJay 3 / HipHop eJay 3:
 [FF FF       record terminator]
 ```
 
-The parser yields `beat: null` and `channel: null` for these records — no
-beat or lane index is recoverable from the compact format.
+Current parser recovery (validated on archive mixes):
+
+- `beat` is recovered from signed `int16 LE` at `pathStart - 10`
+  (observed compact records use `gap === 10`).
+- `channel` is recovered from the temp-path suffix letter:
+  `pxd32p[d..s].tmp -> lane 0..15`.
+- If any guard check fails (unexpected gap, out-of-range path window, or
+  invalid suffix), the parser falls back to `beat: null` / `channel: null`.
 
 ##### Big track record (gap === 40 bytes)
 
@@ -825,11 +831,15 @@ This means each mix file snapshot captures the complete drum machine kit
 configuration, not just the timeline placement.
 
 > **Timeline rendering limitation**: Format D has the same null beat/channel
-> problem as Format C. The parser intentionally emits `beat: null` and
-> `channel: null` for every `TrackPlacement` (see the comment in
-> `parseFormatDTracks`: *"Update if a future analysis recovers them"*).
-> Format D mixes (HipHop eJay 4, House eJay) cannot be rendered on a
-> sequencer grid until beat/channel fields are located in the binary.
+> problem as Format C.
+
+Status update (April 2026): this limitation has been lifted. Format D now uses
+the same compact-record recovery strategy as Format C:
+
+- `beat = int16 LE(pathStart - 10)`
+- `channel = pxd32p[d..s].tmp letter index`
+
+Guarded fallback remains in place for malformed records.
 
 ---
 
@@ -1143,13 +1153,13 @@ applies the following rules:
 |--------|---------------------------------------------------|--------------------------------|
 | **A** | `appId`, `bpm`, grid-derived `beat`, grid-derived `channel`, `rawId`, catalog metadata. | Browser-side Gen 1 sample resolution still depends on source-path / catalog parity work; unsupported trailer-only references remain silent. |
 | **B** | `appId`, `bpm`, `beat`, `channel`, `rawId`, `internalName`, title/author/catalogs/ticker text. | Mixer/effect reproduction is still partial; browser resolution is only as good as `sampleIndex` coverage. |
-| **C** | `appId`, `bpm`, title/author/catalogs, `displayName`/`internalName`, mixer raw text. | `beat` and `channel` remain unrecovered in current parser output, so the browser falls back to beat `0` and synthetic `track-*` lanes. |
-| **D** | `appId`, `bpm`, title/author/catalogs, mixer raw text, drum-machine state, `displayName`/`internalName`. | `beat` and `channel` remain unrecovered; drum-machine and mixer parameters are parsed but not yet reproduced faithfully in the browser transport. |
+| **C** | `appId`, `bpm`, title/author/catalogs, `displayName`/`internalName`, mixer raw text, recovered `beat`/`channel` for compact and big records. | Mixer/effect reproduction is still partial; continuation-record nuances are still simplified. |
+| **D** | `appId`, `bpm`, title/author/catalogs, mixer raw text, drum-machine state, recovered `beat`/`channel`, `displayName`/`internalName`. | Drum-machine and mixer parameters are parsed but not yet reproduced faithfully in the browser transport. |
 
 The largest currently measured archive mix is `archive/HipHop 4/MIX/monochroid.mix`
 (23,721 bytes). A local timing baseline run in April 2026 showed fast parse
-and plan times but `0` resolved events because HipHop 4 Format D tracks still
-reach the player without usable identifiers.
+and plan times; timeline coordinates are now recovered for Format C/D, while
+sample resolution quality still depends on alias/catalog coverage.
 
 ---
 
@@ -1169,7 +1179,7 @@ reach the player without usable identifiers.
 | SuperPack Gen 1+ files may have extended grid | ~~**Low**~~ **Resolved** | Historical concern from when SuperPack mixes were in the archive (`dream.mix` 11,413 B, `Mcxtreme.mix` 11,277 B). Both grids are now known to be deterministic (8 × 351 uint16 LE each), so any bytes past offset 0x2BE2 are guaranteed trailer metadata, never extended grid data. SuperPack source removed during the April 2026 archive cleanup; resolution preserved for the record. |
 | Empty .mix file in Dance 4 | **None** | Skip 2-byte files during parsing. |
 | Oversized .mix file (> 100 KB) contains embedded audio | **Low** | No shipped library mix exceeds 23,721 bytes. Files above ~100 KB are assumed to carry in-band PCM data from the eJay HyperKit recording workflow. Parse the header and text sections normally, then run `npm run mix:extract-embedded` to recover the WAV payloads into `output/Unsorted/embedded mix`; unresolved references should degrade gracefully rather than failing. |
-| Format C/D `beat`/`channel` are always `null` — timeline rendering blocked | **High (Milestone 3 blocker)** | Temp-path records carry no positional data; beat/channel fields have not been located in the binary. Affects Dance 3/4, HipHop 3/4, Techno 3, Xtreme, House (9 of 14 products). Mitigation: render as a flat sample list or play all tracks at beat 0 until the format is further reverse-engineered. |
+| Format C/D `beat`/`channel` are always `null` — timeline rendering blocked | ~~**High (Milestone 3 blocker)**~~ **Resolved** | Compact C and Format D now recover `beat` from `int16 LE(pathStart-10)` and `channel` from `pxd32p[d..s].tmp` suffix mapping; big C (`gap===40`) keeps native `zeitpos`/`Spur` offsets. Guarded null fallback remains for malformed records. |
 
 ---
 

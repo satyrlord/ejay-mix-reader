@@ -389,6 +389,9 @@ export function buildMixPlaybackPlan(
   const products = playbackLookupOrder(mix);
   const lanes = lanesForMix(mix);
   const timelineUnitBeats = mix.format === "A" ? 4 : 1;
+  const authoritativeLoopBeats = typeof mix.loopBeats === "number" && Number.isFinite(mix.loopBeats) && mix.loopBeats > 0
+    ? Math.max(1, Math.round(mix.loopBeats))
+    : null;
   const channelIds: string[] = [];
   // Track whether the parser recovered any positional data for this mix.
   // If every track has `beat === null`, we drop into "list view" — no loop,
@@ -451,6 +454,8 @@ export function buildMixPlaybackPlan(
     // Format C/D today, plus any mix where the parser could not recover
     // positions. The transport must not loop in this state.
     loopBeats = null;
+  } else if (authoritativeLoopBeats !== null) {
+    loopBeats = authoritativeLoopBeats;
   } else if (mix.format === "A") {
     let inferredLength = recoveredMaxBeat + 1;
     for (const laneEvents of eventsByLaneId.values()) {

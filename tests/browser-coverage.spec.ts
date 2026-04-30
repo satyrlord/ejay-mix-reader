@@ -5,6 +5,8 @@ test.describe("browser coverage gap", () => {
   const PARSER_MOD = "/src/mix-parser.ts";
   const MIX_PLAYER_MOD = "/src/mix-player.ts";
   const MIX_FILE_BROWSER_MOD = "/src/mix-file-browser.ts";
+  const MIX_PLAYBACK_CONTROLLER_MOD = "/src/mix-playback-controller.ts";
+  const SEQUENCER_HELPERS_MOD = "/src/main-helpers/sequencer.ts";
 
   test("mix-buffer executes browser-only wrapper paths", async ({ page }) => {
     await page.goto("/coverage-harness.html");
@@ -468,8 +470,8 @@ test.describe("browser coverage gap", () => {
           author: hiphop3?.author,
           trackCount: hiphop3?.tracks.length,
           firstDisplayName: hiphop3?.tracks[0]?.sampleRef.displayName ?? null,
-          beatIsNull: hiphop3?.tracks[0]?.beat === null,
-          channelIsNull: hiphop3?.tracks[0]?.channel === null,
+          firstBeat: hiphop3?.tracks[0]?.beat ?? null,
+          firstChannel: hiphop3?.tracks[0]?.channel ?? null,
         },
         hiphop4: {
           format: hiphop4.format,
@@ -633,8 +635,8 @@ test.describe("browser coverage gap", () => {
       author: "-",
       trackCount: 16,
       firstDisplayName: "Kick90",
-      beatIsNull: true,
-      channelIsNull: true,
+      firstBeat: 0,
+      firstChannel: 0,
     });
     expect(result.hiphop4).toMatchObject({
       format: "D",
@@ -642,7 +644,7 @@ test.describe("browser coverage gap", () => {
       author: "laborda-gonzales",
       firstDisplayName: null,
     });
-    expect(result.hiphop4.trackCount).toBe(16);
+    expect(result.hiphop4.trackCount).toBe(0);
     expect(result.hiphop4.padCount).toBe(16);
     expect(result.xtreme).toEqual({
       format: "C",
@@ -650,6 +652,88 @@ test.describe("browser coverage gap", () => {
       trackCount: 0,
       hasVideoMix: false,
     });
+  });
+
+  test("mix playback controller and sequencer helpers execute fallback branches", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async ({ mixControllerPath, sequencerPath }) => {
+      const mixController = await import(/* @vite-ignore */ mixControllerPath);
+      const sequencer = await import(/* @vite-ignore */ sequencerPath);
+
+      const urls = mixController.collectMixAudioUrls({
+        events: [
+          { audioUrl: "output/Drum/kick.wav" },
+          { audioUrl: null },
+          { audioUrl: "" },
+          { audioUrl: "output/Drum/kick.wav" },
+          { audioUrl: "output/Bass/riff.wav" },
+        ],
+      });
+
+      return {
+        urls,
+        tokenFromOutput: mixController.categoryTokenFromAudioUrl("output/Voice/sing.wav"),
+        tokenWithoutPrefix: mixController.categoryTokenFromAudioUrl("Drum/snare.wav"),
+        tokenFallbackNull: mixController.categoryTokenFromAudioUrl(null),
+        tokenFallbackNoSlash: mixController.categoryTokenFromAudioUrl("bad"),
+        channelColor: mixController.categoryColorFromAudioUrl("output/Loop/fill.wav"),
+        laneLabel: mixController.describeMixLane("lane-0"),
+        trackLabel: mixController.describeMixLane("track-9"),
+        passthroughLabel: mixController.describeMixLane("custom"),
+        bpmDefaultUnit: mixController.timelineBpm({ bpm: 140, timelineUnitBeats: 0 }),
+        bpmCustomUnit: mixController.timelineBpm({ bpm: 140, timelineUnitBeats: 2 }),
+        widthDefault: mixController.timelineWidthPx(8),
+        widthCustom: sequencer.timelineWidthPx(8, 100, 10),
+        clampNullLoop: mixController.clampMixBeat(4, null),
+        clampNaN: mixController.clampMixBeat(Number.NaN, 8),
+        clampFloor: mixController.clampMixBeat(4.9, 8),
+        clampHigh: mixController.clampMixBeat(400, 8),
+      };
+    }, {
+      mixControllerPath: MIX_PLAYBACK_CONTROLLER_MOD,
+      sequencerPath: SEQUENCER_HELPERS_MOD,
+    }) as {
+      urls: string[];
+      tokenFromOutput: string;
+      tokenWithoutPrefix: string;
+      tokenFallbackNull: string;
+      tokenFallbackNoSlash: string;
+      channelColor: string;
+      laneLabel: string;
+      trackLabel: string;
+      passthroughLabel: string;
+      bpmDefaultUnit: number;
+      bpmCustomUnit: number;
+      widthDefault: number;
+      widthCustom: number;
+      clampNullLoop: number;
+      clampNaN: number;
+      clampFloor: number;
+      clampHigh: number;
+    };
+
+    expect(result.urls).toEqual([
+      "output/Drum/kick.wav",
+      "output/Bass/riff.wav",
+    ]);
+    expect(result.tokenFromOutput).toBe("voice");
+    expect(result.tokenWithoutPrefix).toBe("drum");
+    expect(result.tokenFallbackNull).toBe("unsorted");
+    expect(result.tokenFallbackNoSlash).toBe("unsorted");
+    expect(result.channelColor).toBe("var(--channel-loop, var(--channel-unsorted, #6b83aa))");
+    expect(result.laneLabel).toBe("Lane 1");
+    expect(result.trackLabel).toBe("Track 10");
+    expect(result.passthroughLabel).toBe("custom");
+    expect(result.bpmDefaultUnit).toBe(140);
+    expect(result.bpmCustomUnit).toBe(70);
+    expect(result.widthDefault).toBe(544);
+    expect(result.widthCustom).toBe(180);
+    expect(result.clampNullLoop).toBe(0);
+    expect(result.clampNaN).toBe(0);
+    expect(result.clampFloor).toBe(4);
+    expect(result.clampHigh).toBe(7);
   });
 
   test("mix-player executes playback-plan, graph, and fetch helper paths in the browser", async ({ page }) => {

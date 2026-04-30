@@ -727,14 +727,15 @@ function parseFormatCTracks(buf: MixBuffer, startOffset: number): TrackPlacement
       if (gap >= 0 && gap <= 4) i++;
     }
 
-    const record = parseFormatCTrackRecord(buf, startOffset, first.index);
+    const record = parseFormatCTrackRecord(buf, startOffset, first.index, first.path);
     if (!record) continue;
 
     tracks.push({
       beat: record.beat,
       channel: record.channel,
       sampleRef: {
-        rawId: record.channel ?? 0,
+        // C/D lane indexes are timeline coordinates, not sample ids.
+        rawId: 0,
         internalName: null,
         displayName: record.displayName,
         resolvedPath: null,
@@ -750,6 +751,7 @@ function parseFormatCTrackRecord(
   buf: MixBuffer,
   lowerBound: number,
   pathStart: number,
+  path: string,
 ): FormatCTrackRecord | null {
   if (pathStart > buf.length) return null;
 
@@ -766,9 +768,36 @@ function parseFormatCTrackRecord(
     beat = buf.readUInt32LE(pathStart - 18);   // zeitpos
     channel = buf.readUInt8(pathStart - 13);   // Spur
     dataLength = buf.readUInt32LE(pathStart - 22);
+  } else {
+    // Compact C records (observed gap=10 in shipped mixes) expose a small
+    // signed timeline offset at pathStart-10. Lane identity is encoded in
+    // the temp filename suffix (pxd32p[d..s].tmp -> lane 0..15).
+    const recoveredBeat = recoverCompactFormatCDBeat(buf, pathStart, nameField.gap);
+    const recoveredLane = laneIndexFromTempPath(path);
+    if (recoveredBeat !== null && recoveredLane !== null) {
+      beat = recoveredBeat;
+      channel = recoveredLane;
+    }
   }
 
   return { displayName: nameField.name, beat, channel, dataLength };
+}
+
+function laneIndexFromTempPath(path: string): number | null {
+  const match = /pxd32p([a-z])\.tmp[.,]?$/i.exec(path);
+  if (!match) return null;
+  const lane = match[1]!.toLowerCase().charCodeAt(0) - 100; // 'd' -> 0
+  return lane >= 0 && lane < 32 ? lane : null;
+}
+
+function recoverCompactFormatCDBeat(
+  buf: MixBuffer,
+  pathStart: number,
+  gap: number,
+): number | null {
+  if (gap !== 10 || pathStart < 10) return null;
+  const beat = buf.readInt16LE(pathStart - 10);
+  return beat >= -64 && beat <= 4096 ? beat : null;
 }
 
 function findFormatCDNameField(
@@ -869,10 +898,27 @@ function parseFormatDTracks(buf: MixBuffer, startOffset: number): TrackPlacement
     if (!right) { offset++; continue; }
 
     const nameField = findFormatCDNameField(buf, Math.max(startOffset, offset - 96), left.pathStart);
+    if (!nameField) {
+      offset = right.nextOffset;
+      continue;
+    }
+
+    // Strict compact-D recovery: only populate beat/lane when every guard
+    // passes; otherwise keep explicit null fallbacks.
+    let beat: number | null = null;
+    let channel: number | null = null;
+    if (nameField.gap === 10) {
+      const recoveredBeat = recoverCompactFormatCDBeat(buf, left.pathStart, nameField.gap);
+      const recoveredLane = laneIndexFromTempPath(left.path);
+      if (recoveredBeat !== null && recoveredLane !== null) {
+        beat = recoveredBeat;
+        channel = recoveredLane;
+      }
+    }
 
     tracks.push({
-      beat: null,
-      channel: null,
+      beat,
+      channel,
       sampleRef: {
         rawId: 0,
         internalName: null,
@@ -891,7 +937,7 @@ function parseFormatDTracks(buf: MixBuffer, startOffset: number): TrackPlacement
 function readLengthPrefixedTempPath(
   buf: MixBuffer,
   lengthOffset: number,
-): { pathStart: number; nextOffset: number } | null {
+): { pathStart: number; nextOffset: number; path: string } | null {
   if (lengthOffset + 4 > buf.length) return null;
 
   const pathLength = buf.readUInt16LE(lengthOffset);
@@ -904,7 +950,7 @@ function readLengthPrefixedTempPath(
   const path = buf.toString("latin1", pathStart, pathEnd);
   if (!/^[A-Z]:\\.*pxd32p[a-z]\.tmp[.,]?$/i.test(path)) return null;
 
-  return { pathStart, nextOffset: pathEnd };
+  return { pathStart, nextOffset: pathEnd, path };
 }
 
 // ── Helpers ──────────────────────────────────────────────────

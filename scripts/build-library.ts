@@ -503,15 +503,15 @@ function main(): void {
       continue;
     }
 
+    const parserSourceRoot = dirname(parserSources[0]);
     console.log(`\n── Steps 1+2: ${spec.label} ──`);
     if (parserSources.length > 1) {
-      console.log(`  > Found ${parserSources.length} packed archives in ${parserSource}`);
+      console.log(`  > Found ${parserSources.length} packed archives in ${parserSourceRoot}`);
     }
     const productOutputRel = join("output", spec.id);
     const productOutputAbs = join(ROOT, productOutputRel);
     const metadataPath = join(productOutputAbs, "metadata.json");
     const mergedSamples: MetadataSample[] = [];
-    const parserSourceRoot = dirname(parserSources[0]);
 
     for (const sourceCandidate of parserSources) {
       run("scripts/pxd-parser.ts", [sourceCandidate, "--output", productOutputRel]);

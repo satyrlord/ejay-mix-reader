@@ -12,6 +12,8 @@
     "mix:extract-embedded": "tsx scripts/extract-embedded-mix-audio.ts",
     "mix:meta": "tsx scripts/extract-mix-metadata.ts",
     "mix:dump-cd": "tsx scripts/mix-format-cd-records.ts",
+    "mix:diff-cd": "tsx scripts/mix-format-cd-diff.ts",
+    "mix:audit-cd": "tsx scripts/mix-format-cd-audit.ts",
     "samples:missing": "tsx scripts/gen-missing-beats-report.ts",
     "samples:recover": "tsx scripts/recover-missing-samples.ts",
     "samples:update": "tsx scripts/recover-missing-samples.ts",
