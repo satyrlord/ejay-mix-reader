@@ -667,7 +667,8 @@ function extractTickerText(buf: MixBuffer, searchFrom: number): string[] {
 
 interface FormatCTrackRecord {
   displayName: string | null;
-  unresolvedLaneCode: number | null;
+  beat: number | null;
+  channel: number | null;
   dataLength: number | null;
 }
 
@@ -730,14 +731,14 @@ function parseFormatCTracks(buf: MixBuffer, startOffset: number): TrackPlacement
     if (!record) continue;
 
     tracks.push({
-      beat: null,
-      channel: null,
+      beat: record.beat,
+      channel: record.channel,
       sampleRef: {
-        rawId: record.unresolvedLaneCode ?? 0,
+        rawId: record.channel ?? 0,
         internalName: null,
-        displayName: record.displayName ?? null,
+        displayName: record.displayName,
         resolvedPath: null,
-        dataLength: record.dataLength ?? null,
+        dataLength: record.dataLength,
       },
     });
   }
@@ -750,29 +751,52 @@ function parseFormatCTrackRecord(
   lowerBound: number,
   pathStart: number,
 ): FormatCTrackRecord | null {
+  if (pathStart > buf.length) return null;
+
   const nameField = findFormatCDNameField(buf, lowerBound, pathStart);
   if (!nameField) return null;
 
-  const nameEnd = nameField.offset + 2 + nameField.name.length;
-  if (nameEnd + 10 > pathStart || pathStart > buf.length) return null;
+  // The big format (gap===40) has beat/channel/dataLength at fixed offsets relative to pathStart.
+  // Layout: [...18-byte state][dataLen:4][zeitpos:4][pad:1][channel:1][8-byte state][mystery:2][pathLen:2][path]
+  // The compact format (gap 8-12) has no such fields.
+  let beat: number | null = null;
+  let channel: number | null = null;
+  let dataLength: number | null = null;
+  if (nameField.gap === 40 && pathStart >= 22) {
+    beat = buf.readUInt32LE(pathStart - 18);   // zeitpos
+    channel = buf.readUInt8(pathStart - 13);   // Spur
+    dataLength = buf.readUInt32LE(pathStart - 22);
+  }
 
-  const laneCodeOffset = nameEnd;
-  const unknown32Offset = laneCodeOffset + 2;
-  const dataLengthOffset = unknown32Offset + 4;
-  if (dataLengthOffset + 4 > pathStart) return null;
-
-  return {
-    displayName: nameField.name,
-    unresolvedLaneCode: buf.readInt16LE(laneCodeOffset),
-    dataLength: buf.readUInt32LE(dataLengthOffset),
-  };
+  return { displayName: nameField.name, beat, channel, dataLength };
 }
 
 function findFormatCDNameField(
   buf: MixBuffer,
   lowerBound: number,
   pathStart: number,
-): { offset: number; name: string } | null {
+): { offset: number; name: string; gap: number } | null {
+  // ── Big format (gap === 40) ───────────────────────────────────────────────
+  // nameLen includes a trailing \0\x01 marker (2 bytes), so effective name =
+  // nameLen − 2 printable chars.  Confirmed for Dance eJay 3 format-C files
+  // where the 40-byte block contains: 18-byte state, dataLen, zeitpos, pad,
+  // channel, 8-byte state, mystery word, pathLen.
+  const nameEnd40 = pathStart - 40;
+  if (nameEnd40 >= lowerBound) {
+    for (let nameLen = 2; nameLen <= 54; nameLen++) {
+      const offset = nameEnd40 - nameLen - 2;
+      if (offset < lowerBound) break;
+      if (offset + 2 > buf.length) continue;
+      if (buf.readUInt16LE(offset) !== nameLen) continue;
+      // Strip \0\x01 trailer before validation
+      const name = buf.toString("latin1", offset + 2, nameEnd40 - 2);
+      if (!/^[A-Za-z0-9_ .()-]*$/.test(name)) continue;
+      return { offset, name, gap: 40 };
+    }
+  }
+
+  // ── Compact format (gap 8–12) ─────────────────────────────────────────────
+  // nameLen is the exact printable-char count (no \0\x01 trailer).
   const minOffset = Math.max(lowerBound, pathStart - 64);
   for (let offset = pathStart - 2; offset >= minOffset; offset--) {
     if (offset + 2 > buf.length) continue;
@@ -787,10 +811,11 @@ function findFormatCDNameField(
     if (gap < 8 || gap > 12) continue;
 
     const name = buf.toString("latin1", nameStart, nameEnd);
-    if (!/^[A-Za-z0-9_ -]+$/.test(name)) continue;
+    if (!/^[A-Za-z0-9_ .()-]*$/.test(name)) continue;
 
-    return { offset, name };
+    return { offset, name, gap };
   }
+
   return null;
 }
 

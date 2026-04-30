@@ -3,7 +3,7 @@ import { resolve } from "path";
 
 import { describe, expect, it } from "vitest";
 
-import { buildIndex, ARCHIVE_MIX_DIRS, collectProductMixes } from "../../scripts/build-index.js";
+import { buildIndex, ARCHIVE_MIX_DIRS, collectProductMixes, resolveProductMixDir } from "../../scripts/build-index.js";
 import { parseMixBrowser } from "../mix-parser.js";
 import { buildMixPlaybackPlan } from "../mix-player.js";
 
@@ -42,8 +42,10 @@ function buildBrowserPlaybackParity(): ResolverParityBaseline {
     parseFailures: [],
   };
 
-  for (const [productId, layout] of Object.entries(ARCHIVE_MIX_DIRS)) {
+  for (const [productId] of Object.entries(ARCHIVE_MIX_DIRS)) {
     const mixes = collectProductMixes(productId, ARCHIVE);
+    const resolved = resolveProductMixDir(productId, ARCHIVE);
+    if (!resolved) continue;
     const summary: ProductParitySummary = {
       mixes: 0,
       tracks: 0,
@@ -54,7 +56,7 @@ function buildBrowserPlaybackParity(): ResolverParityBaseline {
     parity.perProduct[productId] = summary;
 
     for (const mix of mixes) {
-      const fullPath = resolve(ARCHIVE, layout.archiveDir, layout.mixSubdir, mix.filename);
+      const fullPath = resolve(resolved.mixDir, mix.filename);
       const ir = parseMixBrowser(readFileSync(fullPath), productId);
       if (!ir) {
         parity.parseFailures.push(`${productId}/${mix.filename}`);

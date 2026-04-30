@@ -48,7 +48,13 @@ describe("gen-missing-beats-report helpers", () => {
     expect(isUtilitySample({ filename: "mix.wav", source: "normal/sample" })).toBe(false);
 
     expect(productHintForPath("Dance_SuperPack/eJay SampleKit/DMKIT1/demo.mix")).toBe("Dance_SuperPack");
+    expect(productHintForPath("Dance eJay 1/MIX/start.mix")).toBe("Dance_eJay1");
+    expect(productHintForPath("Rave eJay/MIX/demo.mix")).toBe("Rave");
+    expect(productHintForPath("Techno eJay 2/MIX/demo.mix")).toBe("Techno_eJay");
+    expect(productHintForPath("Dance eJay 2 OLD/MIX/demo.mix")).toBe("Dance_eJay2");
+    expect(productHintForPath("Dance eJay 2 NEW/MIX/demo.mix")).toBe("Dance_eJay2");
     expect(productHintForPath("GenerationPack1/Rave/demo.mix")).toBe("GenerationPack1_Rave");
+    expect(productHintForPath("_user/Rave/demo.mix")).toBe("Rave");
     expect(productHintForPath("unknown/demo.mix")).toBeUndefined();
 
     expect(dedupKey("Rave", { filename: "x.wav", source: "Kick/One", internal_name: null, alias: null })).toBe(
@@ -197,6 +203,66 @@ describe("generateMissingBeatsReport", () => {
           filename: "R2BS306.wav",
           source: "rekit1/01/r2bs306.pxd",
           source_archive: "REKIT1",
+        }),
+      ]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("expands product-specific Gen1 catalog aliases for unresolved numeric refs", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "missing-beats-gen1-alias-"));
+    try {
+      const archiveDir = join(tmp, "archive");
+      mkdirSync(join(archiveDir, "HipHop eJay 1", "MIX"), { recursive: true });
+      writeFileSync(join(archiveDir, "HipHop eJay 1", "MIX", "demo.mix"), Buffer.from("hh1", "utf8"));
+
+      const metadataPath = join(tmp, "metadata.json");
+      writeFileSync(metadataPath, JSON.stringify({ samples: [] }), "utf8");
+
+      const result = generateMissingBeatsReport(
+        { archiveDir, metadataPath, outputRoot: join(tmp, "output") },
+        {
+          parseMixFn: (buf) => {
+            if (buf.toString("utf8") !== "hh1") return null;
+            return { product: "HipHop_eJay1" } as never;
+          },
+          buildResolverIndexFn: () => ({
+            gen1: new Map([
+              [
+                "GenerationPack1_HipHop",
+                {
+                  entries: Array.from({ length: 820 }, (_, id) => ({
+                    id,
+                    path: id === 819 ? "ac/h1rp022.pxd" : "",
+                    bank: id === 819 ? "AC" : null,
+                    file: id === 819 ? "H1RP022" : null,
+                    category: null,
+                    group: null,
+                    version: null,
+                  })),
+                },
+              ],
+            ]),
+          }) as never,
+          resolveMixFn: () => ({
+            total: 1,
+            resolved: 0,
+            unresolved: 1,
+            tracks: [
+              { sampleRef: { rawId: 819, internalName: null, displayName: null, resolvedPath: null } },
+            ],
+          }) as never,
+        },
+      );
+
+      expect(result.report.total_missing_beats).toBe(1);
+      expect(result.report.samples).toEqual([
+        expect.objectContaining({
+          product: "HipHop_eJay1",
+          filename: "H1RP022.wav",
+          source: "ac/h1rp022.pxd",
+          source_archive: "AC",
         }),
       ]);
     } finally {

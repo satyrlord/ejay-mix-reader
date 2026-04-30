@@ -10,12 +10,12 @@ export default defineConfig({
       provider: "v8",
       include: ["scripts/**/*.ts"],
       exclude: [
+        "scripts/**/*.d.ts",
         "scripts/__tests__/**",
         "scripts/test-coverage.ts",
-        // One-shot investigation scripts: not part of the production
-        // pipeline; documented in docs/mix-format-analysis.md.
-        "scripts/investigate-mix-followups.ts",
-        "scripts/probe-header-aux.ts",
+        // Reverse-engineering investigation utility (record dumper),
+        // intentionally outside the production runtime pipeline.
+        "scripts/mix-format-cd-records.ts",
         // Types-only file — no executable code to cover.
         "scripts/mix-types.ts",
       ],

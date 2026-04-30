@@ -111,8 +111,25 @@ export const GEN1_PRODUCT_LAYOUT: Record<
   ProductLayout
 > = {
   Dance_eJay1: {
-    max: "Dance_eJay1/dance/DMACHINE/MAX.TXT",
-    pxdtxt: "Dance_eJay1/dance/DMACHINE/PXD.TXT",
+    max: "Dance eJay 1/eJay/eJay/MAX",
+    pxddance: "Dance eJay 1/eJay/eJay/Pxddance",
+    kitCatalogs: [
+      {
+        path: "Dance eJay 1/eJay/eJay/kit1.txt",
+        offset: 3400,
+        pathPrefix: "dmkit1/",
+      },
+      {
+        path: "Dance eJay 1/eJay/eJay/kit2.txt",
+        offset: 3900,
+        pathPrefix: "dmkit2/",
+      },
+      {
+        path: "Dance eJay 1/eJay/eJay/kit3.txt",
+        offset: 4500,
+        pathPrefix: "dmkit3/",
+      },
+    ],
   },
   Dance_SuperPack: {
     max: "Dance_SuperPack/dance/EJAY/MAX",
@@ -128,7 +145,7 @@ export const GEN1_PRODUCT_LAYOUT: Record<
     ],
   },
   Rave: {
-    max: "Rave/RAVE/EJAY/MAX",
+    max: "Rave eJay/eJay/eJay/MAX",
   },
   GenerationPack1_Dance: {
     max: "GenerationPack1/Dance/dance/EJAY/MAX",
@@ -150,6 +167,9 @@ export const GEN1_PRODUCT_LAYOUT: Record<
   },
   GenerationPack1_HipHop: {
     max: "GenerationPack1/HipHop/HIPHOP/EJAY/MAX",
+  },
+  HipHop_eJay1: {
+    max: "HipHop eJay 1/HIPHOP/EJAY/MAX",
   },
 };
 
@@ -416,21 +436,81 @@ export function resolveProductPaths(
   pxdtxtPath: string | null;
   kitCatalogPaths: Array<{ path: string; offset: number; pathPrefix?: string }>;
 } {
+  const productRootAliases: Record<string, string[]> = {
+    Dance_eJay1: ["Dance eJay 1"],
+    Dance_SuperPack: ["Dance SuperPack"],
+    HipHop_eJay1: ["HipHop 1", "HipHop eJay 1"],
+    Rave: ["Rave eJay"],
+  };
+
+  function resolveArchivePathCandidates(relPath: string, aliases: string[] = []): string {
+    const normalized = relPath.replace(/\\/g, "/");
+    const slash = normalized.indexOf("/");
+    const remainder = slash >= 0 ? normalized.slice(slash + 1) : "";
+
+    const candidates = [
+      normalized,
+      ...aliases.map((aliasRoot) => (remainder ? `${aliasRoot}/${remainder}` : aliasRoot)),
+    ];
+
+    for (const candidate of candidates) {
+      const absPath = resolve(archiveRoot, candidate);
+      if (existsSync(absPath)) return absPath;
+    }
+
+    // Keep deterministic fallback for tests that assert canonical paths.
+    return resolve(archiveRoot, normalized);
+  }
+
   const layout = GEN1_PRODUCT_LAYOUT[product];
   if (!layout) {
     throw new Error(
       `Unknown Gen 1 product "${product}". Known: ${Object.keys(GEN1_PRODUCT_LAYOUT).join(", ")}`,
     );
   }
+  const aliases = productRootAliases[product] ?? [];
+  let maxPath = resolveArchivePathCandidates(layout.max, aliases);
+  let pxddancePath = layout.pxddance ? resolveArchivePathCandidates(layout.pxddance, aliases) : null;
+  let kitCatalogPaths = (layout.kitCatalogs ?? []).map((kit) => ({
+    path: resolveArchivePathCandidates(kit.path, aliases),
+    offset: kit.offset,
+    pathPrefix: kit.pathPrefix,
+  }));
+
+  // Dance eJay 1 appears in two archive layouts. Prefer the configured path,
+  // then fall back to the alternate subpath if needed.
+  if (product === "Dance_eJay1") {
+    if (!existsSync(maxPath)) {
+      const legacyMax = resolve(archiveRoot, "Dance eJay 1/dance/EJAY/MAX");
+      const modernMax = resolve(archiveRoot, "Dance eJay 1/eJay/eJay/MAX");
+      if (existsSync(legacyMax)) maxPath = legacyMax;
+      else if (existsSync(modernMax)) maxPath = modernMax;
+    }
+    if (layout.pxddance && pxddancePath && !existsSync(pxddancePath)) {
+      const legacyPxddance = resolve(archiveRoot, "Dance eJay 1/dance/EJAY/Pxddance");
+      const modernPxddance = resolve(archiveRoot, "Dance eJay 1/eJay/eJay/Pxddance");
+      if (existsSync(legacyPxddance)) pxddancePath = legacyPxddance;
+      else if (existsSync(modernPxddance)) pxddancePath = modernPxddance;
+    }
+    if (kitCatalogPaths.length > 0) {
+      kitCatalogPaths = kitCatalogPaths.map((kit) => {
+        if (existsSync(kit.path)) return kit;
+        const leaf = kit.path.replace(/\\/g, "/").split("/").pop();
+        if (!leaf) return kit;
+        const legacyKit = resolve(archiveRoot, `Dance eJay 1/dance/EJAY/${leaf}`);
+        if (existsSync(legacyKit)) return { ...kit, path: legacyKit };
+        const modernKit = resolve(archiveRoot, `Dance eJay 1/eJay/eJay/${leaf}`);
+        if (existsSync(modernKit)) return { ...kit, path: modernKit };
+        return kit;
+      });
+    }
+  }
+
   return {
-    maxPath: resolve(archiveRoot, layout.max),
-    pxddancePath: layout.pxddance ? resolve(archiveRoot, layout.pxddance) : null,
-    pxdtxtPath: layout.pxdtxt ? resolve(archiveRoot, layout.pxdtxt) : null,
-    kitCatalogPaths: (layout.kitCatalogs ?? []).map((kit) => ({
-      path: resolve(archiveRoot, kit.path),
-      offset: kit.offset,
-      pathPrefix: kit.pathPrefix,
-    })),
+    maxPath,
+    pxddancePath,
+    pxdtxtPath: layout.pxdtxt ? resolveArchivePathCandidates(layout.pxdtxt, aliases) : null,
+    kitCatalogPaths,
   };
 }
 

@@ -33,7 +33,7 @@ import {
   statSync,
   writeFileSync,
 } from "fs";
-import { basename, dirname, join, relative, resolve } from "path";
+import { basename, dirname, extname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
@@ -42,10 +42,12 @@ import {
   buildResolverIndex,
   resolveMix,
   canonicalizeProduct,
+  gen1CatalogCandidates,
   type NormalizedMetadata,
 } from "./mix-resolver.js";
 import type { Gen1CatalogEntry } from "./gen1-catalog.js";
 import { readWavInfo } from "./wav-decode.js";
+import { applyDpcm, decodePxdFile, SAMPLE_RATE } from "./pxd-parser.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -65,28 +67,52 @@ const OUTPUT_DIR = join(ROOT, "output");
 const PATH_PRODUCT_HINTS: Array<[string, string]> = [
   ["Dance_SuperPack/eJay SampleKit/DMKIT1/", "Dance_SuperPack"],
   ["Dance_SuperPack/eJay SampleKit/DMKIT2/", "Dance_SuperPack"],
+  ["Dance SuperPack/eJay SampleKit/DMKIT1/", "Dance_SuperPack"],
+  ["Dance SuperPack/eJay SampleKit/DMKIT2/", "Dance_SuperPack"],
   ["Dance_SuperPack/", "Dance_SuperPack"],
+  ["Dance SuperPack/", "Dance_SuperPack"],
   ["Dance_eJay1/", "Dance_eJay1"],
+  ["Dance eJay 1/", "Dance_eJay1"],
   ["Dance_eJay2/", "Dance_eJay2"],
+  ["Dance eJay 2/", "Dance_eJay2"],
   ["Dance_eJay3/", "Dance_eJay3"],
+  ["Dance eJay 3/", "Dance_eJay3"],
   ["Dance_eJay4/", "Dance_eJay4"],
+  ["Dance eJay 4/", "Dance_eJay4"],
+  ["HipHop 1/", "HipHop_eJay1"],
+  ["HipHop eJay 1/", "HipHop_eJay1"],
   ["HipHop 2/", "HipHop_eJay2"],
+  ["HipHop eJay 2/", "HipHop_eJay2"],
   ["HipHop 3/", "HipHop_eJay3"],
+  ["HipHop eJay 3/", "HipHop_eJay3"],
   ["HipHop 4/", "HipHop_eJay4"],
+  ["HipHop eJay 4/", "HipHop_eJay4"],
   ["House_eJay/", "House_eJay"],
+  ["House eJay/", "House_eJay"],
   ["Rave/", "Rave"],
+  ["Rave eJay/", "Rave"],
   ["Techno 3/", "Techno_eJay3"],
+  ["Techno eJay 3/", "Techno_eJay3"],
   ["TECHNO_EJAY/", "Techno_eJay"],
+  ["Techno eJay 2/", "Techno_eJay"],
+  ["Techno eJay/", "Techno_eJay"],
   ["Xtreme_eJay/", "Xtreme_eJay"],
+  ["Xtreme/", "Xtreme_eJay"],
   ["GenerationPack1/Dance/", "GenerationPack1_Dance"],
   ["GenerationPack1/HipHop/", "GenerationPack1_HipHop"],
   ["GenerationPack1/Rave/", "GenerationPack1_Rave"],
   ["_userdata/Dance and House/Dance2/", "Dance_eJay2"],
+  ["_user/Dance and House/Dance2/", "Dance_eJay2"],
   ["_userdata/Dance and House/Dance3/", "Dance_eJay3"],
+  ["_user/Dance and House/Dance3/", "Dance_eJay3"],
   ["_userdata/Dance and House/Dance4/", "Dance_eJay4"],
+  ["_user/Dance and House/Dance4/", "Dance_eJay4"],
   ["_userdata/Hip Hop/", "HipHop_eJay4"],
+  ["_user/Hip Hop/", "HipHop_eJay4"],
   ["_userdata/Rave/", "Rave"],
+  ["_user/Rave/", "Rave"],
   ["_userdata/Techno/", "Techno_eJay"],
+  ["_user/Techno/", "Techno_eJay"],
 ];
 
 /**
@@ -380,9 +406,13 @@ function gen1EntryForRef(
   gen1Catalogs?: Map<string, { entries: Gen1CatalogEntry[] }> | null,
 ): Gen1CatalogEntry | null {
   if (!gen1Catalogs || ref.rawId <= 0) return null;
-  const catalog = gen1Catalogs.get(product);
-  if (!catalog || ref.rawId >= catalog.entries.length) return null;
-  return catalog.entries[ref.rawId] ?? null;
+  for (const productId of gen1CatalogCandidates(product)) {
+    const catalog = gen1Catalogs.get(productId);
+    if (!catalog || ref.rawId >= catalog.entries.length) continue;
+    const entry = catalog.entries[ref.rawId] ?? null;
+    if (entry?.path) return entry;
+  }
+  return null;
 }
 
 /** Stable deduplication key for an unresolved ref. */
@@ -480,6 +510,171 @@ export function buildFileIndex(dir: string, index: Map<string, string>): void {
       }
     }
   }
+}
+
+interface ArchiveAudioIndex {
+  bySuffix: Map<string, string>;
+  byBasename: Map<string, string>;
+  filesIndexed: number;
+}
+
+function normalizeArchivePath(pathValue: string): string {
+  return pathValue
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "")
+    .toLowerCase();
+}
+
+function buildArchiveAudioIndex(archiveDir: string): ArchiveAudioIndex {
+  const bySuffix = new Map<string, string>();
+  const byBasename = new Map<string, string>();
+  let filesIndexed = 0;
+
+  const walk = (dir: string): void => {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const full = join(dir, entry);
+      let st;
+      try {
+        st = statSync(full);
+      } catch {
+        continue;
+      }
+
+      if (st.isDirectory()) {
+        walk(full);
+        continue;
+      }
+
+      if (!st.isFile() || !/\.(pxd|wav)$/i.test(entry)) {
+        continue;
+      }
+
+      const rel = normalizeArchivePath(relative(archiveDir, full));
+      if (!rel) continue;
+
+      const parts = rel.split("/").filter(Boolean);
+      for (let i = 0; i < parts.length; i++) {
+        const suffix = parts.slice(i).join("/");
+        if (!bySuffix.has(suffix)) {
+          bySuffix.set(suffix, full);
+        }
+      }
+
+      const base = parts[parts.length - 1];
+      if (base && !byBasename.has(base)) {
+        byBasename.set(base, full);
+      }
+
+      filesIndexed++;
+    }
+  };
+
+  if (existsSync(archiveDir)) {
+    walk(archiveDir);
+  }
+
+  return { bySuffix, byBasename, filesIndexed };
+}
+
+function resolveArchiveSourcePath(entry: ReportEntry, index: ArchiveAudioIndex): string | null {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const add = (value: string | null | undefined): void => {
+    if (!value) return;
+    const normalized = normalizeArchivePath(value.trim());
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    candidates.push(normalized);
+  };
+
+  add(entry.source);
+
+  const sourceExt = extname(entry.source).toLowerCase();
+  if (!sourceExt) {
+    add(`${entry.source}.pxd`);
+    add(`${entry.source}.wav`);
+  }
+
+  add(basename(entry.source));
+  add(basename(entry.filename));
+
+  for (const candidate of candidates) {
+    const bySuffix = index.bySuffix.get(candidate);
+    if (bySuffix) return bySuffix;
+
+    const byBasename = index.byBasename.get(basename(candidate));
+    if (byBasename) return byBasename;
+  }
+
+  return null;
+}
+
+function buildWavBuffer(
+  pcmData: Buffer,
+  sampleRate = SAMPLE_RATE,
+  numChannels = 1,
+  sampleWidth = 2,
+): Buffer {
+  const dataSize = pcmData.length;
+  const byteRate = sampleRate * numChannels * sampleWidth;
+  const blockAlign = numChannels * sampleWidth;
+  const bitsPerSample = sampleWidth * 8;
+
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8, "ascii");
+  header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, pcmData]);
+}
+
+function recoverFromArchiveSource(
+  entry: ReportEntry,
+  index: ArchiveAudioIndex,
+  warn: (message: string) => void,
+): { sourcePath: string; wavData: Buffer } | null {
+  const sourcePath = resolveArchiveSourcePath(entry, index);
+  if (!sourcePath) return null;
+
+  let srcData: Buffer;
+  try {
+    srcData = readFileSync(sourcePath);
+  } catch (err) {
+    warn(`  WARN: Could not read archive source ${sourcePath}: ${(err as Error).message}`);
+    return null;
+  }
+
+  if (/\.wav$/i.test(sourcePath) || srcData.subarray(0, 4).toString("ascii") === "RIFF") {
+    return { sourcePath, wavData: srcData };
+  }
+
+  const decoded = decodePxdFile(srcData);
+  if (!decoded) return null;
+
+  const pcm16 = applyDpcm(decoded.pcm);
+  return {
+    sourcePath,
+    wavData: buildWavBuffer(pcm16, SAMPLE_RATE, 1, 2),
+  };
 }
 
 /** Infer the output category folder name for a report entry. */
@@ -795,6 +990,10 @@ export function runRecovery(
     log(`  ${added} WAV files indexed (total: ${externalIndex.size})`);
   }
 
+  log("Scanning archive sources (.pxd/.wav) ...");
+  const archiveAudioIndex = buildArchiveAudioIndex(archiveDir);
+  log(`  ${archiveAudioIndex.filesIndexed} source files indexed in archive/`);
+
   let alreadyKnown = 0;
   let found = 0;
   let notFound = 0;
@@ -812,9 +1011,16 @@ export function runRecovery(
     }
 
     const lookupKeys = buildLookupKeys(entry, outName);
-    const sourcePath =
+    let sourcePath =
       findIndexedFile(outputIndex, lookupKeys) ??
       findIndexedFile(externalIndex, lookupKeys);
+
+    const archiveFallback = !sourcePath
+      ? recoverFromArchiveSource(entry, archiveAudioIndex, warn)
+      : null;
+    if (!sourcePath && archiveFallback) {
+      sourcePath = archiveFallback.sourcePath;
+    }
 
     if (!sourcePath) {
       notFound++;
@@ -835,7 +1041,7 @@ export function runRecovery(
 
     let wavInfo = null;
     try {
-      const buf = readFileSync(sourcePath);
+      const buf = archiveFallback?.wavData ?? readFileSync(sourcePath);
       wavInfo = readWavInfoFn(buf);
     } catch (e) {
       warn(`  WARN: Could not read WAV header for ${sourcePath}: ${(e as Error).message}`);
@@ -876,13 +1082,21 @@ export function runRecovery(
     if (!dryRun) {
       if (needsCopy) {
         if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
-        copyFileSync(sourcePath, destPath);
+        if (archiveFallback) {
+          writeFileSync(destPath, archiveFallback.wavData);
+        } else {
+          copyFileSync(sourcePath, destPath);
+        }
         copied++;
       }
       newEntries.push(newEntry);
     } else {
       if (needsCopy) {
-        log(`  [DRY RUN] Would copy: ${sourcePath}`);
+        if (archiveFallback) {
+          log(`  [DRY RUN] Would decode/copy: ${sourcePath}`);
+        } else {
+          log(`  [DRY RUN] Would copy: ${sourcePath}`);
+        }
         log(`             → ${destPath}`);
         copied++;
       } else {

@@ -600,6 +600,46 @@ function summariseChannels(catalog: CatalogEntry[]): number {
   return catalog.reduce((maxChannels, entry) => Math.max(maxChannels, entry.channels ?? 1), 1);
 }
 
+/**
+ * Wrapper directory names frequently found above real bank folders.
+ * When extraction starts at a broad product root, these are stripped from the
+ * front of `source` paths so metadata stays consistent with catalog paths.
+ */
+const SOURCE_WRAPPER_DIRS = new Set<string>([
+  "dance",
+  "rave",
+  "hiphop",
+  "pxd",
+  "ejay",
+]);
+
+function normalizeSourcePath(relPath: string): string {
+  const parts = relPath.replace(/\\/g, "/").split("/").filter(Boolean);
+  while (parts.length > 1 && SOURCE_WRAPPER_DIRS.has(parts[0].toLowerCase())) {
+    parts.shift();
+  }
+  return parts.join("/");
+}
+
+/**
+ * Infer the logical bank/group from a normalized source path.
+ *
+ * Examples:
+ *   - "AA/1da006.pxd"               -> "AA"
+ *   - "rekit1/15/r2sr512.pxd"       -> "rekit1"
+ *   - "Special/special_loop_01.wav" -> "Special"
+ */
+function inferBank(sourcePath: string): string {
+  const parts = sourcePath.split("/").filter(Boolean);
+  if (parts.length <= 1) return "";
+
+  const dirs = parts.slice(0, -1);
+  for (const dir of dirs) {
+    if (!/^\d+$/.test(dir)) return dir;
+  }
+  return dirs[0] ?? "";
+}
+
 /** Recursively glob for files matching a pattern (case-insensitive). */
 function globFiles(dir: string, ext: string): string[] {
   const results: string[] = [];
@@ -662,9 +702,8 @@ export function extractIndividualPxds(
 
   for (const pxdPath of uniqueFiles) {
     const data = readFileSync(pxdPath);
-    const relPath = relative(source, pxdPath).replace(/\\/g, "/");
-    const parts = relPath.split("/");
-    const bank = parts.length > 1 ? parts[0] : "";
+    const relPath = normalizeSourcePath(relative(source, pxdPath));
+    const bank = inferBank(relPath);
     const stem = basename(pxdPath, extname(pxdPath));
 
     // Check for plain WAV

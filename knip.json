@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/knip@6.7.0/schema.json",
+  "include": [
+    "files",
+    "dependencies",
+    "unlisted",
+    "binaries",
+    "unresolved"
+  ],
+  "ignoreFiles": [
+    "src/env.d.ts"
+  ],
+  "ignoreIssues": {
+    "tests/browser.spec.ts": [
+      "unresolved"
+    ],
+    "tests/browser-coverage.spec.ts": [
+      "unresolved"
+    ]
+  },
+  "typescript": true,
+  "vitest": true,
+  "playwright": true
+}

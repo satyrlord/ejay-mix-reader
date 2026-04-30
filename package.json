@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "mix:extract-embedded": "tsx scripts/extract-embedded-mix-audio.ts",
     "mix:meta": "tsx scripts/extract-mix-metadata.ts",
+    "mix:dump-cd": "tsx scripts/mix-format-cd-records.ts",
     "samples:missing": "tsx scripts/gen-missing-beats-report.ts",
     "samples:recover": "tsx scripts/recover-missing-samples.ts",
     "samples:update": "tsx scripts/recover-missing-samples.ts",

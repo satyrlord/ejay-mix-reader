@@ -33,6 +33,10 @@ applyGlobalUiTimingConstants();
 const transportBuildLabelAudioSources = new Set<string>();
 let transportBuildLabelRevealTimeoutId: number | null = null;
 
+const MIX_SAMPLE_LOADING_OVERLAY_ID = "mix-sample-loading-overlay";
+const MIX_SAMPLE_LOADING_TITLE_SELECTOR = ".mix-loading-title";
+const MIX_SAMPLE_LOADING_DETAIL_SELECTOR = ".mix-loading-detail";
+
 function getTransportBuildLabel(): HTMLElement | null {
   return document.querySelector<HTMLElement>(".transport-build-label");
 }
@@ -148,6 +152,68 @@ export function showErrorToast(message: string): void {
   toast.textContent = message;
   document.body.appendChild(toast);
   window.setTimeout(() => toast.remove(), 3000);
+}
+
+export interface MixSampleLoadingOverlayState {
+  isVisible: boolean;
+  mixName?: string;
+  loadedCount?: number;
+  totalCount?: number;
+}
+
+function ensureMixSampleLoadingOverlay(): HTMLElement {
+  const existing = document.getElementById(MIX_SAMPLE_LOADING_OVERLAY_ID);
+  if (existing) return existing;
+
+  const overlay = document.createElement("div");
+  overlay.id = MIX_SAMPLE_LOADING_OVERLAY_ID;
+  overlay.className = "mix-loading-overlay";
+  overlay.setAttribute("aria-hidden", "true");
+  overlay.innerHTML = `
+    <div class="mix-loading-card" role="status" aria-live="polite" aria-atomic="true">
+      <span class="mix-loading-spinner" aria-hidden="true"></span>
+      <p class="mix-loading-title">Loading mix samples</p>
+      <p class="mix-loading-detail">Preparing audio cache...</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function mixLoadingTitle(mixName: string | undefined): string {
+  const name = mixName?.trim();
+  if (!name) return "Loading mix samples";
+  return `Loading ${name.replace(/\.mix$/i, "")}`;
+}
+
+function mixLoadingDetail(loadedCount: number, totalCount: number): string {
+  if (totalCount <= 0) {
+    return "Preparing audio cache...";
+  }
+  const clampedLoaded = Math.max(0, Math.min(totalCount, loadedCount));
+  if (clampedLoaded >= totalCount) {
+    return `Finalizing timeline (${totalCount}/${totalCount})`;
+  }
+  return `Loading samples ${clampedLoaded}/${totalCount}`;
+}
+
+export function setMixSampleLoadingOverlay(state: MixSampleLoadingOverlayState): void {
+  const overlay = ensureMixSampleLoadingOverlay();
+  const title = overlay.querySelector<HTMLElement>(MIX_SAMPLE_LOADING_TITLE_SELECTOR);
+  const detail = overlay.querySelector<HTMLElement>(MIX_SAMPLE_LOADING_DETAIL_SELECTOR);
+  const loadedCount = state.loadedCount ?? 0;
+  const totalCount = state.totalCount ?? 0;
+
+  if (title) {
+    title.textContent = mixLoadingTitle(state.mixName);
+  }
+  if (detail) {
+    detail.textContent = mixLoadingDetail(loadedCount, totalCount);
+  }
+
+  overlay.classList.toggle("is-visible", state.isVisible);
+  overlay.setAttribute("aria-hidden", state.isVisible ? "false" : "true");
+  document.body.classList.toggle("mix-loading-active", state.isVisible);
 }
 
 /**

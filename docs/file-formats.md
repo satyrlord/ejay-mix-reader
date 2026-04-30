@@ -83,6 +83,15 @@ tsx scripts/pxd-parser.ts path/to/file.pxd --output output/test
   `bpm` and recomputes `beats`.
 - Gen 1 Rave eJay uses an implicit BPM of 180, not 140. This affects beat counts, one-shot detection, and any downstream
   analysis that derives timing from `duration_sec`.
+- Techno eJay (Dance eJay 2: Techno Edition) uses an implicit/default BPM of
+  140. Verification evidence:
+  - `archive/TECHNO_EJAY/EJAY/EJAY/METRO.PXD` is a RIFF/WAV click file with
+    75,600 samples at 44,100 Hz (1.7142857 s), which is exactly one 4-beat bar
+    at 140 BPM.
+  - Consolidated sample metadata (`output/metadata.json`) contains only
+    `bpm: 140` for `product: "Techno_eJay"`.
+- `bpmAdjusted` values in `.mix` metadata (for example 134/135) are user tempo
+  adjustments, not the product's default sample-library BPM.
 - In the normalized metadata, `beats = 0` is a deliberate one-shot sentinel.
   Enrichment should preserve that value instead of recomputing it to a
   non-zero loop length.

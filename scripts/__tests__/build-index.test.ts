@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-import { buildIndex, buildMixLibrary, buildSampleIndex, buildUserdataMixLibrary, collectProductMixes, countWavFiles, deriveDisplayName, findMixSubdir, scanMixDir, userdataGroupLabel } from "../build-index.js";
+import { buildIndex, buildMixLibrary, buildSampleIndex, buildUserdataMixLibrary, collectProductMixes, countWavFiles, deriveDisplayName, findMixSubdir, resolveProductArchivePath, resolveProductMixDir, scanMixDir, userdataGroupLabel } from "../build-index.js";
 
 describe("countWavFiles", () => {
   it("counts nested wav files recursively", () => {
@@ -394,6 +394,22 @@ describe("collectProductMixes", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("accepts recreated archive folder aliases", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-coll-alias-"));
+    try {
+      mkdirSync(join(root, "Dance eJay 2", "MIX"), { recursive: true });
+      writeFileSync(join(root, "Dance eJay 2", "MIX", "START.MIX"), Buffer.from("#SKKENNUNG#:abc"));
+
+      const entries = collectProductMixes("Dance_eJay2", root);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.filename).toBe("START.MIX");
+      expect(resolveProductArchivePath("Dance_eJay2", root)).toBe(join(root, "Dance eJay 2"));
+      expect(resolveProductMixDir("Dance_eJay2", root)?.mixDir).toBe(join(root, "Dance eJay 2", "MIX"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("buildMixLibrary", () => {
@@ -693,6 +709,114 @@ describe("buildSampleIndex", () => {
     }
   });
 
+  it("loads Dance_eJay2 compound aliases from the D_EJAY2 INF path variant", () => {
+    const outputRoot = mkdtempSync(join(tmpdir(), "build-index-sample-dance2-inf-alias-output-"));
+    const archiveRoot = mkdtempSync(join(tmpdir(), "build-index-sample-dance2-inf-alias-archive-"));
+    try {
+      writeFileSync(join(outputRoot, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "kick.wav",
+            category: "Drum",
+            product: "Dance_eJay2",
+            internal_name: "D5MA066",
+          },
+        ],
+      }));
+
+      const infDir = join(archiveRoot, "Dance eJay 2", "D_EJAY2", "PXD");
+      const infPath = join(infDir, "DANCE20.INF");
+      mkdirSync(infDir, { recursive: true });
+      writeFileSync(
+        infPath,
+        [
+          "[SAMPLES]",
+          "1",
+          "0",
+          '"D5MA066"',
+          "0",
+          "128",
+          '"euro"',
+          '"kick5"',
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+        ].join("\r\n"),
+        "ascii",
+      );
+
+      const index = buildSampleIndex(outputRoot, archiveRoot);
+      expect(index.Dance_eJay2.byInternalName["eurokick5"]).toBe("Drum/kick.wav");
+    } finally {
+      rmSync(outputRoot, { recursive: true, force: true });
+      rmSync(archiveRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("populates byPath with alias / internal_name / stem fallbacks for label lookup", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-bypath-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          { filename: "kick.wav", alias: "Big Kick", category: "Drum", product: "P1" },
+          { filename: "snare.wav", internal_name: "D5SN001", category: "Drum", product: "P1" },
+          { filename: "pad.wav", category: "Pads", product: "P1" },
+          { filename: "oneshot", category: "Extra", product: "P1" },
+        ],
+      }));
+
+      const index = buildSampleIndex(root);
+      expect(index.P1.byPath?.["Drum/kick.wav"]).toBe("Big Kick");
+      expect(index.P1.byPath?.["Drum/snare.wav"]).toBe("D5SN001");
+      expect(index.P1.byPath?.["Pads/pad.wav"]).toBe("pad");
+      expect(index.P1.byPath?.["Extra/oneshot"]).toBe("oneshot");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("populates byPathBeats from valid sample beat metadata", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-bypath-beats-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          { filename: "kick.wav", category: "Drum", product: "P1", beats: 4 },
+          { filename: "snare.wav", category: "Drum", product: "P1", beats: 0 },
+          { filename: "hat.wav", category: "Drum", product: "P1", beats: -2 },
+        ],
+      }));
+
+      const index = buildSampleIndex(root);
+      expect(index.P1.byPathBeats?.["Drum/kick.wav"]).toBe(4);
+      expect(index.P1.byPathBeats?.["Drum/snare.wav"]).toBeUndefined();
+      expect(index.P1.byPathBeats?.["Drum/hat.wav"]).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not overwrite an existing byPath entry for the same relPath", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-bypath-nooverwrite-"));
+    try {
+      // Two samples with the same filename and category end up at the same
+      // relPath. The first one (alias present) must win; the second must not
+      // clobber the existing label.
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          { filename: "kick.wav", alias: "First Kick", category: "Drum", product: "P1" },
+          { filename: "kick.wav", internal_name: "Should Not Win", category: "Drum", product: "P1" },
+        ],
+      }));
+
+      const index = buildSampleIndex(root);
+      expect(index.P1.byPath?.["Drum/kick.wav"]).toBe("First Kick");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("indexes source basenames into byStem for catalog fallback matching", () => {
     const root = mkdtempSync(join(tmpdir(), "build-index-sample-source-stem-"));
     try {
@@ -729,12 +853,67 @@ describe("buildSampleIndex", () => {
       }));
 
       const archiveDir = join(root, "archive");
-      const danceDir = join(archiveDir, "Dance_eJay1", "dance", "DMACHINE");
+      const danceDir = join(archiveDir, "Dance eJay 1", "dance", "EJAY");
       mkdirSync(danceDir, { recursive: true });
-      writeFileSync(join(danceDir, "MAX.TXT"), ['""', '"AA\\KICK.PXD"', ""].join("\r\n"));
+      writeFileSync(join(danceDir, "MAX"), ['""', '"AA\\KICK.PXD"', ""].join("\r\n"));
 
       const index = buildSampleIndex(root, archiveDir);
       expect(index.Dance_eJay1.byGen1Id?.["1"]).toBe("Drum/kick.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers Rave PXD row-id mapping over conflicting MAX ids", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-rave-pxd-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "right.wav",
+            category: "Bass",
+            product: "Rave",
+            source: "BH\\R1BS071.PXD",
+          },
+          {
+            filename: "wrong.wav",
+            category: "Voice",
+            product: "Rave",
+            source: "AA\\WRONG.PXD",
+          },
+          {
+            filename: "low.wav",
+            category: "Loop",
+            product: "Rave",
+            source: "AA\\LOW.PXD",
+          },
+        ],
+      }));
+
+      const archiveDir = join(root, "archive");
+      const raveDir = join(archiveDir, "Rave eJay", "eJay", "eJay");
+      mkdirSync(raveDir, { recursive: true });
+
+      const maxLines = Array.from({ length: 802 }, () => '""');
+      maxLines[1] = '"AA\\LOW.PXD"';
+      // Intentionally conflicting MAX mapping: raw id 801 points at WRONG.PXD.
+      maxLines[801] = '"AA\\WRONG.PXD"';
+      writeFileSync(join(raveDir, "MAX"), maxLines.join("\r\n"));
+
+      const pxdLines: string[] = [];
+      for (let i = 0; i <= 70; i += 1) {
+        const path = i === 70
+          ? "BH\\R1BS071.PXD"
+          : `ZZ\\DUMMY${String(i).padStart(3, "0")}.PXD`;
+        pxdLines.push(`"${path}"`, '""', '"loop"', '"1"', '"Grp. 1"', '"Vers1"');
+      }
+      writeFileSync(join(raveDir, "PXD"), pxdLines.join("\r\n"));
+
+      const index = buildSampleIndex(root, archiveDir);
+      // 801 = 731 + 70; must resolve via PXD row mapping, not the MAX line.
+      expect(index.Rave.byGen1Id?.["801"]).toBe("Bass/right.wav");
+      // MAX fallback still applies to low ids not covered by the PXD row offset.
+      expect(index.Rave.byGen1Id?.["1"]).toBe("Loop/low.wav");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

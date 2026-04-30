@@ -336,7 +336,34 @@ describe("resolveProductPaths", () => {
       "GenerationPack1_Dance",
       "GenerationPack1_HipHop",
       "GenerationPack1_Rave",
+      "HipHop_eJay1",
       "Rave",
+    ]);
+  });
+
+  it("returns sample-kit overlays for Dance eJay 1", () => {
+    const resolved = resolveProductPaths("Dance_eJay1", "D:/archive");
+    expect(
+      resolved.kitCatalogPaths.map((kit) => ({
+        ...kit,
+        path: kit.path.replace(/\\/g, "/"),
+      })),
+    ).toEqual([
+      {
+        path: "D:/archive/Dance eJay 1/eJay/eJay/kit1.txt",
+        offset: 3400,
+        pathPrefix: "dmkit1/",
+      },
+      {
+        path: "D:/archive/Dance eJay 1/eJay/eJay/kit2.txt",
+        offset: 3900,
+        pathPrefix: "dmkit2/",
+      },
+      {
+        path: "D:/archive/Dance eJay 1/eJay/eJay/kit3.txt",
+        offset: 4500,
+        pathPrefix: "dmkit3/",
+      },
     ]);
   });
 
@@ -441,17 +468,22 @@ describe.skipIf(!hasArchive)("live archive spot-checks", () => {
   // GenerationPack1 was removed from the archive in April 2026; the
   // GP1-HipHop catalog spot-check has been removed along with the folder.
 
-  it("Dance eJay 1 MAX.TXT enriches categories from PXD.TXT", () => {
+  it("Dance eJay 1 includes SampleKit overlays and category enrichment", () => {
     const cat = runCli({
       product: "Dance_eJay1",
       archiveRoot: ARCHIVE,
       outputRoot: mkdtempSync(join(tmpdir(), "gen1-live-")),
     });
-    // MAX.TXT has 1352 IDs and PXD.TXT covers all nine tabs.
-    expect(cat.totalIds).toBe(1352);
-    expect(cat.entries[0].category).toBe("loop"); // IDs 0–125
-    expect(cat.entries[200].category).toBe("drum"); // IDs 126–239
-    expect(cat.entries[300].category).toBe("bass"); // IDs 240–354
-    expect(cat.entries[1300].category).toBe("xtra"); // IDs 1192–1351
+    // In the recreated archive, Dance eJay 1 resolves through eJay/eJay/MAX
+    // + Pxddance and splices local kit1/2/3 overlays at fixed offsets.
+    expect(cat.totalIds).toBe(5050);
+    expect(cat.populatedIds).toBe(4338);
+    expect(cat.entries[3400].path).toBe("dmkit1/01/rap301.pxd");
+    expect(cat.entries[3900].path).toBe("dmkit2/01/bass301.pxd");
+    expect(cat.entries[4500].path).toBe("dmkit3/01/d4sp001l.pxd");
+    expect(cat.entries[0].category).toBe("effect");
+    expect(cat.entries[200].category).toBe("effect");
+    expect(cat.entries[300].category).toBe("rap");
+    expect(cat.entries[1300].category).toBe("layer");
   });
 });

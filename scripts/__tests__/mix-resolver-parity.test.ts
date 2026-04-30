@@ -3,7 +3,7 @@ import { resolve } from "path";
 
 import { describe, expect, it } from "vitest";
 
-import { ARCHIVE_MIX_DIRS, collectProductMixes } from "../build-index.js";
+import { ARCHIVE_MIX_DIRS, collectProductMixes, resolveProductMixDir } from "../build-index.js";
 import { parseMix } from "../mix-parser.js";
 import { buildResolverIndex, resolveMix } from "../mix-resolver.js";
 import type { NormalizedMetadata } from "../mix-resolver.js";
@@ -57,8 +57,10 @@ function buildResolverParityBaseline(): ResolverParityBaseline {
     unresolvedReferencesTop25: [],
   };
 
-  for (const [productId, layout] of Object.entries(ARCHIVE_MIX_DIRS)) {
+  for (const [productId] of Object.entries(ARCHIVE_MIX_DIRS)) {
     const mixes = collectProductMixes(productId, ARCHIVE);
+    const resolved = resolveProductMixDir(productId, ARCHIVE);
+    if (!resolved) continue;
     const productSummary: ProductParitySummary = {
       mixes: 0,
       tracks: 0,
@@ -69,7 +71,7 @@ function buildResolverParityBaseline(): ResolverParityBaseline {
     baseline.perProduct[productId] = productSummary;
 
     for (const mix of mixes) {
-      const fullPath = resolve(ARCHIVE, layout.archiveDir, layout.mixSubdir, mix.filename);
+      const fullPath = resolve(resolved.mixDir, mix.filename);
       const ir = parseMix(readFileSync(fullPath), productId);
       if (!ir) {
         baseline.parseFailures.push(`${productId}/${mix.filename}`);

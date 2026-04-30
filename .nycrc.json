@@ -14,7 +14,8 @@
     "src/mix-file-browser.ts",
     "src/mix-player.ts",
     "src/mix-buffer.ts",
-    "src/mix-parser.ts"
+    "src/mix-parser.ts",
+    "src/product-mode.ts"
   ],
   "exclude": [
     "dist/**",

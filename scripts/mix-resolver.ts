@@ -34,7 +34,7 @@
  */
 
 import { existsSync, readFileSync } from "fs";
-import { posix, resolve } from "path";
+import { join, posix, resolve } from "path";
 
 import {
   buildGen1Catalog,
@@ -42,6 +42,7 @@ import {
   resolveProductPaths,
   type Gen1Catalog,
 } from "./gen1-catalog.js";
+import { parseInfCatalog } from "./pxd-parser.js";
 import type { CatalogEntry, MixIR, SampleRef, TrackPlacement } from "./mix-types.js";
 
 // ── Types ────────────────────────────────────────────────────
@@ -152,6 +153,7 @@ export const PRODUCT_FALLBACKS: Record<string, string[]> = {
   GenerationPack1_HipHop: ["HipHop_eJay2", "HipHop_eJay3"],
   HipHop_eJay1: ["GenerationPack1_HipHop", "HipHop_eJay2", "HipHop_eJay3"],
   HipHop_eJay3: ["Dance_eJay3"],
+  Techno_eJay: ["Dance_eJay2", "House_eJay"],
   Techno_eJay3: ["Dance_eJay3"],
 };
 
@@ -308,14 +310,103 @@ export function loadGen1Catalogs(archiveRoot: string): Map<string, Gen1Catalog> 
 }
 
 /**
- * Gen 1 catalog aliases: parser-emitted product labels that should share
- * a Gen 1 catalog with another product (e.g. HipHop_eJay1 uses the
- * GenerationPack1_HipHop MAX catalog because there is no standalone
- * HipHop 1 archive directory).
+ * Product-local Gen 1 catalog fallback candidates. Keys are the product being
+ * resolved; values are alternate products whose MAX catalog can be used when
+ * the key product has no local catalog or does not span the requested raw ID.
  */
-const GEN1_CATALOG_ALIASES: Record<string, string> = {
-  HipHop_eJay1: "GenerationPack1_HipHop",
+export const GEN1_CATALOG_ALIASES: Record<string, string[]> = {
+  Dance_eJay1: ["Dance_SuperPack", "GenerationPack1_Dance"],
+  Dance_SuperPack: ["Dance_eJay1", "GenerationPack1_Dance"],
+  GenerationPack1_Dance: ["Dance_eJay1", "Dance_SuperPack"],
+  HipHop_eJay1: ["GenerationPack1_HipHop"],
+  GenerationPack1_HipHop: ["HipHop_eJay1"],
+  Rave: ["GenerationPack1_Rave"],
+  GenerationPack1_Rave: ["Rave"],
 };
+
+/**
+ * Return product-specific Gen 1 catalog candidates in lookup order, starting
+ * with `productId` itself.
+ */
+export function gen1CatalogCandidates(productId: string): string[] {
+  const out = [productId];
+  for (const alias of GEN1_CATALOG_ALIASES[productId] ?? []) {
+    if (!out.includes(alias)) out.push(alias);
+  }
+  return out;
+}
+
+/**
+ * Gen 2 INF file paths (relative to archiveRoot) keyed by canonical product
+ * id. The INF catalog stores category+alias pairs that Format B mixes use as
+ * compound `internalName` values (e.g. "eurokick5" = category "euro" + alias
+ * "kick5").  These compound forms are not stored in `output/metadata.json` so
+ * they must be derived at index-build time.
+ */
+const GEN2_INF_PATHS: Record<string, string[]> = {
+  Dance_eJay2: [
+    "Dance_eJay2/D_ejay2/PXD/DANCE20.INF",
+    "Dance eJay 2/D_EJAY2/PXD/DANCE20.INF",
+    "Dance eJay 2/D2/PXD/dance20.inf",
+    "Dance eJay 2 OLD/D_EJAY2/PXD/DANCE20.INF",
+    "Dance eJay 2 NEW/D2/PXD/Dancesk4.inf",
+    "Dance eJay 2 NEW/D2/PXD/Dancesk5.inf",
+    "Dance eJay 2 NEW/D2/PXD/Dancesk6.inf",
+  ],
+  Techno_eJay: [
+    "TECHNO_EJAY/EJAY/PXD/RAVE20.INF",
+    "Techno eJay 2/eJay/PXD/rave20.inf",
+  ],
+  Dance_eJay3: ["Dance_eJay3/eJay/pxd/dance30.inf"],
+  Dance_eJay4: ["Dance_eJay4/ejay/PXD/DANCE40.inf"],
+  HipHop_eJay2: ["HipHop 2/eJay/pxd/HipHop20.inf"],
+  HipHop_eJay3: ["HipHop 3/eJay/pxd/hiphop30.inf"],
+  HipHop_eJay4: ["HipHop 4/eJay/pxd/HipHop40.inf"],
+  House_eJay: ["House_eJay/ejay/PXD/HOUSE10.inf"],
+  Techno_eJay3: ["Techno 3/eJay/pxd/rave30.inf"],
+  Xtreme_eJay: ["Xtreme_eJay/eJay/PXD/xejay10.inf"],
+};
+
+/**
+ * Enrich every Gen 2 product index with compound alias keys derived from the
+ * INF catalog.  A compound key is `(infEntry.category + infEntry.alias).toLowerCase()`,
+ * e.g. "eurokick5".  The mapping target is the `NormalizedSample` whose
+ * `internal_name` matches `infEntry.filename` (case-insensitive).
+ *
+ * This allows Format B mixes that carry compound names as their `internalName`
+ * to be resolved via `ProductIndex.byInternalName`.
+ */
+function enrichWithCompoundAliases(
+  products: Map<string, ProductIndex>,
+  archiveRoot: string,
+): void {
+  for (const [productId, relPaths] of Object.entries(GEN2_INF_PATHS)) {
+    const idx = products.get(productId);
+    if (!idx) continue;
+    for (const rel of relPaths) {
+      const absPath = join(archiveRoot, rel);
+      if (!existsSync(absPath)) continue;
+      let entries;
+      try {
+        entries = parseInfCatalog(absPath);
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const compound = (entry.category + entry.alias).toLowerCase().trim();
+        if (!compound || idx.byInternalName.has(compound)) continue;
+        const sample = idx.byInternalName.get(entry.filename.toLowerCase());
+        if (!sample) continue;
+        idx.byInternalName.set(compound, sample);
+        // Hyphen-stripped variant (e.g. "darabuka2" from "dara-buka2")
+        const stripped = compound.replace(/-/g, "");
+        if (stripped !== compound && !idx.byInternalName.has(stripped)) {
+          idx.byInternalName.set(stripped, sample);
+        }
+      }
+    }
+  }
+}
 
 /**
  * Build a fully-populated `ResolverIndex` from normalised metadata plus
@@ -327,15 +418,21 @@ export function buildResolverIndex(opts: ResolverOptions): ResolverIndex {
   const archiveRoot = resolve(opts.archiveRoot ?? "archive");
   const gen1 = opts.gen1Catalogs ?? loadGen1Catalogs(archiveRoot);
 
-  // Propagate Gen 1 catalog aliases so products without their own MAX
-  // file inherit a compatible catalog from a related product.
-  for (const [alias, canonical] of Object.entries(GEN1_CATALOG_ALIASES)) {
-    if (!gen1.has(alias) && gen1.has(canonical)) {
-      gen1.set(alias, gen1.get(canonical)!);
+  // Propagate Gen 1 catalog aliases so products without their own MAX file
+  // inherit the first compatible catalog from their fallback candidates.
+  for (const productId of Object.keys(GEN1_CATALOG_ALIASES)) {
+    if (gen1.has(productId)) continue;
+    for (const candidate of gen1CatalogCandidates(productId).slice(1)) {
+      const catalog = gen1.get(candidate);
+      if (catalog) {
+        gen1.set(productId, catalog);
+        break;
+      }
     }
   }
 
   const products = buildProductIndexes(opts.metadata);
+  enrichWithCompoundAliases(products, archiveRoot);
   return { outputRoot, archiveRoot, gen1, products };
 }
 

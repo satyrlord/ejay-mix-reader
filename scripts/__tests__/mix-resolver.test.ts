@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 
 import { describe, expect, it } from "vitest";
 
@@ -8,6 +8,7 @@ import {
   buildProductIndexes,
   buildResolverIndex,
   canonicalizeProduct,
+  gen1CatalogCandidates,
   loadGen1Catalogs,
   PRODUCT_ALIASES,
   PRODUCT_FALLBACKS,
@@ -71,6 +72,35 @@ function makeTrack(
       ...refOverrides,
     },
   };
+}
+
+interface InfSampleRow {
+  sampleId: number;
+  filename: string;
+  category: string;
+  alias: string;
+}
+
+function writeInfCatalog(infPath: string, rows: readonly InfSampleRow[]): void {
+  const lines: string[] = ["[SAMPLES]"];
+  for (const row of rows) {
+    lines.push(
+      String(row.sampleId),
+      "0",
+      `"${row.filename}"`,
+      "0",
+      "128",
+      `"${row.category}"`,
+      `"${row.alias}"`,
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+    );
+  }
+  mkdirSync(dirname(infPath), { recursive: true });
+  writeFileSync(infPath, lines.join("\r\n"), "ascii");
 }
 
 const DANCE1_SAMPLES: NormalizedSample[] = [
@@ -153,6 +183,19 @@ describe("canonicalizeProduct", () => {
     expect(PRODUCT_FALLBACKS.HipHop_eJay3).toContain("Dance_eJay3");
     expect(PRODUCT_FALLBACKS.Techno_eJay3).toContain("Dance_eJay3");
   });
+
+  it("exposes product-local Gen 1 catalog candidates", () => {
+    expect(gen1CatalogCandidates("Dance_eJay1")).toEqual([
+      "Dance_eJay1",
+      "Dance_SuperPack",
+      "GenerationPack1_Dance",
+    ]);
+    expect(gen1CatalogCandidates("HipHop_eJay1")).toEqual([
+      "HipHop_eJay1",
+      "GenerationPack1_HipHop",
+    ]);
+    expect(gen1CatalogCandidates("Unknown")).toEqual(["Unknown"]);
+  });
 });
 
 // ── productsFromCatalogs ─────────────────────────────────────
@@ -222,7 +265,7 @@ describe("loadGen1Catalogs", () => {
   it("reads MAX files from a real archive layout", () => {
     const root = mkdtempSync(join(tmpdir(), "ejay-resolver-"));
     try {
-      const maxDir = join(root, "Rave", "RAVE", "EJAY");
+      const maxDir = join(root, "Rave eJay", "eJay", "eJay");
       mkdirSync(maxDir, { recursive: true });
       writeFileSync(
         join(maxDir, "MAX"),
@@ -307,6 +350,168 @@ describe("buildResolverIndex", () => {
       gen1Catalogs: new Map([["GenerationPack1_HipHop", gp1Catalog]]),
     });
     expect(idx.gen1.get("HipHop_eJay1")).toBe(gp1Catalog);
+  });
+
+  it("propagates reverse HipHop aliases when only HipHop eJay 1 is loaded", () => {
+    const hiphop1Catalog = buildGen1Catalog({
+      maxText: '"ba\\h1bs005.pxd"\r\n',
+      product: "HipHop_eJay1",
+      maxPath: "/virtual/MAX",
+    });
+    const idx = buildResolverIndex({
+      metadata: { samples: [] },
+      gen1Catalogs: new Map([["HipHop_eJay1", hiphop1Catalog]]),
+    });
+    expect(idx.gen1.get("GenerationPack1_HipHop")).toBe(hiphop1Catalog);
+  });
+
+  it("adds compound and hyphen-stripped aliases from Gen 2 INF catalogs", () => {
+    const root = mkdtempSync(join(tmpdir(), "ejay-resolver-inf-stripped-"));
+    try {
+      writeInfCatalog(join(root, "Dance_eJay2", "D_ejay2", "PXD", "DANCE20.INF"), [
+        {
+          sampleId: 1,
+          filename: "D5MG539",
+          category: "dara-",
+          alias: "buka2",
+        },
+      ]);
+
+      const idx = buildResolverIndex({
+        metadata: {
+          samples: [
+            makeSample({
+              product: "Dance_eJay2",
+              filename: "D5MG539.wav",
+              category: "Drum",
+              subcategory: "perc",
+              internal_name: "D5MG539",
+            }),
+          ],
+        },
+        archiveRoot: root,
+        gen1Catalogs: new Map(),
+      });
+
+      const dance2 = idx.products.get("Dance_eJay2")!;
+      expect(dance2.byInternalName.get("dara-buka2")?.filename).toBe("D5MG539.wav");
+      expect(dance2.byInternalName.get("darabuka2")?.filename).toBe("D5MG539.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loads Dance eJay 2 compound aliases from the D_EJAY2 archive path variant", () => {
+    const root = mkdtempSync(join(tmpdir(), "ejay-resolver-dance2-inf-alias-"));
+    try {
+      writeInfCatalog(join(root, "Dance eJay 2", "D_EJAY2", "PXD", "DANCE20.INF"), [
+        {
+          sampleId: 1,
+          filename: "D5MA066",
+          category: "euro",
+          alias: "kick5",
+        },
+      ]);
+
+      const idx = buildResolverIndex({
+        metadata: {
+          samples: [
+            makeSample({
+              product: "Dance_eJay2",
+              filename: "D5MA066.wav",
+              category: "Drum",
+              subcategory: "kick",
+              internal_name: "D5MA066",
+            }),
+          ],
+        },
+        archiveRoot: root,
+        gen1Catalogs: new Map(),
+      });
+
+      const dance2 = idx.products.get("Dance_eJay2")!;
+      expect(dance2.byInternalName.get("eurokick5")?.filename).toBe("D5MA066.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves existing stripped-key mappings when adding compound aliases", () => {
+    const root = mkdtempSync(join(tmpdir(), "ejay-resolver-inf-collision-"));
+    try {
+      writeInfCatalog(join(root, "Dance_eJay2", "D_ejay2", "PXD", "DANCE20.INF"), [
+        {
+          sampleId: 1,
+          filename: "SRC01",
+          category: "dara-",
+          alias: "buka2",
+        },
+      ]);
+
+      const idx = buildResolverIndex({
+        metadata: {
+          samples: [
+            makeSample({
+              product: "Dance_eJay2",
+              filename: "TARGET.wav",
+              category: "Drum",
+              subcategory: "perc",
+              internal_name: "SRC01",
+            }),
+            makeSample({
+              product: "Dance_eJay2",
+              filename: "EXISTING.wav",
+              category: "Drum",
+              subcategory: "perc",
+              internal_name: "darabuka2",
+            }),
+          ],
+        },
+        archiveRoot: root,
+        gen1Catalogs: new Map(),
+      });
+
+      const dance2 = idx.products.get("Dance_eJay2")!;
+      expect(dance2.byInternalName.get("dara-buka2")?.filename).toBe("TARGET.wav");
+      expect(dance2.byInternalName.get("darabuka2")?.filename).toBe("EXISTING.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loads Techno eJay compound aliases from the recreated archive folder path", () => {
+    const root = mkdtempSync(join(tmpdir(), "ejay-resolver-techno-inf-alias-"));
+    try {
+      writeInfCatalog(join(root, "Techno eJay 2", "eJay", "PXD", "rave20.inf"), [
+        {
+          sampleId: 1,
+          filename: "R5MA030",
+          category: "euro",
+          alias: "kick5",
+        },
+      ]);
+
+      const idx = buildResolverIndex({
+        metadata: {
+          samples: [
+            makeSample({
+              product: "Techno_eJay",
+              filename: "R5MA030.wav",
+              category: "Drum",
+              subcategory: "kick",
+              internal_name: "R5MA030",
+            }),
+          ],
+        },
+        archiveRoot: root,
+        gen1Catalogs: new Map(),
+      });
+
+      const techno = idx.products.get("Techno_eJay")!;
+      expect(techno.byInternalName.get("eurokick5")?.filename).toBe("R5MA030.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

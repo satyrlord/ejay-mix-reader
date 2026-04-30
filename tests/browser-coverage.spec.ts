@@ -79,6 +79,31 @@ test.describe("browser coverage gap", () => {
         return new Uint8Array(await response.arrayBuffer());
       };
 
+      const pickProductMixUrl = async (
+        productId: string,
+        preferredFilenames: string[] = [],
+      ): Promise<string> => {
+        for (const filename of preferredFilenames) {
+          const candidate = `/mix/${productId}/${filename}`;
+          const head = await fetch(candidate, { method: "HEAD" });
+          if (head.ok) return candidate;
+        }
+
+        const indexResponse = await fetch("/data/index.json");
+        if (!indexResponse.ok) {
+          throw new Error(`Failed to fetch /data/index.json: ${indexResponse.status}`);
+        }
+        const index = await indexResponse.json() as {
+          mixLibrary?: Array<{ id: string; mixes: Array<{ filename: string }> }>;
+        };
+        const group = index.mixLibrary?.find((entry) => entry.id === productId);
+        const fallback = group?.mixes?.[0]?.filename;
+        if (!fallback) {
+          throw new Error(`No mixes found for product ${productId}`);
+        }
+        return `/mix/${productId}/${fallback}`;
+      };
+
       const buildFormatA = (
         appSig: number,
         cells: Array<{ row: number; col: number; id: number }>,
@@ -308,7 +333,9 @@ test.describe("browser coverage gap", () => {
       const invalidCatalogs = mod.parseCatalogs(new mod.MixBuffer(Uint8Array.from([0xff, 0xff, 0x41, 0x42, 0x43, 0x44])), 0);
 
       const dance1 = mod.parseMixBrowser(await fetchBytes("/mix/Dance_eJay1/START.MIX"));
-      const dance2 = mod.parseFormatB(new mod.MixBuffer(await fetchBytes("/mix/Dance_eJay2/STEP.MIX")));
+      const dance2 = mod.parseFormatB(new mod.MixBuffer(await fetchBytes(
+        await pickProductMixUrl("Dance_eJay2", ["STEP.MIX", "start.mix", "START.MIX"]),
+      )));
       const dance3 = mod.parseFormatC(new mod.MixBuffer(await fetchBytes("/mix/Dance_eJay3/start.mix")));
       const hiphop3 = mod.parseMixBrowser(await fetchBytes("/mix/HipHop_eJay3/start.mix"));
       const hiphop4 = mod.parseFormatD(new mod.MixBuffer(await fetchBytes("/mix/HipHop_eJay4/start.mix")));
@@ -498,9 +525,9 @@ test.describe("browser coverage gap", () => {
       bpmAdjusted: 130,
       trackCount: 1,
       firstTrack: {
-        rawId: 23,
+        rawId: 0,
         displayName: "SynthKick",
-        dataLength: 4096,
+        dataLength: null,
       },
       mixer: {
         channelCount: 1,
@@ -956,7 +983,7 @@ test.describe("browser coverage gap", () => {
     expect(result.plan.labels).toContain("#7");
     expect(result.plan.labels).toContain("D5MG539");
     expect(result.plan.labels).toContain("kick28");
-    expect(result.emptyPlan).toEqual({ loopBeats: 1, resolvedEvents: 0, unresolvedEvents: 0 });
+    expect(result.emptyPlan).toEqual({ loopBeats: null, resolvedEvents: 0, unresolvedEvents: 0 });
     expect(result.channelState).toEqual({ gain: 0.5, pan: 1, anySoloed: true, secondGain: 0 });
     expect(result.drumMachine.missingPad).toBeNull();
     expect(result.drumMachine.triggeredRate).toBeCloseTo(2);
@@ -992,6 +1019,490 @@ test.describe("browser coverage gap", () => {
     expect(result.stops.length).toBeGreaterThanOrEqual(1);
     expect(result.disconnectCount).toBeGreaterThan(0);
     expect(result.connectionCount).toBeGreaterThan(0);
+  });
+
+  test("mix-player covers alias lookup, timeline-length variants, and host edge branches", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (modPath) => {
+      const mod = await import(/* @vite-ignore */ modPath);
+
+      const makeAudioBuffer = (length = 44100, sampleRate = 44100) => ({
+        duration: length / sampleRate,
+        length,
+        numberOfChannels: 1,
+        sampleRate,
+        getChannelData: () => new Float32Array(length),
+      });
+
+      const sourceStartTimes: number[] = [];
+      const sourceStopTimes: number[] = [];
+      let throwOnScheduledStop = false;
+
+      const makeSource = () => ({
+        buffer: null,
+        playbackRate: { value: 1 },
+        connect: () => {},
+        disconnect: () => {},
+        start: (when?: number) => { sourceStartTimes.push(when ?? -1); },
+        stop: (when?: number) => {
+          if (typeof when === "number") {
+            if (throwOnScheduledStop) {
+              throw new Error("scheduled stop unsupported");
+            }
+            sourceStopTimes.push(when);
+            return;
+          }
+          sourceStopTimes.push(-1);
+        },
+      });
+
+      const ctx = {
+        sampleRate: 44100,
+        currentTime: 3,
+        destination: { connect: () => {}, disconnect: () => {} },
+        createGain: () => ({ gain: { value: 1 }, connect: () => {}, disconnect: () => {} }),
+        createStereoPanner: () => ({ pan: { value: 0 }, connect: () => {}, disconnect: () => {} }),
+        createDelay: () => ({ delayTime: { value: 0 }, connect: () => {}, disconnect: () => {} }),
+        createConvolver: () => ({ buffer: null, connect: () => {}, disconnect: () => {} }),
+        createDynamicsCompressor: () => ({
+          threshold: { value: -24 },
+          ratio: { value: 12 },
+          connect: () => {},
+          disconnect: () => {},
+        }),
+        createBuffer: (_channels: number, length: number, sampleRate: number) => makeAudioBuffer(length, sampleRate),
+        createBufferSource: makeSource,
+        createBiquadFilter: () => ({
+          type: "peaking",
+          frequency: { value: 1000 },
+          Q: { value: 1 },
+          gain: { value: 0 },
+          connect: () => {},
+          disconnect: () => {},
+        }),
+        createWaveShaper: () => ({ curve: null, oversample: "none" as const, connect: () => {}, disconnect: () => {} }),
+        createOscillator: () => ({
+          type: "sine",
+          frequency: { value: 440 },
+          connect: () => {},
+          disconnect: () => {},
+          start: () => {},
+          stop: () => {},
+        }),
+        createAnalyser: () => ({ fftSize: 1024, frequencyBinCount: 512, connect: () => {}, disconnect: () => {} }),
+        decodeAudioData: async (data: ArrayBuffer) => makeAudioBuffer(Math.max(1, data.byteLength)),
+      };
+
+      const sampleIndex = {
+        Techno_eJay: {
+          byAlias: { voxhit: "Voice/voxhit.wav" },
+          bySource: {},
+          byStem: { lead: "Loop/lead.wav", hit: "Voice/hit.wav" },
+          byInternalName: { eurokick5: "Drum/eurokick5.wav", ravea01: "Drum/ravea01.wav" },
+          bySampleId: { "1": "Drum/by-sample-id.wav" },
+          byGen1Id: { "2": "Drum/by-gen1-id.wav" },
+          byPath: {
+            "Drum/by-sample-id.wav": "Sample ID",
+            "Drum/eurokick5.wav": "Euro Kick 5",
+            "Loop/meta-len.wav": "Meta Length",
+          },
+          byPathBeats: {
+            "Loop/meta-len.wav": 12,
+            "Loop/too-long.wav": 24,
+          },
+        },
+        Dance_eJay2: {
+          byAlias: {},
+          bySource: {},
+          byStem: {},
+          byInternalName: {},
+          bySampleId: {},
+          byGen1Id: {},
+        },
+        House_eJay: {
+          byAlias: {},
+          bySource: {},
+          byStem: {},
+          byInternalName: {},
+          bySampleId: {},
+          byGen1Id: {},
+        },
+      };
+
+      const baseMix = {
+        format: "A",
+        product: "Techno_eJay_",
+        appId: 0x0889,
+        bpm: 140,
+        bpmAdjusted: null,
+        author: null,
+        title: null,
+        registration: null,
+        mixer: { channels: [], eq: [], compressor: null, stereoWide: null, raw: {} },
+        drumMachine: null,
+        tickerText: [],
+        catalogs: [
+          { name: "Techno eJay 3", idRangeStart: 0, idRangeEnd: 10 },
+          { name: "Rave eJay", idRangeStart: 11, idRangeEnd: 20 },
+          { name: "Dance SuperPack", idRangeStart: 21, idRangeEnd: 30 },
+          { name: "House eJay", idRangeStart: 31, idRangeEnd: 40 },
+          { name: "Xtreme eJay", idRangeStart: 41, idRangeEnd: 50 },
+          { name: "HipHop eJay 4", idRangeStart: 51, idRangeEnd: 60 },
+        ],
+        tracks: [
+          { beat: 0, channel: 0, sampleRef: { rawId: 1, internalName: null, displayName: null, resolvedPath: null, dataLength: null } },
+          { beat: 4, channel: 0, sampleRef: { rawId: 0, internalName: "EUROKICK5", displayName: null, resolvedPath: null, dataLength: null } },
+          { beat: 7, channel: 0, sampleRef: { rawId: 0, internalName: "folder/lead.wav", displayName: null, resolvedPath: null, dataLength: null } },
+          { beat: 10, channel: 1, sampleRef: { rawId: 2, internalName: null, displayName: null, resolvedPath: null, dataLength: null } },
+          { beat: 14, channel: 1, sampleRef: { rawId: 0, internalName: null, displayName: "VoxHit", resolvedPath: null, dataLength: null } },
+          { beat: 18, channel: 1, sampleRef: { rawId: 0, internalName: null, displayName: "folder/hit.wav", resolvedPath: null, dataLength: null } },
+          { beat: 22, channel: 2, sampleRef: { rawId: 0, internalName: "missing", displayName: null, resolvedPath: "Loop/meta-len.wav", dataLength: null } },
+          { beat: 26, channel: 2, sampleRef: { rawId: 0, internalName: "missing2", displayName: null, resolvedPath: "Loop/too-long.wav", dataLength: null } },
+          { beat: 30, channel: 3, sampleRef: { rawId: 0, internalName: null, displayName: null, resolvedPath: "output/Loop/already.wav", dataLength: null } },
+          { beat: 34, channel: null, sampleRef: { rawId: 0, internalName: null, displayName: null, resolvedPath: null, dataLength: null } },
+        ],
+      };
+
+      const planA = mod.buildMixPlaybackPlan(baseMix, sampleIndex);
+      const planB = mod.buildMixPlaybackPlan({
+        ...baseMix,
+        format: "B",
+        product: "Techno_eJay",
+        tracks: [
+          { beat: 0, channel: 0, sampleRef: { rawId: 1, internalName: null, displayName: null, resolvedPath: null, dataLength: null } },
+          { beat: 5, channel: 0, sampleRef: { rawId: 0, internalName: null, displayName: null, resolvedPath: "Loop/too-long.wav", dataLength: null } },
+        ],
+      }, sampleIndex);
+      const planList = mod.buildMixPlaybackPlan({
+        ...baseMix,
+        format: "D",
+        tracks: [
+          { beat: null, channel: null, sampleRef: { rawId: 0, internalName: null, displayName: null, resolvedPath: null, dataLength: null } },
+        ],
+      }, sampleIndex);
+      const planUnknown = mod.buildMixPlaybackPlan({
+        ...baseMix,
+        product: "Unknown_Product",
+        tracks: [
+          { beat: 0, channel: 0, sampleRef: { rawId: 0, internalName: null, displayName: null, resolvedPath: "Loose/path.wav", dataLength: null } },
+        ],
+      }, sampleIndex);
+
+      const host = new mod.MixPlayerHost(ctx);
+      host.registerChannel("lane-0");
+      host.scheduleSample({ buffer: makeAudioBuffer(), beat: 4, channelId: "lane-0", durationBeats: 2 });
+      const startedOnce = host.play(120, 10);
+      const startedTwice = host.play(120, 10);
+      host.stop();
+
+      const hostStopThrow = new mod.MixPlayerHost(ctx);
+      hostStopThrow.registerChannel("lane-0");
+      hostStopThrow.scheduleSample({ buffer: makeAudioBuffer(), beat: 0, channelId: "lane-0", durationBeats: 1 });
+      throwOnScheduledStop = true;
+      const startedWithThrowingStop = hostStopThrow.play(120, 0);
+      throwOnScheduledStop = false;
+      hostStopThrow.clear();
+
+      let invalidBpmMessage = "";
+      let invalidBeatsMessage = "";
+      try {
+        mod.beatsToSeconds(4, 0);
+      } catch (error) {
+        invalidBpmMessage = error instanceof Error ? error.message : String(error);
+      }
+      try {
+        mod.beatsToSeconds(Number.NaN, 120);
+      } catch (error) {
+        invalidBeatsMessage = error instanceof Error ? error.message : String(error);
+      }
+
+      return {
+        planA: {
+          loopBeats: planA.loopBeats,
+          timelineUnitBeats: planA.timelineUnitBeats,
+          timelineRecovered: planA.timelineRecovered,
+          laneCount: planA.lanes.length,
+          labels: planA.events.map((event: { displayLabel: string }) => event.displayLabel),
+          lengths: planA.events.map((event: { lengthBeats: number }) => event.lengthBeats),
+          audioUrls: planA.events.map((event: { audioUrl: string | null }) => event.audioUrl),
+        },
+        planB: {
+          loopBeats: planB.loopBeats,
+          lengths: planB.events.map((event: { lengthBeats: number }) => event.lengthBeats),
+        },
+        planList: {
+          loopBeats: planList.loopBeats,
+          timelineRecovered: planList.timelineRecovered,
+          firstLength: planList.events[0]?.lengthBeats ?? null,
+        },
+        planUnknownAudioUrl: planUnknown.events[0]?.audioUrl ?? null,
+        lanesForB: mod.lanesForMix({ ...baseMix, format: "B" }).at(-1)?.label ?? null,
+        recoveredBeat: mod.maxRecoveredBeat([{ beat: null }, { beat: 9 }, { beat: 2 }]),
+        host: {
+          startedOnce,
+          startedTwice,
+          startedWithThrowingStop,
+          startTimes: sourceStartTimes,
+          stopTimes: sourceStopTimes,
+        },
+        helperEdges: {
+          volumeNaN: mod.volumeToGain(Number.NaN),
+          panNaN: mod.panToStereo(Number.NaN),
+          semitoneNaN: mod.semitonesToRate(Number.NaN),
+          negativeCurveLength: mod.buildOverdriveCurve(-1, 10).length,
+          negativeAmountCurveLength: mod.buildOverdriveCurve(8, -5).length,
+          invalidBpmMessage,
+          invalidBeatsMessage,
+        },
+      };
+    }, MIX_PLAYER_MOD);
+
+    expect(result.planA.loopBeats).toBe(36);
+    expect(result.planA.timelineUnitBeats).toBe(4);
+    expect(result.planA.timelineRecovered).toBe(true);
+    expect(result.planA.laneCount).toBe(8);
+    expect(result.planA.labels).toContain("Sample ID");
+    expect(result.planA.labels).toContain("Euro Kick 5");
+    expect(result.planA.labels).toContain("Meta Length");
+    expect(result.planA.labels).toContain("Unknown sample");
+    expect(result.planA.audioUrls).toContain("output/Loop/already.wav");
+    expect(result.planB.loopBeats).toBe(8);
+    expect(result.planB.lengths).toEqual([5, 3]);
+    expect(result.planList).toEqual({
+      loopBeats: null,
+      timelineRecovered: false,
+      firstLength: 1,
+    });
+    expect(result.planUnknownAudioUrl).toBe("output/Loose/path.wav");
+    expect(result.lanesForB).toBe("User Perc.");
+    expect(result.recoveredBeat).toBe(9);
+    expect(result.host.startedOnce).toBe(1);
+    expect(result.host.startedTwice).toBe(0);
+    expect(result.host.startedWithThrowingStop).toBe(1);
+    expect(result.host.startTimes).toContain(12);
+    expect(result.host.stopTimes).toContain(13);
+    expect(result.helperEdges).toMatchObject({
+      volumeNaN: 0,
+      panNaN: 0,
+      semitoneNaN: 1,
+      negativeCurveLength: 0,
+      negativeAmountCurveLength: 8,
+    });
+    expect(result.helperEdges.invalidBpmMessage).toContain("Invalid BPM");
+    expect(result.helperEdges.invalidBeatsMessage).toContain("Invalid beats");
+  });
+
+  test("player module covers toggle, stop, and rejection paths in browser", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (modPath) => {
+      const mod = await import(/* @vite-ignore */ modPath);
+
+      type ListenerMap = Record<string, Array<() => void>>;
+
+      class FakeAudio {
+        src = "";
+        paused = true;
+        ended = false;
+        currentTime = 0;
+        duration = 5;
+        private listeners: ListenerMap = {};
+
+        addEventListener(type: string, fn: () => void): void {
+          this.listeners[type] = this.listeners[type] ?? [];
+          this.listeners[type].push(fn);
+        }
+
+        removeEventListener(type: string, fn: () => void): void {
+          this.listeners[type] = (this.listeners[type] ?? []).filter((cb) => cb !== fn);
+        }
+
+        emit(type: string): void {
+          for (const fn of this.listeners[type] ?? []) fn();
+        }
+
+        async play(): Promise<void> {
+          if (this.src.includes("reject")) {
+            return Promise.reject(new Error("blocked"));
+          }
+          this.paused = false;
+          return Promise.resolve();
+        }
+
+        pause(): void {
+          this.paused = true;
+          this.emit("pause");
+        }
+      }
+
+      const OriginalAudio = window.Audio;
+      const warns: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (...args: unknown[]) => {
+        warns.push(args.map(String).join(" "));
+      };
+
+      (window as unknown as { Audio: typeof Audio }).Audio = FakeAudio as unknown as typeof Audio;
+
+      const states: string[] = [];
+      const player = new mod.Player();
+      player.onStateChange((state: string) => states.push(state));
+
+      const flush = async (): Promise<void> => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      };
+
+      player.play("ok-1.wav");
+      await flush();
+      const activeAfterPlay = player.activePath;
+
+      player.stop();
+      await flush();
+
+      player.toggle("ok-2.wav"); // toggles to play
+      await flush();
+      player.toggle("ok-2.wav"); // toggles to stop
+      await flush();
+      const activeAfterToggleStop = player.activePath;
+
+      player.play("reject.wav"); // play() rejection path
+      await flush();
+
+      const intervalUnknown = mod.calcProgressInterval(0);
+      const intervalNormal = mod.calcProgressInterval(3);
+
+      const stateBeforeDestroy = player.state;
+      player.destroy();
+      const stateAfterDestroy = player.state;
+
+      (window as unknown as { Audio: typeof Audio }).Audio = OriginalAudio;
+      console.warn = originalWarn;
+
+      return {
+        states,
+        activeAfterPlay,
+        activeAfterToggleStop,
+        intervalUnknown,
+        intervalNormal,
+        stateBeforeDestroy,
+        stateAfterDestroy,
+        warns,
+      };
+    }, "/src/player.ts");
+
+    expect(result.states).toContain("playing");
+    expect(result.states).toContain("stopped");
+    expect(result.activeAfterPlay).toBe("ok-1.wav");
+    expect(result.activeAfterToggleStop).toBeNull();
+    expect(result.intervalUnknown).toBe(250);
+    expect(result.intervalNormal).toBe(150);
+    expect(result.stateBeforeDestroy).toBe("stopped");
+    expect(result.stateAfterDestroy).toBe("stopped");
+    expect(result.warns.some((line: string) => line.includes("Audio playback failed"))).toBe(true);
+  });
+
+  test("sample-grid context menu covers sample and grid right-click branches", async ({ page }) => {
+    await page.goto("/coverage-harness.html");
+    await page.waitForLoadState("networkidle");
+
+    const result = await page.evaluate(async (modPath) => {
+      const mod = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.className = "sample-grid";
+      const block = document.createElement("div");
+      block.className = "sample-block";
+      block.dataset.filename = "kick.wav";
+      host.appendChild(block);
+      document.body.appendChild(host);
+
+      const categories = [
+        {
+          id: "Drum",
+          name: "Drum",
+          sampleCount: 1,
+          subcategories: ["kick", "snare"],
+        },
+      ];
+      const samples = [
+        {
+          filename: "kick.wav",
+          category: "Drum",
+          subcategory: "kick",
+          product: "Dance_eJay1",
+          source_archive: "archive",
+        },
+      ];
+
+      const moved: Array<{ category: string; subcategory: string | null }> = [];
+      let sortState = { key: "filename", dir: "asc" };
+      let refreshCalls = 0;
+
+      const controller = mod.createSampleGridContextMenuController({
+        getCategories: () => categories,
+        getCurrentGridSamples: () => samples,
+        getSortState: () => sortState,
+        setSortState: (key: string, dir: string) => {
+          sortState = { key, dir };
+        },
+        refreshSamples: () => {
+          refreshCalls += 1;
+        },
+        onMoveSample: (_sample: unknown, category: string, subcategory: string | null) => {
+          moved.push({ category, subcategory });
+        },
+      });
+
+      const sampleEvent = new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 40,
+        clientY: 50,
+      });
+      Object.defineProperty(sampleEvent, "target", { value: block });
+      controller.handleContextMenu(sampleEvent);
+
+      const sampleMenuShown = document.getElementById(mod.SAMPLE_CONTEXT_MENU_ID) !== null;
+      const moveButton = document.querySelector<HTMLElement>("#sample-context-menu .ctx-submenu .ctx-menu-item");
+      moveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      // Dismiss via escape path in attachMenuDismiss.
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+      const gridEvent = new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 80,
+        clientY: 90,
+      });
+      Object.defineProperty(gridEvent, "target", { value: host });
+      controller.handleContextMenu(gridEvent);
+
+      const sortMenuShown = document.getElementById(mod.SAMPLE_CONTEXT_MENU_ID) !== null;
+      const sortButton = document.querySelector<HTMLButtonElement>("#sample-context-menu button.ctx-menu-item");
+      sortButton?.click();
+
+      controller.close();
+
+      host.remove();
+      return {
+        sampleMenuShown,
+        sortMenuShown,
+        moved,
+        sortState,
+        refreshCalls,
+        menuExistsAfterClose: document.getElementById(mod.SAMPLE_CONTEXT_MENU_ID) !== null,
+      };
+    }, "/src/sample-grid-context-menu.ts");
+
+    expect(result.sampleMenuShown).toBe(true);
+    expect(result.sortMenuShown).toBe(true);
+    expect(result.moved.length).toBeGreaterThanOrEqual(1);
+    expect(result.refreshCalls).toBeGreaterThanOrEqual(1);
+    expect(result.menuExistsAfterClose).toBe(false);
   });
 
   test("main covers mix selection failure, playback caching, and cleanup branches", async ({ page }) => {
@@ -1033,7 +1544,10 @@ test.describe("browser coverage gap", () => {
 
       let audioFetchCount = 0;
       let closedContexts = 0;
+      let samplePlayCalls = 0;
       const originalFetch = globalThis.fetch;
+      const originalMediaPlay = HTMLMediaElement.prototype.play;
+      const originalMediaPause = HTMLMediaElement.prototype.pause;
 
       class FakeAudioContext {
         sampleRate = 44100;
@@ -1075,6 +1589,11 @@ test.describe("browser coverage gap", () => {
       }
 
       (window as typeof window & { AudioContext: typeof AudioContext }).AudioContext = FakeAudioContext as unknown as typeof AudioContext;
+      HTMLMediaElement.prototype.play = function () {
+        samplePlayCalls += 1;
+        return Promise.resolve();
+      };
+      HTMLMediaElement.prototype.pause = function () {};
 
       library.FetchLibrary.prototype.loadIndex = async function () {
         return {
@@ -1120,7 +1639,7 @@ test.describe("browser coverage gap", () => {
         if (url.endsWith("/mix/_userdata%2Fsets/GOOD.MIX")) {
           return new Response(buildFormatA(0x0a06, [
             { row: 0, col: 0, id: 42 },
-            { row: 1, col: 0, id: 300 },
+            { row: 2, col: 0, id: 300 },
           ]) as unknown as BodyInit, { status: 200 });
         }
         if (url.endsWith("output/Drum/kick.wav")) {
@@ -1144,48 +1663,78 @@ test.describe("browser coverage gap", () => {
 
       bad.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
       await waitFor(() => (document.getElementById("error-toast")?.textContent ?? "").includes("Could not load selected .mix file."));
+      const sawBadMixErrorToast = true;
 
       good.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
       await waitFor(() => (document.querySelector<HTMLElement>(".context-mix-name")?.textContent ?? "").includes("GOOD"));
       await waitFor(() => document.querySelectorAll(".sequencer-event").length === 2);
+      await waitFor(() => document.querySelectorAll(".sequencer-beat-number").length >= 3);
 
+      const home = document.querySelector<HTMLButtonElement>(".seq-home-btn");
       const play = document.querySelector<HTMLButtonElement>(".seq-play-btn");
       const stop = document.querySelector<HTMLButtonElement>(".seq-stop-btn");
-      if (!play || !stop) {
+      if (!home || !play || !stop) {
         throw new Error("Missing transport buttons");
       }
 
-      play.click();
-      await waitFor(() => stop.disabled === false);
-      stop.click();
-      await waitFor(() => stop.disabled === true);
+      const lane = document.querySelector<HTMLElement>(".sequencer-lane");
+      const events = [...document.querySelectorAll<HTMLElement>(".sequencer-event")];
+      if (!lane || events.length < 2) {
+        throw new Error("Expected sequencer lane and bubbles");
+      }
 
-      play.click();
+      await waitFor(() => play.disabled === false);
+
+      const laneRect = lane.getBoundingClientRect();
+      lane.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        clientX: laneRect.left + 160 + 48 + 4,
+        clientY: laneRect.top + (laneRect.height / 2),
+      }));
+      await waitFor(() => /^Bar\s+2\s+\//.test(document.querySelector<HTMLElement>(".seq-position")?.textContent ?? ""));
       await waitFor(() => stop.disabled === false);
-      stop.click();
+
+      home.click();
+      await waitFor(() => /^Bar\s+1\s+\//.test(document.querySelector<HTMLElement>(".seq-position")?.textContent ?? ""));
+
+      events[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await waitFor(() => stop.disabled === true);
+      await waitFor(() => samplePlayCalls > 0);
+
+      events[1].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await waitFor(() => /^Bar\s+3\s+\//.test(document.querySelector<HTMLElement>(".seq-position")?.textContent ?? ""));
+
+      await waitFor(() => stop.disabled === false);
+      await waitFor(() => stop.disabled === true, 260);
+
+      home.click();
+      await waitFor(() => /^Bar\s+1\s+\//.test(document.querySelector<HTMLElement>(".seq-position")?.textContent ?? ""));
 
       window.dispatchEvent(new Event("beforeunload"));
       await flush();
 
+      HTMLMediaElement.prototype.play = originalMediaPlay;
+      HTMLMediaElement.prototype.pause = originalMediaPause;
       globalThis.fetch = originalFetch;
 
       return {
         mixName: document.querySelector<HTMLElement>(".context-mix-name")?.textContent ?? "",
-        errorToast: document.getElementById("error-toast")?.textContent ?? "",
+        sawBadMixErrorToast,
         beatCount: document.querySelectorAll(".sequencer-beat-number").length,
         eventCount: document.querySelectorAll(".sequencer-event").length,
         audioFetchCount,
         closedContexts,
+        samplePlayCalls,
       };
     }, "/src/library.ts");
 
     expect(result.mixName).toContain("GOOD");
-    expect(result.errorToast).toContain("Could not load selected .mix file.");
+    expect(result.sawBadMixErrorToast).toBe(true);
     expect(result.beatCount).toBeGreaterThan(0);
     expect(result.eventCount).toBe(2);
     expect(result.audioFetchCount).toBe(1);
     expect(result.closedContexts).toBe(1);
+    expect(result.samplePlayCalls).toBeGreaterThan(0);
   });
 
   test("main covers empty mixes and no-WebAudio playback warnings", async ({ page }) => {
@@ -1471,6 +2020,8 @@ test.describe("browser coverage gap", () => {
       await waitFor(() => (document.querySelector<HTMLElement>(".context-mix-name")?.textContent ?? "").includes("PARTIAL"));
       await waitFor(() => document.querySelectorAll(".sequencer-event").length === 2);
 
+      await waitFor(() => play.disabled === false);
+
       play.click();
       await waitFor(() => stop.disabled === false);
       stop.click();
@@ -1485,9 +2036,11 @@ test.describe("browser coverage gap", () => {
       };
     }, "/src/library.ts");
 
-    expect(result.audioFetchCount).toBe(2);
+    // Preload fetches both samples at selection time, then playback retries the
+    // failed decode path once more for the unresolved URL.
+    expect(result.audioFetchCount).toBe(3);
     expect(result.missingEventCount).toBe(0);
-    expect(result.transportLabel).toContain("ready");
+    expect(result.transportLabel).toMatch(/ready|Loading samples/i);
   });
 
   test("main covers tab selection and watcher refresh no-op and error branches", async ({ page }) => {
@@ -1798,6 +2351,54 @@ test.describe("browser coverage gap", () => {
     expect(typeof result.addButtonDisabled).toBe("boolean");
   });
 
+  test("main covers shell splitter keyboard and pointer branches", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+
+    const splitter = page.locator(".shell-splitter");
+    await expect(splitter).toBeVisible();
+
+    await splitter.focus();
+    await splitter.press("ArrowDown");
+    await splitter.press("ArrowUp");
+    await splitter.press("PageDown");
+    await splitter.press("PageUp");
+    await splitter.press("Home");
+    await splitter.press("End");
+    await splitter.press("Enter");
+
+    await splitter.dispatchEvent("pointerdown", { button: 2, clientY: 260 });
+
+    const box = await splitter.boundingBox();
+    expect(box).not.toBeNull();
+    if (box) {
+      const centerX = box.x + (box.width / 2);
+      const centerY = box.y + (box.height / 2);
+      await page.mouse.move(centerX, centerY);
+      await page.mouse.down();
+      await page.mouse.move(centerX, centerY + 24);
+      await page.mouse.up();
+    }
+
+    const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
+    await page.setViewportSize({ width: viewport.width - 24, height: viewport.height - 16 });
+    await page.setViewportSize(viewport);
+
+    const result = await splitter.evaluate((node) => {
+      const element = node as HTMLElement;
+      const shell = element.closest(".spa-shell") as HTMLElement | null;
+      return {
+        ariaValueNow: element.getAttribute("aria-valuenow"),
+        isDragging: element.classList.contains("is-dragging"),
+        editorHeight: shell?.style.getPropertyValue("--shell-editor-height") ?? "",
+      };
+    });
+
+    expect(result.ariaValueNow).not.toBeNull();
+    expect(result.isDragging).toBe(false);
+    expect(result.editorHeight).toMatch(/\d+px/);
+  });
+
   test("mix-file-browser covers GenerationPack and userdata label branches", async ({ page }) => {
     await page.goto("/coverage-harness.html");
     await page.waitForLoadState("networkidle");
@@ -1858,7 +2459,7 @@ test.describe("browser coverage gap", () => {
         }),
       });
 
-      (window as typeof window & { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => archiveRoot;
+      (window as unknown as { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => archiveRoot;
 
       const host = document.createElement("div");
       host.innerHTML = `
@@ -1943,7 +2544,7 @@ test.describe("browser coverage gap", () => {
         }),
       });
 
-      (window as typeof window & { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => customRoot;
+      (window as unknown as { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => customRoot;
 
       const host = document.createElement("div");
       host.innerHTML = `

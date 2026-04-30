@@ -1,12 +1,19 @@
 // Home page and SPA shell rendering.
 
-import { SVG_NS, createZoomIcon } from "./icons.js";
+import {
+  SVG_NS,
+  createSequencerHomeIcon,
+  createSequencerPlayIcon,
+  createSequencerStopIcon,
+  createZoomIcon,
+} from "./icons.js";
 import { renderTransportBar } from "./transport.js";
 
-export const BPM_VALUES = [90, 125, 135, 140, 160, 180] as const;
+export const BPM_VALUES = [90, 125, 140, 160, 180] as const;
 
 export interface SpaShellSlots {
   shell: HTMLElement;
+  splitter: HTMLElement;
   sidebar: HTMLElement;
   tabs: HTMLElement;
   grid: HTMLElement;
@@ -149,10 +156,18 @@ function renderSequencerPlaceholder(container: HTMLElement): void {
   const controls = document.createElement("div");
   controls.className = "sequencer-controls";
   controls.innerHTML = `
-    <button type="button" class="seq-play-btn" aria-label="Play mix" disabled>&#9654;</button>
-    <button type="button" class="seq-stop-btn" aria-label="Stop mix" disabled>&#9632;</button>
+    <button type="button" class="seq-home-btn" aria-label="Move playhead to start" title="Move playhead to start"></button>
+    <button type="button" class="seq-play-btn" aria-label="Play mix" title="Play mix" disabled></button>
+    <button type="button" class="seq-stop-btn" aria-label="Stop mix" disabled></button>
     <span class="seq-position">0:00 / 0:00</span>
   `;
+
+  const homeBtn = controls.querySelector<HTMLButtonElement>(".seq-home-btn");
+  homeBtn?.appendChild(createSequencerHomeIcon());
+  const playBtn = controls.querySelector<HTMLButtonElement>(".seq-play-btn");
+  playBtn?.appendChild(createSequencerPlayIcon());
+  const stopBtn = controls.querySelector<HTMLButtonElement>(".seq-stop-btn");
+  stopBtn?.appendChild(createSequencerStopIcon());
 
   container.append(scrollArea, controls);
 }
@@ -191,6 +206,17 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
 
   editorArea.append(archiveTree, sequencer);
 
+  const splitter = document.createElement("div");
+  splitter.id = "shell-splitter";
+  splitter.className = "shell-splitter";
+  splitter.setAttribute("role", "separator");
+  splitter.setAttribute("aria-orientation", "horizontal");
+  splitter.setAttribute("aria-label", "Resize sequencer and sample browser");
+  splitter.setAttribute("aria-valuemin", "0");
+  splitter.setAttribute("aria-valuemax", "100");
+  splitter.setAttribute("aria-valuenow", "58");
+  splitter.tabIndex = 0;
+
   // ── Context strip (middle) ───────────────────────────────
 
   const contextStrip = document.createElement("div");
@@ -200,6 +226,10 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
   const contextStatus = document.createElement("div");
   contextStatus.className = "context-status";
   renderContextStripContent(contextStatus);
+
+  const contextStripSeparator = document.createElement("span");
+  contextStripSeparator.className = "context-separator";
+  contextStripSeparator.setAttribute("aria-hidden", "true");
 
   const contextControls = document.createElement("div");
   contextControls.className = "context-browser-controls";
@@ -280,7 +310,7 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
   bpmWrap.append(bpmLabel, bpm);
 
   contextControls.append(tabs, searchWrap, zoomWrap, bpmWrap);
-  contextStrip.append(contextStatus, contextControls);
+  contextStrip.append(contextStatus, contextStripSeparator, contextControls);
 
   // ── Browser area (bottom): category sidebar + sample grid ─
 
@@ -303,15 +333,16 @@ export function renderSpaShell(container: HTMLElement): SpaShellSlots {
 
   main.append(grid);
   browserArea.append(sidebar, main);
-  shell.append(editorArea, contextStrip, browserArea);
 
   const transportHost = document.createElement("div");
   transportHost.id = "transport-host";
+  shell.append(editorArea, splitter, contextStrip, browserArea);
   container.append(shell, transportHost);
   renderTransportBar(transportHost);
 
   return {
     shell,
+    splitter,
     sidebar,
     tabs,
     grid,

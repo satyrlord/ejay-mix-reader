@@ -88,6 +88,14 @@ export const EQ10_FREQUENCIES: readonly number[] = [
 export interface MixPlaybackPlanEvent {
   id: string;
   beat: number;
+  /**
+   * Length of this event in beats — i.e. the gap on its lane until the
+   * next event starts. Used by the renderer to size the sample block and
+   * by the scheduler to truncate the previous sample so each lane behaves
+   * monophonically (matches the original eJay behaviour where starting a
+   * new sample on a track stops the currently playing one).
+   */
+  lengthBeats: number;
   channelId: string;
   displayLabel: string;
   audioUrl: string | null;
@@ -95,14 +103,79 @@ export interface MixPlaybackPlanEvent {
   resolved: boolean;
 }
 
+/** Canonical lane row in the sequencer grid for the playing mix's generation. */
+export interface LaneDescriptor {
+  /** e.g. `"lane-0"` */
+  id: string;
+  /** 0-based row index */
+  index: number;
+  /** e.g. `"Lane 1"` or `"User Perc."` */
+  label: string;
+}
+
 export interface MixPlaybackPlan {
   bpm: number;
-  loopBeats: number;
+  /**
+   * Number of quarter-note beats represented by one timeline unit in
+   * `events[].beat` / `loopBeats`.
+   * Format A uses bar units (1 unit = 4 quarter-note beats).
+   */
+  timelineUnitBeats: number;
+  /**
+   * Length of one timeline loop in beats, or `null` when the parser could
+   * not recover any positional information for this mix (e.g. Format C/D
+   * placements with `beat === null`). When `null`, the renderer should
+   * surface a flat sample list rather than a sequencer grid and the
+   * transport must not loop.
+   */
+  loopBeats: number | null;
+  /** True when `loopBeats` was derived from real timeline data. */
+  timelineRecovered: boolean;
+  /**
+   * Canonical lane rows for the mix's generation. Always includes every
+   * lane the format exposes, even ones with zero events, so the UI can
+   * render an empty row for them.
+   */
+  lanes: LaneDescriptor[];
   sourceTrackCount: number;
   resolvedEvents: number;
   unresolvedEvents: number;
   channelIds: string[];
   events: MixPlaybackPlanEvent[];
+}
+
+/** Lane counts per generation. See `docs/milestone-3-plan.md` §4.4. */
+export const LANE_COUNT_BY_FORMAT: Readonly<Record<"A" | "B" | "C" | "D", number>> = {
+  A: 8,
+  B: 17,
+  C: 32,
+  D: 32,
+};
+
+/** Build the canonical lane list for the supplied mix's generation. */
+export function lanesForMix(mix: MixIR): LaneDescriptor[] {
+  const count = LANE_COUNT_BY_FORMAT[mix.format];
+  const lanes: LaneDescriptor[] = [];
+  for (let i = 0; i < count; i++) {
+    let label = `Lane ${i + 1}`;
+    if (mix.format === "B" && i === 16) label = "User Perc.";
+    lanes.push({ id: `lane-${i}`, index: i, label });
+  }
+  return lanes;
+}
+
+/**
+ * Return the highest finite beat across tracks, or `null` when no timeline
+ * position could be recovered.
+ */
+export function maxRecoveredBeat(tracks: readonly { beat: number | null }[]): number | null {
+  let maxBeat = -1;
+  for (const track of tracks) {
+    if (typeof track.beat === "number" && Number.isFinite(track.beat) && track.beat > maxBeat) {
+      maxBeat = track.beat;
+    }
+  }
+  return maxBeat >= 0 ? maxBeat : null;
 }
 
 const MIX_PLAYBACK_PRODUCT_ALIASES: Record<string, string> = {
@@ -135,6 +208,7 @@ const MIX_PLAYBACK_PRODUCT_FALLBACKS: Record<string, string[]> = {
   GenerationPack1_HipHop: ["HipHop_eJay2", "HipHop_eJay3"],
   HipHop_eJay1: ["GenerationPack1_HipHop", "HipHop_eJay2", "HipHop_eJay3"],
   HipHop_eJay3: ["Dance_eJay3"],
+  Techno_eJay: ["Dance_eJay2", "House_eJay"],
   Techno_eJay3: ["Dance_eJay3"],
 };
 
@@ -244,12 +318,84 @@ function resolveSampleAudioUrl(
     : null;
 }
 
+/**
+ * Look up a human-friendly label for a resolved audio URL. Walks the same
+ * product order as `resolveSampleAudioUrl` and consults each entry's
+ * `byPath` map (populated from `output/metadata.json` aliases).
+ */
+function resolveSampleLabel(
+  audioUrl: string | null,
+  sampleIndex: Record<string, SampleLookupEntry> | undefined,
+  products: string[],
+): string | null {
+  if (!audioUrl || !sampleIndex) return null;
+  const relPath = audioUrl.startsWith("output/") ? audioUrl.slice("output/".length) : audioUrl;
+
+  for (const product of products) {
+    const entry = sampleIndex[product] ?? sampleIndex[canonicalPlaybackProduct(product)];
+    const label = entry?.byPath?.[relPath];
+    if (label) return label;
+  }
+  return null;
+}
+
+/**
+ * Look up a sample's musical duration in beats from `sampleIndex.byPathBeats`
+ * using the same product lookup order as label/audio resolution.
+ */
+function resolveSampleBeats(
+  audioUrl: string | null,
+  sampleIndex: Record<string, SampleLookupEntry> | undefined,
+  products: string[],
+): number | null {
+  if (!audioUrl || !sampleIndex) return null;
+  const relPath = audioUrl.startsWith("output/") ? audioUrl.slice("output/".length) : audioUrl;
+
+  for (const product of products) {
+    const entry = sampleIndex[product] ?? sampleIndex[canonicalPlaybackProduct(product)];
+    const beats = entry?.byPathBeats?.[relPath];
+    if (typeof beats === "number" && Number.isFinite(beats) && beats > 0) {
+      return beats;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Convert metadata quarter-note beat lengths to this plan's timeline units.
+ *
+ * Example: Format A tracks are stored in bar units, so a 64-beat sample in
+ * metadata maps to 16 timeline units (`64 / 4`).
+ */
+function sampleBeatsToTimelineUnits(
+  sampleBeats: number | null,
+  timelineUnitBeats: number,
+): number | null {
+  if (sampleBeats === null || !Number.isFinite(sampleBeats) || sampleBeats <= 0) {
+    return null;
+  }
+  const unitBeats = Number.isFinite(timelineUnitBeats) && timelineUnitBeats > 0
+    ? timelineUnitBeats
+    : 1;
+  const timelineUnits = sampleBeats / unitBeats;
+  return Number.isFinite(timelineUnits) && timelineUnits > 0 ? timelineUnits : null;
+}
+
 export function buildMixPlaybackPlan(
   mix: MixIR,
   sampleIndex?: Record<string, SampleLookupEntry>,
 ): MixPlaybackPlan {
   const products = playbackLookupOrder(mix);
+  const lanes = lanesForMix(mix);
+  const timelineUnitBeats = mix.format === "A" ? 4 : 1;
   const channelIds: string[] = [];
+  // Track whether the parser recovered any positional data for this mix.
+  // If every track has `beat === null`, we drop into "list view" — no loop,
+  // no sequencer grid placement, just a flat list of samples.
+  const recoveredMaxBeat = maxRecoveredBeat(mix.tracks);
+  const anyBeatKnown = recoveredMaxBeat !== null;
+
   const events = mix.tracks.map((track, index) => {
     const beat = typeof track.beat === "number" && Number.isFinite(track.beat)
       ? Math.max(0, track.beat)
@@ -262,11 +408,23 @@ export function buildMixPlaybackPlan(
     }
 
     const audioUrl = resolveSampleAudioUrl(track.sampleRef, sampleIndex, products);
+    const resolvedLabel = resolveSampleLabel(audioUrl, sampleIndex, products);
+    const resolvedBeats = sampleBeatsToTimelineUnits(
+      resolveSampleBeats(audioUrl, sampleIndex, products),
+      timelineUnitBeats,
+    );
     return {
       id: `${channelId}:${beat}:${index}`,
       beat,
+      // 0 means "no explicit sample length known"; it is replaced later
+      // with lane-gap fallback when we compute final durations per lane.
+      lengthBeats: resolvedBeats ?? 0,
       channelId,
-      displayLabel: sampleLabel(track.sampleRef),
+      // Prefer the alias from the sample library when the event resolves
+      // to a real audio file — Format A mixes only carry numeric ids in
+      // their grid, so without this fallback every block would render as
+      // `#1234` instead of the human-readable sample name.
+      displayLabel: resolvedLabel ?? sampleLabel(track.sampleRef),
       audioUrl,
       sampleRef: track.sampleRef,
       resolved: audioUrl !== null,
@@ -274,11 +432,71 @@ export function buildMixPlaybackPlan(
   }).sort((left, right) => left.beat - right.beat || left.channelId.localeCompare(right.channelId));
 
   const resolvedEvents = events.filter((event) => event.resolved).length;
-  const maxBeat = events.reduce((highest, event) => Math.max(highest, event.beat), 0);
+
+  const eventsByLaneId = new Map<string, MixPlaybackPlanEvent[]>();
+  for (const event of events) {
+    const laneList = eventsByLaneId.get(event.channelId);
+    if (laneList) {
+      laneList.push(event);
+    } else {
+      eventsByLaneId.set(event.channelId, [event]);
+    }
+  }
+  for (const laneEvents of eventsByLaneId.values()) {
+    laneEvents.sort((a, b) => a.beat - b.beat);
+  }
+
+  let loopBeats: number | null;
+  if (!anyBeatKnown) {
+    // Format C/D today, plus any mix where the parser could not recover
+    // positions. The transport must not loop in this state.
+    loopBeats = null;
+  } else if (mix.format === "A") {
+    let inferredLength = recoveredMaxBeat + 1;
+    for (const laneEvents of eventsByLaneId.values()) {
+      const tailEvent = laneEvents[laneEvents.length - 1];
+      if (!tailEvent) continue;
+      const explicitTailLength = tailEvent.lengthBeats > 0
+        ? Math.max(1, Math.round(tailEvent.lengthBeats))
+        : 1;
+      inferredLength = Math.max(inferredLength, tailEvent.beat + explicitTailLength);
+    }
+
+    // Format A timeline units are bars; rounding to the next 2-bar boundary
+    // matches original Gen-1 START mix lengths (e.g. Rave START = 118 bars).
+    loopBeats = Math.max(1, Math.ceil(inferredLength / 2) * 2);
+  } else {
+    // Gen-2/3 stay quantized to 4-beat bars.
+    const rawLength = recoveredMaxBeat + 1;
+    loopBeats = Math.max(1, Math.ceil(rawLength / 4) * 4);
+  }
+
+  // Compute per-event lengthBeats from the gap to the next event on the
+  // same lane. The last event on each lane runs out to the loop end (or
+  // stays at 1 beat in list-view mode).
+  for (const laneEvents of eventsByLaneId.values()) {
+    for (let i = 0; i < laneEvents.length; i++) {
+      const current = laneEvents[i]!;
+      const next = laneEvents[i + 1];
+      const endBeat = next ? next.beat : (loopBeats ?? current.beat + 1);
+      const gapLength = Math.max(1, endBeat - current.beat);
+      const explicitLength = current.lengthBeats > 0
+        ? Math.max(1, Math.round(current.lengthBeats))
+        : null;
+      // Prefer true sample length when known, but clamp to lane gap so
+      // bubbles and scheduling stay monophonic.
+      current.lengthBeats = explicitLength === null
+        ? gapLength
+        : Math.min(explicitLength, gapLength);
+    }
+  }
 
   return {
     bpm: mix.bpm,
-    loopBeats: Math.max(1, maxBeat + 1),
+    timelineUnitBeats,
+    loopBeats,
+    timelineRecovered: anyBeatKnown,
+    lanes,
     sourceTrackCount: mix.tracks.length,
     resolvedEvents,
     unresolvedEvents: events.length - resolvedEvents,
@@ -341,6 +559,14 @@ export interface AudioParamLike {
   value: number;
 }
 
+export interface AudioBufferLike {
+  readonly duration: number;
+  readonly length: number;
+  readonly numberOfChannels: number;
+  readonly sampleRate: number;
+  getChannelData(channel: number): Float32Array;
+}
+
 export interface GainNodeLike extends AudioNodeLike {
   gain: AudioParamLike;
 }
@@ -354,7 +580,7 @@ export interface DelayNodeLike extends AudioNodeLike {
 }
 
 export interface ConvolverNodeLike extends AudioNodeLike {
-  buffer: unknown;
+  buffer: AudioBufferLike | null;
 }
 
 export interface DynamicsCompressorNodeLike extends AudioNodeLike {
@@ -363,7 +589,7 @@ export interface DynamicsCompressorNodeLike extends AudioNodeLike {
 }
 
 export interface AudioBufferSourceNodeLike extends AudioNodeLike {
-  buffer: unknown;
+  buffer: AudioBufferLike | null;
   playbackRate: AudioParamLike;
   start(when?: number): void;
   stop(when?: number): void;
@@ -406,15 +632,13 @@ export interface AudioContextLike {
   createDelay(maxDelay?: number): DelayNodeLike;
   createConvolver(): ConvolverNodeLike;
   createDynamicsCompressor(): DynamicsCompressorNodeLike;
-  createBuffer(channels: number, length: number, sampleRate: number): {
-    getChannelData(channel: number): Float32Array;
-  };
+  createBuffer(channels: number, length: number, sampleRate: number): AudioBufferLike;
   createBufferSource(): AudioBufferSourceNodeLike;
   createBiquadFilter(): BiquadFilterNodeLike;
   createWaveShaper(): WaveShaperNodeLike;
   createOscillator(): OscillatorNodeLike;
   createAnalyser(): AnalyserNodeLike;
-  decodeAudioData(data: ArrayBuffer): Promise<unknown>;
+  decodeAudioData(data: ArrayBuffer): Promise<AudioBufferLike>;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -512,7 +736,7 @@ export class SoloGroup {
 
 export interface DrumPadConfig {
   /** Decoded audio buffer for the pad sample. */
-  buffer: unknown;
+  buffer: AudioBufferLike;
   /** Semitone offset applied via `playbackRate`. */
   semitones?: number;
   /** Reverse playback — the buffer must already be pre-reversed before being passed in. */
@@ -728,13 +952,19 @@ export function createEffect(ctx: AudioContextLike, kind: EffectKind): EffectHan
 
 export interface MixPlayerSampleSpec {
   /** Pre-decoded audio buffer to play. */
-  buffer: unknown;
+  buffer: AudioBufferLike;
   /** Beat offset on the timeline (inclusive, 0-based). */
   beat: number;
   /** Target channel id (must have been registered via `registerChannel`). */
   channelId: string;
   /** Optional semitone transpose for the scheduled source. */
   semitones?: number;
+  /**
+   * Optional duration in beats. When provided, the source is hard-stopped
+   * after this many beats so the lane stays monophonic — matches eJay's
+   * "starting a new sample on a track stops the old one" behaviour.
+   */
+  durationBeats?: number;
 }
 
 /**
@@ -772,6 +1002,10 @@ export class MixPlayerHost {
   }
 
   play(bpm: number, startAt: number = this.ctx.currentTime): number {
+    if (this.playing) {
+      console.warn("MixPlayerHost.play() called while already playing — ignoring duplicate call.");
+      return 0;
+    }
     const started: AudioBufferSourceNodeLike[] = [];
     for (const spec of this.scheduled) {
       const channel = this.channels.get(spec.channelId);
@@ -783,7 +1017,15 @@ export class MixPlayerHost {
       src.buffer = spec.buffer;
       src.playbackRate.value = semitonesToRate(spec.semitones ?? 0);
       src.connect(channel.input);
-      src.start(startAt + beatsToSeconds(spec.beat, bpm));
+      const startTime = startAt + beatsToSeconds(spec.beat, bpm);
+      src.start(startTime);
+      if (typeof spec.durationBeats === "number" && spec.durationBeats > 0) {
+        try {
+          src.stop(startTime + beatsToSeconds(spec.durationBeats, bpm));
+        } catch {
+          /* environments without scheduled-stop support fall back to natural end */
+        }
+      }
       started.push(src);
     }
     this.active = started;

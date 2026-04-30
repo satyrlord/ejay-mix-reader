@@ -931,6 +931,40 @@ describe("extractIndividualPxds", () => {
     expect(existsSync(join(outDir, "genre_sample001.wav"))).toBe(true);
     rmSync(tmpDir, { recursive: true });
   });
+
+  it("normalizes wrapper source paths and still includes sibling Special WAV folders", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "ext-"));
+    const srcDir = join(tmpDir, "Dance eJay 1");
+    const outDir = join(tmpDir, "out");
+    const bankDir = join(srcDir, "dance", "AA");
+    const specialDir = join(srcDir, "Special");
+    const rekitDir = join(srcDir, "PXD", "rekit1", "15");
+    mkdirSync(bankDir, { recursive: true });
+    mkdirSync(specialDir, { recursive: true });
+    mkdirSync(rekitDir, { recursive: true });
+
+    writeFileSync(join(bankDir, "base001.pxd"), makePxd("Base", 2, [0x80, 0x80]));
+    writeFileSync(join(rekitDir, "r2sr512.pxd"), makePxd("Expansion", 2, [0x80, 0x80]));
+
+    const wavData = Buffer.alloc(44, 0);
+    wavData.write("RIFF", 0, "ascii");
+    wavData.write("WAVE", 8, "ascii");
+    writeFileSync(join(specialDir, "special01.wav"), wavData);
+
+    const catalog = extractIndividualPxds(srcDir, outDir, false);
+    const base = catalog.find((entry) => entry.source === "AA/base001.pxd");
+    const expansion = catalog.find((entry) => entry.source === "rekit1/15/r2sr512.pxd");
+    const special = catalog.find((entry) => entry.source === "Special/special01.wav");
+
+    expect(base).toMatchObject({ filename: "AA_base001.wav", bank: "AA" });
+    expect(expansion).toMatchObject({ filename: "rekit1_r2sr512.wav", bank: "rekit1" });
+    expect(special).toMatchObject({ filename: "Special_special01.wav", bank: "Special", format: "wav" });
+
+    expect(existsSync(join(outDir, "AA_base001.wav"))).toBe(true);
+    expect(existsSync(join(outDir, "rekit1_r2sr512.wav"))).toBe(true);
+    expect(existsSync(join(outDir, "Special_special01.wav"))).toBe(true);
+    rmSync(tmpDir, { recursive: true });
+  });
 });
 
 // ── extractPackedArchive ─────────────────────────────────────

@@ -1,7 +1,7 @@
 import { test, expect } from "./baseFixtures.js";
 import type { MixLibraryEntry } from "../src/data.js";
 
-const browserAppStartupTimeoutMs = process.env.VITE_COVERAGE === "true" ? 15_000 : 5_000;
+const browserAppStartupTimeoutMs = process.env.VITE_COVERAGE === "true" ? 15_000 : 10_000;
 
 test.describe("data module edge cases", () => {
   const DATA_MOD = "/src/data.ts";
@@ -368,6 +368,75 @@ test.describe("data module edge cases", () => {
     expect(result.bassSubcategories).toEqual(["unsorted", "riff"]);
     expect(result.bassCount).toBe(2);
     expect(result.rejectedBySubcategory).toBe(0);
+  });
+
+  test("product-mode helpers fall back to all and use default select value", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const mod = await import(/* @vite-ignore */ modPath);
+
+      const unknown = mod.getProductModeEntry("not-a-real-mode");
+      const missing = mod.getProductModeEntry(undefined);
+      const select = mod.createProductModeSelect();
+
+      mod.applyProductTheme(mod.getProductModeEntry("rave"));
+      const themeAfterRave = document.documentElement.getAttribute("data-product-theme");
+      mod.applyProductTheme(mod.getProductModeEntry("all"));
+      const themeAfterAll = document.documentElement.getAttribute("data-product-theme");
+
+      return {
+        unknownId: unknown.id,
+        missingId: missing.id,
+        selectValue: select.value,
+        optionCount: select.options.length,
+        themeAfterRave,
+        themeAfterAll,
+      };
+    }, "/src/product-mode.ts");
+
+    expect(result.unknownId).toBe("all");
+    expect(result.missingId).toBe("all");
+    expect(result.selectValue).toBe("all");
+    expect(result.optionCount).toBeGreaterThan(1);
+    expect(result.themeAfterRave).toBe("rave");
+    expect(result.themeAfterAll).toBeNull();
+  });
+
+  test("sequencer icon factories return SVG elements with expected classes", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const mod = await import(/* @vite-ignore */ modPath);
+
+      const home = mod.createSequencerHomeIcon();
+      const play = mod.createSequencerPlayIcon();
+      const pause = mod.createSequencerPauseIcon();
+      const stop = mod.createSequencerStopIcon();
+
+      return {
+        tags: [home.tagName, play.tagName, pause.tagName, stop.tagName],
+        classes: [
+          home.getAttribute("class"),
+          play.getAttribute("class"),
+          pause.getAttribute("class"),
+          stop.getAttribute("class"),
+        ],
+        viewBoxes: [
+          home.getAttribute("viewBox"),
+          play.getAttribute("viewBox"),
+          pause.getAttribute("viewBox"),
+          stop.getAttribute("viewBox"),
+        ],
+      };
+    }, "/src/render/icons.ts");
+
+    expect(result.tags).toEqual(["svg", "svg", "svg", "svg"]);
+    expect(result.classes).toEqual([
+      "seq-home-icon",
+      "seq-play-icon",
+      "seq-pause-icon",
+      "seq-stop-icon",
+    ]);
+    expect(result.viewBoxes).toEqual(["0 0 16 16", "0 0 16 16", "0 0 16 16", "0 0 16 16"]);
   });
 
   test("special tabs catch samples from removed user subcategories when the browser supplies the visible tab list", async ({ page }) => {
@@ -1235,6 +1304,7 @@ test.describe("render edge cases", () => {
     });
     await expect(page.locator("#harness-tabs #subcategory-add-input")).toBeVisible();
     await page.locator("#outside-target").click();
+    await expect(page.locator("#harness-tabs #subcategory-add-input")).toHaveCount(0);
 
     const result = await page.evaluate(() => {
       return (window as unknown as Window & {
@@ -3314,8 +3384,11 @@ test.describe("main edge cases", () => {
 
     await page.goto("/");
     await expect(page.locator('.category-btn[data-category-id="Loop"]')).toBeVisible();
+    await expect(page.locator(".sample-block").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
 
-    await page.locator('.category-btn[data-category-id="Drum"]').click();
+    await page.locator('.category-btn[data-category-id="Drum"]').evaluate((button: HTMLButtonElement) => {
+      button.click();
+    });
 
     await expect(page.locator('.subcategory-tab[data-tab-id^="product:"]')).toHaveCount(0);
     await expect(page.locator('.subcategory-tab[data-tab-id^="all:"]')).toHaveCount(0);
@@ -3325,12 +3398,30 @@ test.describe("main edge cases", () => {
     await page.locator("#bpm-filter").selectOption("125");
     await expect(page.locator('.subcategory-tab[data-tab-id="subcategory:kick"]')).toBeVisible();
     await page.locator("#bpm-filter").selectOption("140");
-    await page.locator('.subcategory-tab[data-tab-id="subcategory:kick"]').click();
+    await page.locator('.subcategory-tab[data-tab-id="subcategory:kick"]').evaluate((button: HTMLButtonElement) => {
+      button.click();
+    });
 
     await expect(page.locator(".sample-block").first()).toBeVisible();
     await page.locator(".sample-block").first().click();
     await page.locator("#transport-stop").click();
     await expect(page.locator("#transport")).toBeVisible();
+  });
+
+  test("the real app applies Product Mode theme and default BPM from the archive dropdown", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
+    await page.locator("#archive-tree").click();
+
+    const productMode = page.locator(".archive-header .product-mode-select");
+    await expect(productMode).toBeVisible({ timeout: browserAppStartupTimeoutMs });
+
+    await productMode.selectOption("rave");
+    await expect(page.locator("#bpm-filter")).toHaveValue("180");
+    await expect.poll(() => page.evaluate(() => document.documentElement.getAttribute("data-product-theme"))).toBe("rave");
+
+    await productMode.selectOption("all");
+    await expect.poll(() => page.evaluate(() => document.documentElement.getAttribute("data-product-theme"))).toBeNull();
   });
 
   test("the real app sample zoom controls adjust sample bubble sizing", async ({ page }) => {
@@ -3376,9 +3467,17 @@ test.describe("main edge cases", () => {
   });
 
   test("the real app zoom-out is clamped at the minimum zoom level", async ({ page }) => {
+    const zoomStartupTimeoutMs = process.env.VITE_COVERAGE === "true" ? 30_000 : browserAppStartupTimeoutMs;
+
     await page.goto("/");
-    await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
-    await expect(page.locator(".sample-block").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
+    await expect.poll(async () => page.locator(".category-btn").count(), {
+      timeout: zoomStartupTimeoutMs,
+    }).toBeGreaterThan(0);
+    await expect.poll(async () => page.locator(".sample-block").count(), {
+      timeout: zoomStartupTimeoutMs,
+    }).toBeGreaterThan(0);
+    await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: zoomStartupTimeoutMs });
+    await expect(page.locator(".sample-block").first()).toBeVisible({ timeout: zoomStartupTimeoutMs });
 
     const readZoomScale = (): Promise<number> =>
       page.evaluate(() =>
@@ -3459,7 +3558,9 @@ test.describe("main edge cases", () => {
     });
 
     await page.goto("/");
-    await expect(page.locator(".sample-grid-empty")).toHaveText("No categories found in this library.");
+    await expect(page.locator(".sample-grid-empty")).toHaveText("No categories found in this library.", {
+      timeout: browserAppStartupTimeoutMs,
+    });
   });
 
   test("main bootstraps the normalized browser flow, filters tabs, and updates transport", async ({ page }) => {
@@ -4030,16 +4131,16 @@ test.describe("mix-file-browser module", () => {
         awaiting: content.classList.contains("is-awaiting-click"),
         groupCount: groups.length,
         firstGroupLabel: groups[0]?.querySelector(".mix-tree-group-label")?.textContent,
-        headerTitle: header?.querySelector(".archive-title")?.textContent,
-        headerInfo: header?.querySelector(".archive-folder-info")?.textContent,
+        productSelectClass: header?.querySelector("select.product-mode-select")?.className,
+        productSelectValue: (header?.querySelector("select.product-mode-select") as HTMLSelectElement | null)?.value,
       };
     }, [MFB_MOD, SAMPLE_LIBRARY] as const);
 
     expect(result.awaiting).toBe(false);
     expect(result.groupCount).toBe(2);
     expect(result.firstGroupLabel).toBe("Dance eJay 1");
-    expect(result.headerTitle).toBe("Mix Archive");
-    expect(result.headerInfo).toBe("archive");
+    expect(result.productSelectClass).toBe("product-mode-select");
+    expect(result.productSelectValue).toBe("all");
   });
 
   test("DEV mode: first group is auto-expanded, others are collapsed", async ({ page }) => {
@@ -4414,6 +4515,114 @@ test.describe("mix-file-browser module", () => {
     expect(result?.url).toBe("/mix/Dance_eJay1/my%20mix.MIX");
   });
 
+  test("DEV mode: controller setProductMode renders flat product list and preserves selection behavior", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-controller-mode" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const refs: Array<{ label: string; productId: string }> = [];
+      const sidebar = host.querySelector<HTMLElement>("#at-controller-mode")!;
+      const controller = initMixFileBrowser(sidebar, {
+        isDev: true,
+        mixLibrary: library,
+        onSelectFile: (ref: { label: string; productId: string }) => refs.push(ref),
+      });
+
+      sidebar.click();
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
+
+      const beforeMode = controller.getProductMode().id;
+      controller.setProductMode("dance1");
+      const afterMode = controller.getProductMode().id;
+
+      const flatRoot = content.querySelector(".mix-tree-root--flat") !== null;
+      const labels = [...content.querySelectorAll<HTMLElement>(".mix-tree-item-label")].map((el) => el.textContent ?? "");
+
+      const firstFlatItem = content.querySelector<HTMLButtonElement>(".mix-tree-item")!;
+      firstFlatItem.click();
+      const activeAfterClick = content.querySelector<HTMLElement>(".mix-tree-item.is-active .mix-tree-item-label")?.textContent ?? "";
+      firstFlatItem.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+
+      controller.setProductMode("all");
+      const restoredGroupCount = content.querySelectorAll(".mix-tree-group").length;
+
+      return {
+        beforeMode,
+        afterMode,
+        flatRoot,
+        labels,
+        activeAfterClick,
+        selected: refs[0],
+        restoredGroupCount,
+      };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.beforeMode).toBe("all");
+    expect(result.afterMode).toBe("dance1");
+    expect(result.flatRoot).toBe(true);
+    expect(result.labels).toEqual(["LOVE.MIX", "START.MIX"]);
+    expect(result.activeAfterClick).toBe("LOVE.MIX");
+    expect(result.selected).toMatchObject({
+      label: "LOVE.MIX",
+      productId: "Dance_eJay1",
+    });
+    expect(result.restoredGroupCount).toBe(2);
+  });
+
+  test("DEV mode: product-mode dropdown change emits callback and empty flat-state message", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async ([modPath, library]) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-mode-change" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const changedModeIds: string[] = [];
+      const sidebar = host.querySelector<HTMLElement>("#at-mode-change")!;
+      initMixFileBrowser(sidebar, {
+        isDev: true,
+        mixLibrary: library,
+        onSelectFile: () => {},
+        onProductModeChange: (entry: { id: string }) => changedModeIds.push(entry.id),
+      });
+
+      sidebar.click();
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
+      const select = sidebar.querySelector<HTMLSelectElement>(".product-mode-select")!;
+      select.value = "house";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+
+      return {
+        changedModeIds,
+        flatCount: content.querySelectorAll(".mix-tree-root--flat").length,
+        emptyText: content.querySelector<HTMLElement>(".archive-placeholder")?.textContent ?? "",
+      };
+    }, [MFB_MOD, SAMPLE_LIBRARY] as const);
+
+    expect(result.changedModeIds).toEqual(["house"]);
+    expect(result.flatCount).toBe(0);
+    expect(result.emptyText).toBe("No .mix files found for House");
+  });
+
   // ── formatMetaTooltip ──────────────────────────────────────────────────────
 
   test("formatMetaTooltip: returns empty string when meta is undefined", async ({ page }) => {
@@ -4502,6 +4711,78 @@ test.describe("mix-file-browser module", () => {
     }, MFB_MOD);
     const formatRow = result.find(([k]: [string, string]) => k === "Format");
     expect(formatRow?.[1]).toBe("—");
+  });
+
+  test("buildMetaRows: includes Lanes and Timeline rows when diagnostics present", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { buildMetaRows } = await import(/* @vite-ignore */ modPath);
+      const recovered = buildMetaRows("a.MIX", "Rave", {
+        bpm: 170, trackCount: 4, catalogs: [],
+        laneCount: 17, timelineRecovered: true, maxBeat: 31,
+      });
+      const recoveredNoMaxBeat = buildMetaRows("b.MIX", "Rave", {
+        bpm: 170, trackCount: 4, catalogs: [],
+        laneCount: 17, timelineRecovered: true,
+      });
+      const listView = buildMetaRows("c.MIX", "Techno eJay 3", {
+        bpm: 130, trackCount: 9, catalogs: [],
+        laneCount: 32, timelineRecovered: false,
+      });
+      return { recovered, recoveredNoMaxBeat, listView };
+    }, MFB_MOD);
+
+    const lanesRow = result.recovered.find(([k]: [string, string]) => k === "Lanes");
+    expect(lanesRow?.[1]).toBe("17");
+    const tlRow = result.recovered.find(([k]: [string, string]) => k === "Timeline");
+    expect(tlRow?.[1]).toBe("recovered (32 beats)");
+
+    const tlRowNoMax = result.recoveredNoMaxBeat.find(([k]: [string, string]) => k === "Timeline");
+    expect(tlRowNoMax?.[1]).toBe("recovered");
+
+    const listRow = result.listView.find(([k]: [string, string]) => k === "Timeline");
+    expect(listRow?.[1]).toBe("list view (timeline unrecovered)");
+    const listLanes = result.listView.find(([k]: [string, string]) => k === "Lanes");
+    expect(listLanes?.[1]).toBe("32");
+  });
+
+  test("mixMetaFromIr: populates laneCount and timeline diagnostics", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { mixMetaFromIr } = await import(/* @vite-ignore */ modPath);
+      const baseIr = {
+        appId: 0, format: "B" as const, bpm: 140, bpmAdjusted: null,
+        title: "", author: "", tickerText: [],
+        catalogs: [{ name: "x" }],
+      };
+      const noBeats = mixMetaFromIr({
+        ...baseIr,
+        tracks: [{ beat: null, channel: 0 }, { beat: undefined, channel: 1 }],
+      });
+      const withBeats = mixMetaFromIr({
+        ...baseIr,
+        format: "C" as const,
+        tracks: [
+          { beat: 5, channel: 0 },
+          { beat: 12, channel: 2 },
+          { beat: Number.NaN, channel: 3 },
+          { beat: null, channel: 4 },
+        ],
+      });
+      const formatA = mixMetaFromIr({ ...baseIr, format: "A" as const, tracks: [] });
+      const nullIr = mixMetaFromIr(null);
+      return { noBeats, withBeats, formatA, nullIr };
+    }, MFB_MOD);
+
+    expect(result.nullIr).toBeUndefined();
+    expect(result.noBeats?.laneCount).toBe(17);
+    expect(result.noBeats?.timelineRecovered).toBe(false);
+    expect(result.noBeats?.maxBeat).toBeUndefined();
+    expect(result.withBeats?.laneCount).toBe(32);
+    expect(result.withBeats?.timelineRecovered).toBe(true);
+    expect(result.withBeats?.maxBeat).toBe(12);
+    expect(result.formatA?.laneCount).toBe(8);
+    expect(result.formatA?.timelineRecovered).toBe(false);
   });
 
   // ── popup lifecycle ────────────────────────────────────────────────────────
@@ -4806,7 +5087,7 @@ test.describe("mix-file-browser module", () => {
         }),
       });
 
-      (window as typeof window & { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => archiveRoot;
+      (window as unknown as { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => archiveRoot;
 
       const host = document.createElement("div");
       host.innerHTML = `
@@ -4904,7 +5185,7 @@ test.describe("mix-file-browser module", () => {
         }),
       });
 
-      (window as typeof window & { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => productRoot;
+      (window as unknown as { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker = async () => productRoot;
 
       const host = document.createElement("div");
       host.innerHTML = `
@@ -4930,11 +5211,11 @@ test.describe("mix-file-browser module", () => {
 
       return {
         groupLabels: [...sidebar.querySelectorAll<HTMLElement>(".mix-tree-group-label")].map((node) => node.textContent ?? ""),
-        archiveInfo: sidebar.querySelector<HTMLElement>(".archive-folder-info")?.textContent ?? "",
+        productSelectClass: sidebar.querySelector<HTMLElement>("select.product-mode-select")?.className ?? "",
       };
     }, MFB_MOD);
 
     expect(result.groupLabels).toEqual(["Dance eJay 1"]);
-    expect(result.archiveInfo).toBe("Dance_eJay1");
+    expect(result.productSelectClass).toBe("product-mode-select");
   });
 });

@@ -13,6 +13,7 @@
   // tsconfig.browser.json) intentionally exclude these files so a missing
   // import in a test surfaces here rather than from a runtime build.
   "include": [
+    "src/*.d.ts",
     "scripts/__tests__/**/*.ts",
     "src/__tests__/**/*.ts",
     "tests/**/*.ts"

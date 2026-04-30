@@ -11,6 +11,14 @@
 import type { MixFileEntry, MixFileMeta, MixLibraryEntry } from "./data.js";
 import { humanizeIdentifier, mixFormatLabel } from "./data.js";
 import { parseMixBrowser } from "./mix-parser.js";
+import { LANE_COUNT_BY_FORMAT, maxRecoveredBeat } from "./mix-player.js";
+import {
+  createProductModeSelect,
+  getProductModeEntry,
+  isAllEntry,
+  PRODUCT_MODE_ALL_ID,
+  type ProductModeEntry,
+} from "./product-mode.js";
 
 /* -------------------------------------------------------------------------- */
 /* Public types                                                               */
@@ -45,6 +53,15 @@ export interface MixFileBrowserOptions {
   mixLibrary?: MixLibraryEntry[];
   /** Called when the user double-clicks a .mix file in the tree. */
   onSelectFile: (ref: MixFileRef) => void;
+  /** Called when the product-mode dropdown changes. */
+  onProductModeChange?: (entry: ProductModeEntry) => void;
+}
+
+/** Handle returned by {@link initMixFileBrowser} so callers can drive the
+ *  product-mode filter from outside the browser pane. */
+export interface MixFileBrowserController {
+  setProductMode(id: string): void;
+  getProductMode(): ProductModeEntry;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -231,7 +248,7 @@ function describeGroup(relativeParts: string[]): GroupDescriptor {
   };
 }
 
-function mixMetaFromIr(ir: ReturnType<typeof parseMixBrowser>): MixFileMeta | undefined {
+export function mixMetaFromIr(ir: ReturnType<typeof parseMixBrowser>): MixFileMeta | undefined {
   if (!ir) return undefined;
 
   const meta: MixFileMeta = {
@@ -249,8 +266,18 @@ function mixMetaFromIr(ir: ReturnType<typeof parseMixBrowser>): MixFileMeta | un
   if (ir.author) meta.author = ir.author;
   if (ir.tickerText.length > 0) meta.tickerText = ir.tickerText;
 
+  // Diagnostics surfaced by the metadata popup (milestone-3 plan §4.6):
+  // canonical lane count for the generation and whether the parser recovered
+  // any timeline positions.
+  meta.laneCount = LANE_COUNT_BY_FORMAT[ir.format];
+  const maxBeat = maxRecoveredBeat(ir.tracks);
+  meta.timelineRecovered = maxBeat !== null;
+  if (maxBeat !== null) meta.maxBeat = maxBeat;
+
   return meta;
 }
+
+
 
 async function readMixFileMeta(source: MixFileSource, productHint?: string): Promise<MixFileMeta | undefined> {
   try {
@@ -361,6 +388,17 @@ export function buildMetaRows(
         : String(meta.bpm);
     rows.push(["BPM", bpmStr]);
     rows.push(["Tracks", String(meta.trackCount)]);
+    if (typeof meta.laneCount === "number") {
+      rows.push(["Lanes", String(meta.laneCount)]);
+    }
+    if (typeof meta.timelineRecovered === "boolean") {
+      const status = meta.timelineRecovered
+        ? (typeof meta.maxBeat === "number"
+            ? `recovered (${meta.maxBeat + 1} beats)`
+            : "recovered")
+        : "list view (timeline unrecovered)";
+      rows.push(["Timeline", status]);
+    }
     if (meta.title) rows.push(["Title", meta.title]);
     if (meta.author) rows.push(["Author", meta.author]);
     if (meta.tickerText && meta.tickerText.length > 0) {
@@ -671,10 +709,15 @@ async function buildFileInputGroups(rootName: string, files: File[]): Promise<Tr
 export function initMixFileBrowser(
   archiveTree: HTMLElement,
   options: MixFileBrowserOptions,
-): void {
+): MixFileBrowserController {
   const contentOrNull = archiveTree.querySelector<HTMLElement>(".archive-tree-content");
   const headerEl = archiveTree.querySelector<HTMLElement>(".archive-header");
-  if (!contentOrNull) return;
+  if (!contentOrNull) {
+    return {
+      setProductMode: () => {},
+      getProductMode: () => getProductModeEntry(PRODUCT_MODE_ALL_ID),
+    };
+  }
   // Capture as a non-null reference so closures below can use it safely.
   const content: HTMLElement = contentOrNull;
 
@@ -684,6 +727,9 @@ export function initMixFileBrowser(
   };
 
   let treeLoaded = false;
+  let allGroups: TreeGroup[] = [];
+  let productMode: ProductModeEntry = getProductModeEntry(PRODUCT_MODE_ALL_ID);
+  let productSelect: HTMLSelectElement | null = null;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -693,20 +739,18 @@ export function initMixFileBrowser(
     }
   }
 
-  function setHeaderRoot(rootName: string, onChoose?: () => void): void {
+  function setHeaderRoot(_rootName: string, onChoose?: () => void): void {
     if (!headerEl) return;
     headerEl.replaceChildren();
 
-    const title = document.createElement("span");
-    title.className = "archive-title";
-    title.textContent = "Mix Archive";
-    headerEl.appendChild(title);
-
-    const info = document.createElement("span");
-    info.className = "archive-folder-info";
-    info.title = rootName;
-    info.textContent = rootName;
-    headerEl.appendChild(info);
+    productSelect = createProductModeSelect(productMode.id);
+    productSelect.addEventListener("change", () => {
+      const next = getProductModeEntry(productSelect?.value);
+      productMode = next;
+      rerenderTree();
+      options.onProductModeChange?.(next);
+    });
+    headerEl.appendChild(productSelect);
 
     /* istanbul ignore next -- "choose different folder" button only rendered in PROD mode */
     if (onChoose) {
@@ -735,8 +779,24 @@ export function initMixFileBrowser(
 
   function applyTree(groups: TreeGroup[]): void {
     treeLoaded = true;
+    allGroups = groups;
     content.classList.remove("is-awaiting-click");
-    renderTreeGroups(content, groups, state, options.onSelectFile);
+    rerenderTree();
+  }
+
+  function rerenderTree(): void {
+    if (!treeLoaded) return;
+    dismissMixMetaPopup();
+    if (isAllEntry(productMode)) {
+      renderTreeGroups(content, allGroups, state, options.onSelectFile);
+      return;
+    }
+    const allowed = new Set(productMode.mixGroupIds);
+    const matching = allGroups.filter((group) => allowed.has(group.id));
+    const flatFiles = matching.flatMap((group) =>
+      group.files.map((file) => ({ ...file, _groupLabel: group.label })),
+    );
+    renderFlatProductList(content, flatFiles, state, productMode, options.onSelectFile);
   }
 
   // ── DEV flow ───────────────────────────────────────────────────────────────
@@ -841,4 +901,88 @@ export function initMixFileBrowser(
       }
     });
   }
+
+  return {
+    setProductMode(id: string): void {
+      const next = getProductModeEntry(id);
+      productMode = next;
+      if (productSelect) productSelect.value = next.id;
+      rerenderTree();
+    },
+    getProductMode(): ProductModeEntry {
+      return productMode;
+    },
+  };
+}
+
+/**
+ * Render the filtered tree as a flat list (no folder headers) when
+ * Product Mode targets a single product.
+ */
+function renderFlatProductList(
+  content: HTMLElement,
+  files: TreeFile[],
+  state: BrowserState,
+  productMode: ProductModeEntry,
+  onSelect: (ref: MixFileRef) => void,
+): void {
+  content.replaceChildren();
+
+  if (files.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "archive-placeholder";
+    empty.textContent = `No .mix files found for ${productMode.label}`;
+    content.appendChild(empty);
+    return;
+  }
+
+  const root = document.createElement("div");
+  root.className = "mix-tree-root mix-tree-root--flat";
+
+  const items = document.createElement("div");
+  items.className = "mix-tree-items";
+
+  const sorted = files
+    .slice()
+    .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+
+  for (const file of sorted) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `mix-tree-item${state.activeKey === file.key ? " is-active" : ""}`;
+    btn.title = formatMetaTooltip(file.meta) || file.label;
+    btn.appendChild(fileIcon());
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "mix-tree-item-label";
+    nameSpan.textContent = file.label;
+    btn.appendChild(nameSpan);
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.activeKey = file.key;
+      for (const active of content.querySelectorAll<HTMLButtonElement>(".mix-tree-item.is-active")) {
+        active.classList.remove("is-active");
+      }
+      btn.classList.add("is-active");
+      showMixMetaPopup(file.label, productMode.label, file.meta, btn);
+    });
+
+    btn.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      state.activeKey = file.key;
+      dismissMixMetaPopup();
+      onSelect({
+        label: file.label,
+        group: productMode.label,
+        productId: productMode.mixGroupIds[0] ?? productMode.id,
+        source: file.source,
+      });
+    });
+
+    items.appendChild(btn);
+  }
+
+  root.appendChild(items);
+  content.appendChild(root);
 }

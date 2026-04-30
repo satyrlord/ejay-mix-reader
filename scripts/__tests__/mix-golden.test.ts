@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 
-import { ARCHIVE_MIX_DIRS, collectProductMixes } from "../build-index.js";
+import { ARCHIVE_MIX_DIRS, collectProductMixes, resolveProductMixDir } from "../build-index.js";
 import { APP_ID_PRODUCTS, parseMix } from "../mix-parser.js";
 import type { MixIR } from "../mix-types.js";
 
@@ -12,39 +12,53 @@ const FIXTURES = resolve("scripts/__tests__/fixtures");
 
 interface GoldenCase {
   format: string;
-  archivePath: string;
   product: string;
+  filename: string;
   goldenFile: string;
 }
 
 const CASES: GoldenCase[] = [
-  { format: "A", archivePath: "Dance_eJay1/MIX/FREAK.MIX", product: "Dance_eJay1", goldenFile: "golden-format-A.json" },
-  { format: "B", archivePath: "Dance_eJay2/MIX/CAMRON.MIX", product: "Dance_eJay2", goldenFile: "golden-format-B.json" },
-  { format: "C", archivePath: "Dance_eJay4/Mix/5 days to go.mix", product: "Dance_eJay4", goldenFile: "golden-format-C.json" },
-  { format: "D", archivePath: "HipHop 4/MIX/caro01.mix", product: "HipHop_eJay4", goldenFile: "golden-format-D.json" },
+  { format: "A", product: "Dance_eJay1", filename: "FREAK.MIX", goldenFile: "golden-format-A.json" },
+  { format: "B", product: "Dance_eJay2", filename: "CAMRON.MIX", goldenFile: "golden-format-B.json" },
+  { format: "C", product: "Dance_eJay4", filename: "5 days to go.mix", goldenFile: "golden-format-C.json" },
+  { format: "D", product: "HipHop_eJay4", filename: "caro01.mix", goldenFile: "golden-format-D.json" },
 ];
 
 interface AppIdCoverageCase {
-  archivePath: string;
   product: string;
+  filename: string;
   expectedAppId: number;
   format: string;
 }
 
 const APP_ID_CASES: AppIdCoverageCase[] = [
-  { archivePath: "Dance_eJay1/MIX/FREAK.MIX", product: "Dance_eJay1", expectedAppId: 0x00000a06, format: "A" },
-  { archivePath: "Rave/MIX/EARTH.MIX", product: "Rave", expectedAppId: 0x00000a07, format: "A" },
-  { archivePath: "TECHNO_EJAY/MIX/BUBBLE.MIX", product: "Techno_eJay", expectedAppId: 0x00000889, format: "B" },
-  { archivePath: "Dance_eJay2/MIX/CAMRON.MIX", product: "Dance_eJay2", expectedAppId: 0x00000a19, format: "B" },
-  { archivePath: "House_eJay/Mix/VOCS.mix", product: "House_eJay", expectedAppId: 0x000011d6, format: "D" },
-  { archivePath: "HipHop 2/MIX/Dope MC.mix", product: "HipHop_eJay2", expectedAppId: 0x000011e9, format: "B" },
-  { archivePath: "HipHop 4/MIX/caro01.mix", product: "HipHop_eJay4", expectedAppId: 0x000015dc, format: "D" },
-  { archivePath: "Dance_eJay3/MIX/80s revisited.mix", product: "Dance_eJay3", expectedAppId: 0x00002571, format: "C" },
-  { archivePath: "Techno 3/MIX/303-Inferno.mix", product: "Techno_eJay3", expectedAppId: 0x00002572, format: "C" },
-  { archivePath: "HipHop 3/MIX/Big Apple.mix", product: "HipHop_eJay3", expectedAppId: 0x00002573, format: "C" },
-  { archivePath: "Xtreme_eJay/mix/ChillySong.mix", product: "Xtreme_eJay", expectedAppId: 0x00002964, format: "C" },
-  { archivePath: "Dance_eJay4/Mix/5 days to go.mix", product: "Dance_eJay4", expectedAppId: 0x00002d41, format: "C" },
+  { product: "Dance_eJay1", filename: "FREAK.MIX", expectedAppId: 0x00000a06, format: "A" },
+  { product: "Rave", filename: "EARTH.MIX", expectedAppId: 0x00000a07, format: "A" },
+  { product: "HipHop_eJay1", filename: "BCAUSE.MIX", expectedAppId: 0x00000a08, format: "A" },
+  { product: "Techno_eJay", filename: "start.mix", expectedAppId: 0x00000889, format: "B" },
+  { product: "Dance_eJay2", filename: "CAMRON.MIX", expectedAppId: 0x00000a19, format: "B" },
+  { product: "House_eJay", filename: "VOCS.mix", expectedAppId: 0x000011d6, format: "D" },
+  { product: "HipHop_eJay2", filename: "Dope MC.mix", expectedAppId: 0x000011e9, format: "B" },
+  { product: "HipHop_eJay4", filename: "caro01.mix", expectedAppId: 0x000015dc, format: "D" },
+  { product: "Dance_eJay3", filename: "80s revisited.mix", expectedAppId: 0x00002571, format: "C" },
+  { product: "Techno_eJay3", filename: "303-Inferno.mix", expectedAppId: 0x00002572, format: "C" },
+  { product: "HipHop_eJay3", filename: "Big Apple.mix", expectedAppId: 0x00002573, format: "C" },
+  { product: "Xtreme_eJay", filename: "ChillySong.mix", expectedAppId: 0x00002964, format: "C" },
+  { product: "Dance_eJay4", filename: "5 days to go.mix", expectedAppId: 0x00002d41, format: "C" },
 ];
+
+function resolveMixFixturePath(productId: string, filename: string): string {
+  const resolved = resolveProductMixDir(productId, ARCHIVE);
+  if (!resolved) {
+    throw new Error(`Missing archive mix directory for ${productId}`);
+  }
+  const entry = collectProductMixes(productId, ARCHIVE)
+    .find((mix) => mix.filename.toLowerCase() === filename.toLowerCase());
+  if (!entry) {
+    throw new Error(`Missing mix ${filename} for ${productId}`);
+  }
+  return resolve(resolved.mixDir, entry.filename);
+}
 
 function normalizeVariantAppId(ir: MixIR): number {
   return ir.format === "A" ? (ir.appId & 0xffff) : ir.appId;
@@ -60,8 +74,8 @@ function sortedUniqueAppIds(values: Iterable<number>): number[] {
 
 describe.skipIf(!hasArchive)("golden-file MixIR snapshots", () => {
   for (const tc of CASES) {
-    it(`Format ${tc.format}: ${tc.archivePath} matches golden snapshot`, () => {
-      const buf = readFileSync(resolve(ARCHIVE, tc.archivePath));
+    it(`Format ${tc.format}: ${tc.product}/${tc.filename} matches golden snapshot`, () => {
+      const buf = readFileSync(resolveMixFixturePath(tc.product, tc.filename));
       const ir = parseMix(buf, tc.product);
       expect(ir).not.toBeNull();
 
@@ -99,8 +113,8 @@ describe.skipIf(!hasArchive)("golden-file MixIR snapshots", () => {
   }
 
   for (const tc of APP_ID_CASES) {
-    it(`covers appId ${formatAppId(tc.expectedAppId)} with ${tc.archivePath}`, () => {
-      const buf = readFileSync(resolve(ARCHIVE, tc.archivePath));
+    it(`covers appId ${formatAppId(tc.expectedAppId)} with ${tc.product}/${tc.filename}`, () => {
+      const buf = readFileSync(resolveMixFixturePath(tc.product, tc.filename));
       const ir = parseMix(buf, tc.product);
       expect(ir).not.toBeNull();
       expect(ir?.format).toBe(tc.format);
@@ -112,10 +126,12 @@ describe.skipIf(!hasArchive)("golden-file MixIR snapshots", () => {
     const observedAppIds = new Set<number>();
     const parseFailures: string[] = [];
 
-    for (const [productId, layout] of Object.entries(ARCHIVE_MIX_DIRS)) {
+    for (const [productId] of Object.entries(ARCHIVE_MIX_DIRS)) {
       const mixes = collectProductMixes(productId, ARCHIVE);
+      const resolved = resolveProductMixDir(productId, ARCHIVE);
+      if (!resolved) continue;
       for (const mix of mixes) {
-        const fullPath = resolve(ARCHIVE, layout.archiveDir, layout.mixSubdir, mix.filename);
+        const fullPath = resolve(resolved.mixDir, mix.filename);
         const ir = parseMix(readFileSync(fullPath), productId);
         if (!ir) {
           parseFailures.push(`${productId}/${mix.filename}`);

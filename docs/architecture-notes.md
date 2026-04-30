@@ -43,6 +43,24 @@ src/mix-file-browser.ts    ← in-app .mix file browser for the archive-tree
                               `buildMetaRows`, `MixFileRef`, `MixFileSource`,
                               `MixFileBrowserOptions`
 
+scripts/dev-server/        ← Vite dev-server plugin and helper modules
+  csp.ts                   ← pure CSP string builder (no Vite imports)
+  csp-plugin.ts            ← `injectContentSecurityPolicy` Vite plugin shell
+  warmup.ts                ← warmup file lists and Istanbul include constants
+  warmup-plugin.ts         ← `blockingWarmup` Vite plugin shell
+  mix-files.ts             ← pure archive-path resolver and file-copy helpers
+  mix-files-plugin.ts      ← `serveMixFiles` + `copyMixFilesPlugin` Vite plugin
+                              shells
+  category-config-plugin.ts ← `manageCategoryConfig` Vite plugin shell; watches
+                              `output/categories.json` and exposes
+                              `PUT /__category-config`
+  sample-metadata-plugin.ts ← `manageSampleMetadata` Vite plugin shell; exposes
+                              `PUT /__sample-move`
+  index.ts                 ← shared pure helpers reused by multiple plugin shells:
+                              `resolveMixUrl`, `createCategoryConfigMiddleware`,
+                              `validateSampleMovePaths`, `applySampleMoveToManifest`,
+                              `buildPerCategorySummary`
+
 scripts/test-coverage.ts   ← Playwright + nyc coverage runner and threshold
                               enforcement
 scripts/build-index.ts     ← generates data/index.json from extracted output;
@@ -109,6 +127,22 @@ test-results/              ← generated Playwright artifacts
 Browser runtime code lives in `src/`, TypeScript extraction tools live in
 `scripts/`, and build/coverage scripts live in `scripts/`. Vite bundles `src/`
 into `dist/assets/` for production.
+
+`vite.config.ts` is a composition root only — it wires together constants and
+the five plugin shells from `scripts/dev-server/` without containing any plugin
+logic itself. The dev-server module layout is:
+
+| File | Responsibility |
+|------|----------------|
+| `csp.ts` | Pure CSP string builder |
+| `csp-plugin.ts` | `injectContentSecurityPolicy` Vite plugin shell |
+| `warmup.ts` | Warmup file lists and Istanbul include constants |
+| `warmup-plugin.ts` | `blockingWarmup` Vite plugin shell |
+| `mix-files.ts` | Pure archive-path resolver and file-copy helpers |
+| `mix-files-plugin.ts` | `serveMixFiles` + `copyMixFilesPlugin` plugin shells |
+| `category-config-plugin.ts` | `manageCategoryConfig` plugin shell |
+| `sample-metadata-plugin.ts` | `manageSampleMetadata` plugin shell |
+| `index.ts` | Shared pure helpers reused across plugin shells |
 
 ## Root-Level Contract
 
@@ -341,10 +375,10 @@ For each `(product, channel, filename)` reference requested by the player:
 1. **Primary lookup** — exact match in the in-memory catalog built from
    `data/index.json`. This is the existing behaviour.
 2. **Duplicate fallback** — if the primary lookup misses, consult a parsed
-   index of `logs/duplicates.csv` (keyed by `(product, channel, filename)`
-   and by `hash_prefix`). If any duplicate row exists for the same
-   `hash_prefix`, return the first row whose target file is present in the
-   catalog.
+  index of `logs/duplicates.csv` (keyed by `(product, channel, filename)`
+  and by `hash_prefix`) when that report is available. If any duplicate row
+  exists for the same `hash_prefix`, return the first row whose target file
+  is present in the catalog.
 3. **Catalog-wide fallback** — if duplicates do not yield a hit, perform a
    filename-only search across **all** `output/**/metadata.json` entries
    (already aggregated in `data/index.json`). The first match wins; matches
@@ -376,7 +410,7 @@ timestamp_iso,mix_path,product,channel,filename,reason
   `resolveSample(ref): ResolvedSample | null` function plus small helpers
   (`parseDuplicatesCsv`, `buildDuplicateIndex`, `formatLogRow`).
 - `src/duplicates-loader.ts` — browser-side fetch + parse for
-  `logs/duplicates.csv`. Returns the structured index consumed by
+  optional `logs/duplicates.csv` input. Returns the structured index consumed by
   `sample-resolver.ts`. Kept separate so the resolver itself stays pure.
 - `src/miss-logger.ts` — thin abstraction over the log sink. In the
   browser this POSTs (or buffers + downloads) CSV rows; in tests it is
@@ -394,15 +428,16 @@ timestamp_iso,mix_path,product,channel,filename,reason
   `filename`) for the resolver.
 - `src/data.ts` — expose the aggregated `data/index.json` view as a
   catalog snapshot the resolver can consume without re-fetching.
-- `index.html` / Vite static-asset config — ensure `logs/duplicates.csv`
-  is served at runtime (read-only). `logs/log.csv` is **not** shipped;
-  it is a developer-side artifact populated by the miss logger.
+- `index.html` / Vite static-asset config — `logs/duplicates.csv` is an
+  optional developer-provided input and is not required to be checked in.
+  `logs/log.csv` is **not** shipped; it is a developer-side artifact
+  populated by the miss logger.
 
 ### Tooling and Tests
 
-- **Build/serve** — `logs/duplicates.csv` becomes a runtime asset. Add it
-  to Vite's `publicDir` allow-list (or copy via a build step) without
-  enlarging the production bundle.
+- **Build/serve** — keep resolver fallback behavior deterministic when
+  `logs/duplicates.csv` is absent (skip duplicate tier, continue to
+  catalog-wide fallback and miss logging).
 - **Unit tests** (`npm run test:unit`) — cover the resolver in isolation:
   primary hit, duplicate fallback, catalog-wide fallback, logged miss,
   duplicate row malformed, empty duplicates file, repeated misses

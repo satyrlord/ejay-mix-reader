@@ -20,7 +20,7 @@ import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 import { parseMix } from "./mix-parser.js";
-import { ARCHIVE_MIX_DIRS, buildUserdataMixLibrary, collectProductMixes } from "./build-index.js";
+import { ARCHIVE_MIX_DIRS, buildUserdataMixLibrary, collectProductMixes, resolveProductMixDir } from "./build-index.js";
 import type { MixFileMeta } from "../src/data.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -77,11 +77,8 @@ export function buildMetadataManifest(
   const totals = { total: 0, failed: 0 };
 
   for (const productId of Object.keys(ARCHIVE_MIX_DIRS).sort()) {
-    const layout = ARCHIVE_MIX_DIRS[productId];
-    if (!layout) continue;
-
-    const productArchivePath = join(archiveDir, layout.archiveDir);
-    if (!existsSync(productArchivePath)) continue;
+    const resolvedProduct = resolveProductMixDir(productId, archiveDir);
+    if (!resolvedProduct) continue;
 
     // Re-use `collectProductMixes` to discover .mix files for this product.
     const entries = collectProductMixes(productId, archiveDir);
@@ -90,7 +87,7 @@ export function buildMetadataManifest(
     const productManifest: Record<string, MixFileMeta> = {};
 
     for (const entry of entries) {
-      const filePath = join(productArchivePath, layout.mixSubdir, entry.filename);
+      const filePath = join(resolvedProduct.mixDir, entry.filename);
       if (!existsSync(filePath)) continue;
 
       let buf: Buffer;

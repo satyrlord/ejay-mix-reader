@@ -10,6 +10,7 @@ import {
   effectiveGain,
   EQ10_FREQUENCIES,
   fetchMixBinary,
+  lanesForMix,
   MixChannel,
   MixPlayerHost,
   panToStereo,
@@ -17,6 +18,7 @@ import {
   SoloGroup,
   volumeToGain,
   type AnalyserNodeLike,
+  type AudioBufferLike,
   type AudioBufferSourceNodeLike,
   type AudioContextLike,
   type AudioNodeLike,
@@ -92,6 +94,20 @@ function makeAnalyser(): AnalyserNodeLike {
   return { fftSize: 2048, frequencyBinCount: 1024, connect: () => {}, disconnect: () => {} };
 }
 
+function makeAudioBuffer(
+  channels: number = 1,
+  length: number = 44100,
+  sampleRate: number = 44100,
+): AudioBufferLike {
+  return {
+    duration: length / sampleRate,
+    length,
+    numberOfChannels: channels,
+    sampleRate,
+    getChannelData: () => new Float32Array(length),
+  };
+}
+
 function makeCtx(): AudioContextLike {
   const destination: AudioNodeLike = { connect: () => {}, disconnect: () => {} };
   return {
@@ -103,15 +119,13 @@ function makeCtx(): AudioContextLike {
     createDelay: makeDelay,
     createConvolver: makeConvolver,
     createDynamicsCompressor: makeCompressor,
-    createBuffer: (_ch, length) => ({
-      getChannelData: () => new Float32Array(length),
-    }),
+    createBuffer: (channels, length, sampleRate) => makeAudioBuffer(channels, length, sampleRate),
     createBufferSource: makeSource,
     createBiquadFilter: makeBiquad,
     createWaveShaper: makeWaveShaper,
     createOscillator: makeOscillator,
     createAnalyser: makeAnalyser,
-    decodeAudioData: async (data) => data,
+    decodeAudioData: async (data) => makeAudioBuffer(1, Math.max(1, data.byteLength)),
   };
 }
 
@@ -236,7 +250,10 @@ describe("buildMixPlaybackPlan", () => {
     expect(plan.events).toHaveLength(1);
     expect(plan.resolvedEvents).toBe(1);
     expect(plan.unresolvedEvents).toBe(0);
-    expect(plan.loopBeats).toBe(5);
+    // beat 4 → maxBeat+1 = 5 → rounded up to next 4-beat bar = 8.
+    expect(plan.loopBeats).toBe(8);
+    expect(plan.timelineRecovered).toBe(true);
+    expect(plan.lanes).toHaveLength(17); // Format B = Gen 2 = 17 lanes
     expect(plan.channelIds).toEqual(["lane-2"]);
     expect(plan.events[0]).toMatchObject({
       beat: 4,
@@ -571,7 +588,299 @@ describe("buildMixPlaybackPlan", () => {
     ]);
     expect(plan.resolvedEvents).toBe(0);
     expect(plan.unresolvedEvents).toBe(2);
-    expect(plan.loopBeats).toBe(1);
+    // No track has a finite beat → list view, no transport loop.
+    expect(plan.loopBeats).toBeNull();
+    expect(plan.timelineRecovered).toBe(false);
+  });
+
+  it("computes lengthBeats from the gap to the next event on each lane", () => {
+    const plan = buildMixPlaybackPlan(makeMix({
+      tracks: [
+        // Lane 0: events at beats 0, 2, 6 → lengths 2, 4, (loopEnd-6).
+        { beat: 0, channel: 0, sampleRef: { rawId: 1, internalName: null, displayName: "a", resolvedPath: null, dataLength: null } },
+        { beat: 2, channel: 0, sampleRef: { rawId: 2, internalName: null, displayName: "b", resolvedPath: null, dataLength: null } },
+        { beat: 6, channel: 0, sampleRef: { rawId: 3, internalName: null, displayName: "c", resolvedPath: null, dataLength: null } },
+        // Lane 1: a single event at beat 0 → runs to loopBeats (= 8).
+        { beat: 0, channel: 1, sampleRef: { rawId: 4, internalName: null, displayName: "d", resolvedPath: null, dataLength: null } },
+      ],
+    }));
+
+    expect(plan.loopBeats).toBe(8);
+    const lane0 = plan.events.filter((event) => event.channelId === "lane-0");
+    expect(lane0.map((event) => event.lengthBeats)).toEqual([2, 4, 2]);
+    const lane1 = plan.events.filter((event) => event.channelId === "lane-1");
+    expect(lane1[0]?.lengthBeats).toBe(8);
+  });
+
+  it("prefers metadata sample beat lengths and clamps to the lane gap", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Rave: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {
+          "1": "Loop/a.wav",
+          "2": "Loop/b.wav",
+        },
+        byGen1Id: {},
+        byPathBeats: {
+          "Loop/a.wav": 2,
+          "Loop/b.wav": 8,
+        },
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      product: "Rave",
+      tracks: [
+        { beat: 0, channel: 0, sampleRef: { rawId: 1, internalName: null, displayName: "a", resolvedPath: null, dataLength: null } },
+        { beat: 6, channel: 0, sampleRef: { rawId: 2, internalName: null, displayName: "b", resolvedPath: null, dataLength: null } },
+      ],
+    }), sampleIndex);
+
+    expect(plan.loopBeats).toBe(8);
+    const lane0 = plan.events.filter((event) => event.channelId === "lane-0");
+    // First event uses metadata beats (2) even though next event starts much later.
+    // Second event is clamped to lane gap (loop end at beat 8 => gap 2).
+    expect(lane0.map((event) => event.lengthBeats)).toEqual([2, 2]);
+  });
+
+  it("converts metadata quarter-note beats for Format A and extends loop to 2-bar boundary", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Rave: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {
+          "1": "Loop/a.wav",
+          "2": "Loop/b.wav",
+        },
+        byGen1Id: {},
+        byPathBeats: {
+          "Loop/b.wav": 12,
+        },
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      format: "A",
+      product: "Rave",
+      bpm: 180,
+      tracks: [
+        { beat: 0, channel: 0, sampleRef: { rawId: 1, internalName: null, displayName: "a", resolvedPath: null, dataLength: null } },
+        { beat: 114, channel: 0, sampleRef: { rawId: 2, internalName: null, displayName: "b", resolvedPath: null, dataLength: null } },
+      ],
+    }), sampleIndex);
+
+    // maxBeat+1 = 115; sample b has 12 quarter-note beats -> 3 timeline bars;
+    // inferred end becomes 117 and is rounded to the next 2-bar boundary: 118.
+    expect(plan.loopBeats).toBe(118);
+    const lane0 = plan.events.filter((event) => event.channelId === "lane-0");
+    expect(lane0[1]?.lengthBeats).toBe(3);
+  });
+
+  it("sets lengthBeats to 1 for each event when loopBeats is null (list-view mode)", () => {
+    // Format C/D mixes produce loopBeats = null; last event on each lane must
+    // fall back to 1 beat rather than an unbounded duration.
+    const plan = buildMixPlaybackPlan({
+      format: "C",
+      product: "Dance_eJay3",
+      appId: 0x00002571,
+      bpm: 130,
+      bpmAdjusted: null,
+      author: null,
+      title: null,
+      registration: null,
+      mixer: { channels: [], eq: [], compressor: null, stereoWide: null, raw: {} },
+      drumMachine: null,
+      tickerText: [],
+      catalogs: [],
+      tracks: [
+        { beat: null, channel: null, sampleRef: { rawId: 1, internalName: null, displayName: "kick", resolvedPath: null, dataLength: null } },
+        { beat: null, channel: null, sampleRef: { rawId: 2, internalName: null, displayName: "bass", resolvedPath: null, dataLength: null } },
+      ],
+    });
+
+    expect(plan.loopBeats).toBeNull();
+    expect(plan.events.every((event) => event.lengthBeats === 1)).toBe(true);
+  });
+
+  it("uses the alias from byPath as the displayLabel for resolved events", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Rave: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {},
+        byGen1Id: { "1593": "Extra/R1HG0099.wav" },
+        byPath: { "Extra/R1HG0099.wav": "Hyper Gate 99" },
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      format: "A",
+      product: "Rave",
+      tracks: [
+        {
+          beat: 0,
+          channel: 0,
+          sampleRef: { rawId: 1593, internalName: null, displayName: null, resolvedPath: null, dataLength: null },
+        },
+        // Unresolved event keeps the raw-id fallback label.
+        {
+          beat: 4,
+          channel: 1,
+          sampleRef: { rawId: 99999, internalName: null, displayName: null, resolvedPath: null, dataLength: null },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(plan.events[0]).toMatchObject({
+      audioUrl: "output/Extra/R1HG0099.wav",
+      resolved: true,
+      displayLabel: "Hyper Gate 99",
+    });
+    expect(plan.events[1]).toMatchObject({
+      audioUrl: null,
+      resolved: false,
+      displayLabel: "#99999",
+    });
+  });
+
+  it("keeps unresolved fallback label when sampleIndex is undefined", () => {
+    const plan = buildMixPlaybackPlan(makeMix({
+      product: "Rave",
+      tracks: [
+        {
+          beat: 0,
+          channel: 0,
+          sampleRef: {
+            rawId: 42,
+            internalName: null,
+            displayName: "Lead Vox",
+            resolvedPath: "Voice/lead-vox.wav",
+            dataLength: null,
+          },
+        },
+      ],
+    }));
+
+    expect(plan.events[0]).toMatchObject({
+      audioUrl: null,
+      resolved: false,
+      displayLabel: "Lead Vox",
+    });
+  });
+
+  it("falls back to sampleLabel when no product in lookup order has a byPath label", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Rave: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: { "1593": "Extra/R1HG0099.wav" },
+        byGen1Id: {},
+        // Intentionally omit byPath for this relPath to exercise the null
+        // branch in resolveSampleLabel.
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      format: "A",
+      product: "Rave",
+      tracks: [
+        {
+          beat: 0,
+          channel: 0,
+          sampleRef: { rawId: 1593, internalName: null, displayName: null, resolvedPath: null, dataLength: null },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(plan.events[0]).toMatchObject({
+      audioUrl: "output/Extra/R1HG0099.wav",
+      resolved: true,
+      displayLabel: "#1593",
+    });
+  });
+});
+
+describe("lanesForMix", () => {
+  function makeBare(format: "A" | "B" | "C" | "D"): MixIR {
+    return {
+      format,
+      product: "Test",
+      appId: 0,
+      bpm: 120,
+      bpmAdjusted: null,
+      author: null,
+      title: null,
+      registration: null,
+      mixer: { channels: [], eq: [], compressor: null, stereoWide: null, raw: {} },
+      drumMachine: null,
+      tickerText: [],
+      catalogs: [],
+      tracks: [],
+    };
+  }
+
+  it("returns 8 lanes for Format A (Gen 1)", () => {
+    const lanes = lanesForMix(makeBare("A"));
+    expect(lanes).toHaveLength(8);
+    expect(lanes[0]).toEqual({ id: "lane-0", index: 0, label: "Lane 1" });
+    expect(lanes[7]).toEqual({ id: "lane-7", index: 7, label: "Lane 8" });
+  });
+
+  it("returns 17 lanes for Format B with the 17th labelled User Perc.", () => {
+    const lanes = lanesForMix(makeBare("B"));
+    expect(lanes).toHaveLength(17);
+    expect(lanes[16]).toEqual({ id: "lane-16", index: 16, label: "User Perc." });
+  });
+
+  it("returns 32 lanes for Format C and Format D (Gen 3+)", () => {
+    expect(lanesForMix(makeBare("C"))).toHaveLength(32);
+    expect(lanesForMix(makeBare("D"))).toHaveLength(32);
+  });
+});
+
+describe("buildMixPlaybackPlan list-view fallback", () => {
+  it("emits a plan with null loopBeats and 32 canonical lanes for a Format C mix with no beats", () => {
+    const plan = buildMixPlaybackPlan({
+      format: "C",
+      product: "Dance_eJay3",
+      appId: 0x00002571,
+      bpm: 130,
+      bpmAdjusted: null,
+      author: null,
+      title: null,
+      registration: null,
+      mixer: { channels: [], eq: [], compressor: null, stereoWide: null, raw: {} },
+      drumMachine: null,
+      tickerText: [],
+      catalogs: [],
+      tracks: [
+        {
+          beat: null,
+          channel: null,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: "kick28",
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    });
+
+    expect(plan.loopBeats).toBeNull();
+    expect(plan.timelineRecovered).toBe(false);
+    expect(plan.lanes).toHaveLength(32);
+    expect(plan.events).toHaveLength(1);
   });
 });
 
@@ -674,7 +983,7 @@ describe("DrumMachine", () => {
   it("routes simple pads directly to the output", () => {
     const ctx = makeCtx();
     const dm = new DrumMachine(ctx, ctx.destination);
-    dm.setPad("kick", { buffer: {}, semitones: 0 });
+    dm.setPad("kick", { buffer: makeAudioBuffer(), semitones: 0 });
     const src = dm.trigger("kick", 0.5);
     expect(src).not.toBeNull();
     expect(src?.playbackRate.value).toBe(1);
@@ -684,7 +993,7 @@ describe("DrumMachine", () => {
   it("applies pitch and per-pad gain when configured", () => {
     const ctx = makeCtx();
     const dm = new DrumMachine(ctx, ctx.destination);
-    dm.setPad("snare", { buffer: {}, semitones: 12, gain: 0.3 });
+    dm.setPad("snare", { buffer: makeAudioBuffer(), semitones: 12, gain: 0.3 });
     const src = dm.trigger("snare", 0);
     expect(src?.playbackRate.value).toBeCloseTo(2);
     expect(dm.padCount).toBe(1);
@@ -693,15 +1002,15 @@ describe("DrumMachine", () => {
   it("clamps negative pad gain to zero", () => {
     const ctx = makeCtx();
     const dm = new DrumMachine(ctx, ctx.destination);
-    dm.setPad("hat", { buffer: {}, gain: -5 });
+    dm.setPad("hat", { buffer: makeAudioBuffer(), gain: -5 });
     expect(dm.trigger("hat", 0)).not.toBeNull();
   });
 
   it("dispose clears all registered pads", () => {
     const ctx = makeCtx();
     const dm = new DrumMachine(ctx, ctx.destination);
-    dm.setPad("kick", { buffer: {} });
-    dm.setPad("snare", { buffer: {} });
+    dm.setPad("kick", { buffer: makeAudioBuffer() });
+    dm.setPad("snare", { buffer: makeAudioBuffer() });
     expect(dm.padCount).toBe(2);
     dm.dispose();
     expect(dm.padCount).toBe(0);
@@ -837,8 +1146,8 @@ describe("MixPlayerHost", () => {
     const ctx = makeCtx();
     const host = new MixPlayerHost(ctx);
     host.registerChannel("bass");
-    host.scheduleSample({ buffer: {}, beat: 0, channelId: "bass" });
-    host.scheduleSample({ buffer: {}, beat: 2, channelId: "bass", semitones: 7 });
+    host.scheduleSample({ buffer: makeAudioBuffer(), beat: 0, channelId: "bass" });
+    host.scheduleSample({ buffer: makeAudioBuffer(), beat: 2, channelId: "bass", semitones: 7 });
     expect(host.scheduledCount).toBe(2);
     expect(host.isPlaying).toBe(false);
     const started = host.play(120, 10);
@@ -850,7 +1159,7 @@ describe("MixPlayerHost", () => {
     const ctx = makeCtx();
     const host = new MixPlayerHost(ctx);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    host.scheduleSample({ buffer: {}, beat: 0, channelId: "ghost" });
+    host.scheduleSample({ buffer: makeAudioBuffer(), beat: 0, channelId: "ghost" });
     expect(host.play(120)).toBe(0);
     expect(warnSpy).toHaveBeenCalledWith("Skipping scheduled sample for unknown channel: ghost");
     warnSpy.mockRestore();
@@ -860,7 +1169,7 @@ describe("MixPlayerHost", () => {
     const ctx = makeCtx();
     const host = new MixPlayerHost(ctx);
     host.registerChannel("drum");
-    host.scheduleSample({ buffer: {}, beat: 0, channelId: "drum" });
+    host.scheduleSample({ buffer: makeAudioBuffer(), beat: 0, channelId: "drum" });
     host.play(140);
     host.stop();
     expect(host.isPlaying).toBe(false);
@@ -870,7 +1179,7 @@ describe("MixPlayerHost", () => {
     const ctx = makeCtx();
     const host = new MixPlayerHost(ctx);
     host.registerChannel("bass");
-    host.scheduleSample({ buffer: {}, beat: 0, channelId: "bass" });
+    host.scheduleSample({ buffer: makeAudioBuffer(), beat: 0, channelId: "bass" });
     host.clear();
     expect(host.scheduledCount).toBe(0);
   });
@@ -887,9 +1196,76 @@ describe("MixPlayerHost", () => {
     });
     const host = new MixPlayerHost(ctx);
     host.registerChannel("drum");
-    host.scheduleSample({ buffer: {}, beat: 0, channelId: "drum" });
+    host.scheduleSample({ buffer: makeAudioBuffer(), beat: 0, channelId: "drum" });
     host.play(120);
     expect(() => host.stop()).not.toThrow();
+  });
+
+  it("does not call stop() when durationBeats is omitted so sources play to natural end", () => {
+    const ctx = makeCtx();
+    const sources: AudioBufferSourceNodeLike[] = [];
+    ctx.createBufferSource = () => {
+      const src: AudioBufferSourceNodeLike = {
+        buffer: null,
+        playbackRate: { value: 1 },
+        connect: () => {},
+        disconnect: () => {},
+        start: vi.fn(),
+        stop: vi.fn(),
+      };
+      sources.push(src);
+      return src;
+    };
+    const host = new MixPlayerHost(ctx);
+    host.registerChannel("bass");
+    // No durationBeats → source should start but never be hard-stopped.
+    host.scheduleSample({ buffer: makeAudioBuffer(), beat: 0, channelId: "bass" });
+    host.play(120, 0);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.start).toHaveBeenCalledOnce();
+    expect(sources[0]?.stop).not.toHaveBeenCalled();
+  });
+
+  it("schedules a hard stop when durationBeats is provided so lanes stay monophonic", () => {
+    const ctx = makeCtx();
+    const sources: AudioBufferSourceNodeLike[] = [];
+    ctx.createBufferSource = () => {
+      const src: AudioBufferSourceNodeLike = {
+        buffer: null,
+        playbackRate: { value: 1 },
+        connect: () => {},
+        disconnect: () => {},
+        start: vi.fn(),
+        stop: vi.fn(),
+      };
+      sources.push(src);
+      return src;
+    };
+    const host = new MixPlayerHost(ctx);
+    host.registerChannel("bass");
+    // 120 BPM → 1 beat = 0.5s. Schedule at beat 4 with a 2-beat length;
+    // expect stop() to be called at startAt + 4*0.5 + 2*0.5 = 13s.
+    host.scheduleSample({ buffer: makeAudioBuffer(), beat: 4, channelId: "bass", durationBeats: 2 });
+    host.play(120, 10);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.start).toHaveBeenCalledWith(12);
+    expect(sources[0]?.stop).toHaveBeenCalledWith(13);
+  });
+
+  it("ignores stop-scheduling errors when truncating with durationBeats", () => {
+    const ctx = makeCtx();
+    ctx.createBufferSource = () => ({
+      buffer: null,
+      playbackRate: { value: 1 },
+      connect: () => {},
+      disconnect: () => {},
+      start: vi.fn(),
+      stop: () => { throw new Error("scheduled stop unsupported"); },
+    });
+    const host = new MixPlayerHost(ctx);
+    host.registerChannel("bass");
+    host.scheduleSample({ buffer: makeAudioBuffer(), beat: 0, channelId: "bass", durationBeats: 1 });
+    expect(() => host.play(120, 0)).not.toThrow();
   });
 });
 

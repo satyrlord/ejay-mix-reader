@@ -50,7 +50,11 @@ describe("recover-missing-samples helpers", () => {
     expect(isUtilitySample({ filename: "sample.wav", source: "banks/sample.wav" })).toBe(false);
 
     expect(productHintForPath("_userdata/Hip Hop/demo.hh.mix")).toBe("HipHop_eJay4");
+    expect(productHintForPath("Dance eJay 1/MIX/start.mix")).toBe("Dance_eJay1");
+    expect(productHintForPath("Rave eJay/MIX/start.mix")).toBe("Rave");
+    expect(productHintForPath("Techno eJay 2/MIX/start.mix")).toBe("Techno_eJay");
     expect(productHintForPath("GenerationPack1/Rave/demo.mix")).toBe("GenerationPack1_Rave");
+    expect(productHintForPath("_user/Techno/demo.mix")).toBe("Techno_eJay");
 
     expect(refIdentifiers({ rawId: 7, internalName: null, displayName: "BankA/loop_160bpm" })).toEqual({
       filename: "BankA/loop_160bpm.wav",
@@ -405,6 +409,191 @@ describe("runRecovery", () => {
         }),
       ]);
       expect(readFileSync(join(outputDir, "Drum", "HUMN.wav"))).toBeTruthy();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("uses product-specific Gen1 catalog aliases for unresolved numeric refs", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "recover-gen1-alias-"));
+    try {
+      const archiveDir = join(tmp, "archive");
+      const outputDir = join(tmp, "output");
+      const externalDir = join(tmp, "external");
+      const reportPath = join(tmp, "logs", "missing-beats-report.json");
+      const metadataPath = join(outputDir, "metadata.json");
+
+      mkdirSync(join(archiveDir, "HipHop eJay 1", "MIX"), { recursive: true });
+      mkdirSync(join(externalDir, "Voice"), { recursive: true });
+      mkdirSync(outputDir, { recursive: true });
+      mkdirSync(join(reportPath, ".."), { recursive: true });
+
+      writeFileSync(join(archiveDir, "HipHop eJay 1", "MIX", "demo.mix"), Buffer.from("hh1", "utf8"));
+      writeFileSync(
+        metadataPath,
+        JSON.stringify({ generated_at: "x", total_samples: 0, per_category: {}, samples: [] }),
+        "utf8",
+      );
+      writeFileSync(
+        join(externalDir, "Voice", "h1rp022.wav"),
+        buildSilentPcmWav({ sampleRate: 44100, channels: 1, bitDepth: 16, numFrames: 4410 }),
+      );
+
+      const result = runRecovery(
+        {
+          archiveDir,
+          outputDir,
+          reportPath,
+          metadataPath,
+          externalPath: externalDir,
+        },
+        {
+          parseMixFn: (buf) => {
+            if (buf.toString("utf8") !== "hh1") return null;
+            return { product: "HipHop_eJay1" } as never;
+          },
+          buildResolverIndexFn: () => ({
+            gen1: new Map([
+              [
+                "GenerationPack1_HipHop",
+                {
+                  entries: Array.from({ length: 820 }, (_, id) => ({
+                    id,
+                    path: id === 819 ? "ac/h1rp022.pxd" : "",
+                    bank: id === 819 ? "AC" : null,
+                    file: id === 819 ? "H1RP022" : null,
+                    category: "rap",
+                    group: null,
+                    version: null,
+                  })),
+                },
+              ],
+            ]),
+          }) as never,
+          resolveMixFn: () => ({
+            total: 1,
+            resolved: 0,
+            unresolved: 1,
+            tracks: [
+              { sampleRef: { rawId: 819, internalName: null, displayName: null, resolvedPath: null } },
+            ],
+          }) as never,
+        },
+      );
+
+      expect(result.generatedReport.samples).toEqual([
+        expect.objectContaining({
+          product: "HipHop_eJay1",
+          filename: "H1RP022.wav",
+          source: "ac/h1rp022.pxd",
+          source_archive: "AC",
+        }),
+      ]);
+      expect(result.found).toBe(1);
+      expect(result.notFound).toBe(0);
+      expect(result.newEntries).toEqual([
+        expect.objectContaining({
+          filename: "H1RP022.wav",
+          source: "ac/h1rp022.pxd",
+          product: "HipHop_eJay1",
+          category: "Voice",
+        }),
+      ]);
+      expect(readFileSync(join(outputDir, "Voice", "H1RP022.wav"))).toBeTruthy();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("decodes unresolved source PXD files directly from archive as a fallback", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "recover-archive-fallback-"));
+    try {
+      const archiveDir = join(tmp, "archive");
+      const outputDir = join(tmp, "output");
+      const reportPath = join(tmp, "logs", "missing-beats-report.json");
+      const metadataPath = join(outputDir, "metadata.json");
+
+      const pxdDir = join(archiveDir, "Rave eJay", "PXD", "rekit1", "15");
+      mkdirSync(join(archiveDir, "Rave eJay", "MIX"), { recursive: true });
+      mkdirSync(pxdDir, { recursive: true });
+      mkdirSync(outputDir, { recursive: true });
+      mkdirSync(join(reportPath, ".."), { recursive: true });
+
+      const makePxd = (): Buffer => {
+        const meta = Buffer.from("RaveExpansion", "ascii");
+        const header = Buffer.alloc(5 + meta.length + 7);
+        header.write("tPxD", 0, "ascii");
+        header[4] = meta.length;
+        meta.copy(header, 5);
+        const metaEnd = 5 + meta.length;
+        header[metaEnd] = 0x54;
+        header.writeUInt32LE(4, metaEnd + 1);
+        header.writeUInt16LE(0, metaEnd + 5);
+        return Buffer.concat([header, Buffer.from([0x80, 0x81, 0x82, 0x83])]);
+      };
+
+      writeFileSync(join(archiveDir, "Rave eJay", "MIX", "demo.mix"), Buffer.from("rave", "utf8"));
+      writeFileSync(join(pxdDir, "R2SR512.PXD"), makePxd());
+      writeFileSync(
+        metadataPath,
+        JSON.stringify({ generated_at: "x", total_samples: 0, per_category: {}, samples: [] }),
+        "utf8",
+      );
+
+      const result = runRecovery(
+        {
+          archiveDir,
+          outputDir,
+          reportPath,
+          metadataPath,
+          externalPath: "",
+        },
+        {
+          parseMixFn: (buf) => {
+            if (buf.toString("utf8") !== "rave") return null;
+            return { product: "Rave" } as never;
+          },
+          buildResolverIndexFn: () => ({
+            gen1: new Map([
+              [
+                "Rave",
+                {
+                  entries: Array.from({ length: 2 }, (_, id) => ({
+                    id,
+                    path: id === 1 ? "rekit1/15/r2sr512.pxd" : "",
+                    bank: id === 1 ? "REKIT1" : null,
+                    file: id === 1 ? "R2SR512" : null,
+                    category: null,
+                    group: null,
+                    version: null,
+                  })),
+                },
+              ],
+            ]),
+          }) as never,
+          resolveMixFn: () => ({
+            total: 1,
+            resolved: 0,
+            unresolved: 1,
+            tracks: [
+              { sampleRef: { rawId: 1, internalName: null, displayName: null, resolvedPath: null } },
+            ],
+          }) as never,
+        },
+      );
+
+      const recoveredPath = join(outputDir, "Unsorted", "R2SR512.wav");
+      expect(result.found).toBe(1);
+      expect(result.notFound).toBe(0);
+      expect(result.copied).toBe(1);
+      expect(result.newEntries).toEqual([
+        expect.objectContaining({
+          filename: "R2SR512.wav",
+          source: "rekit1/15/r2sr512.pxd",
+          product: "Rave",
+        }),
+      ]);
+      expect(readFileSync(recoveredPath).subarray(0, 4).toString("ascii")).toBe("RIFF");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

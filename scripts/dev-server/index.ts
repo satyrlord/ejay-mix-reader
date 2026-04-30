@@ -13,7 +13,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { existsSync, statSync, writeFileSync } from "fs";
 import { resolve, sep } from "path";
 
-import { ARCHIVE_MIX_DIRS } from "../build-index.js";
+import { ARCHIVE_MIX_DIRS, resolveProductMixDir } from "../build-index.js";
 import { normalizeCategoryConfig } from "../../src/data.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -89,9 +89,10 @@ export function resolveMixUrl(
   }
 
   if (!Object.hasOwn(ARCHIVE_MIX_DIRS, productId)) return null;
-  const layout = ARCHIVE_MIX_DIRS[productId];
-  const absolutePath = resolve(archiveRoot, layout.archiveDir, layout.mixSubdir, filename);
-  const expectedPrefix = resolve(archiveRoot, layout.archiveDir, layout.mixSubdir) + sep;
+  const resolvedProduct = resolveProductMixDir(productId, archiveRoot);
+  if (!resolvedProduct) return null;
+  const absolutePath = resolve(resolvedProduct.mixDir, filename);
+  const expectedPrefix = resolvedProduct.mixDir + sep;
   if (!absolutePath.startsWith(expectedPrefix)) return null;
   if (!existsSync(absolutePath)) return null;
   try {

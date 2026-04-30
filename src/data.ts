@@ -64,18 +64,19 @@ export interface CategoryConfig {
   categories: CategoryConfigEntry[];
 }
 
-export const DEFAULT_CATEGORY_CONFIG: CategoryConfig = {
-  categories: CANONICAL_CATEGORIES.map((category) => ({
+export const DEFAULT_CATEGORY_CONFIG: CategoryConfig = /* freeze guard */ Object.freeze({
+  categories: Object.freeze(CANONICAL_CATEGORIES.map((category) => Object.freeze({
     id: category,
     name: category,
-    subcategories:
+    subcategories: Object.freeze(
       category === "Drum"
         ? [...DRUM_SUBCATEGORIES]
         : category === "Voice"
           ? [...VOICE_SUBCATEGORIES]
           : ["unsorted"],
-  })),
-};
+    ),
+  }))),
+} as CategoryConfig);
 
 export type SubcategoryKind = "special" | "system" | "user";
 
@@ -97,6 +98,19 @@ export interface MixFileMeta {
   trackCount: number;
   catalogs: string[];
   tickerText?: string[];
+  /**
+   * `true` when at least one parsed track carries a non-null `beat` (i.e.
+   * the parser recovered timeline positions). `false` for mixes that fall
+   * back to the flat sample-list view (currently every Format C/D mix).
+   */
+  timelineRecovered?: boolean;
+  /** Canonical lane count for the mix's generation. */
+  laneCount?: number;
+  /**
+   * Highest beat index recovered across tracks (0-based). `undefined` when
+   * `timelineRecovered` is false.
+   */
+  maxBeat?: number;
 }
 
 /** Human-readable generation label for a MIX format letter. */
@@ -143,6 +157,19 @@ export interface SampleLookupEntry {
   byInternalName: Record<string, string>;
   bySampleId: Record<string, string>;
   byGen1Id?: Record<string, string>;
+  /**
+   * Reverse map from a relative output path (e.g. `Drum/kick.wav`) to a
+   * human-friendly label — typically the sample's `alias`, falling back to
+   * `internal_name`. Lets the mix renderer display real sample names
+   * instead of raw numeric ids when a `.mix` event resolves to an audio
+   * file.
+   */
+  byPath?: Record<string, string>;
+  /**
+   * Reverse map from a relative output path to the sample's musical
+   * duration in beats, as extracted from `output/metadata.json`.
+   */
+  byPathBeats?: Record<string, number>;
 }
 
 export interface Sample {
@@ -917,6 +944,7 @@ export function filterSamples(samples: Sample[], filters: SampleFilterOptions): 
   });
 }
 
+/** @deprecated Use `sortSamplesByKey` with `key="beats"` instead. */
 export function sortSamplesForGrid(samples: Sample[]): Sample[] {
   return [...samples].sort((left, right) => {
     const leftBeats = typeof left.beats === "number" ? left.beats : -1;

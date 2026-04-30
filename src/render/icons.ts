@@ -126,3 +126,87 @@ export function createZoomIcon(kind: "in" | "out"): SVGSVGElement {
     elements,
   });
 }
+
+export function createSequencerHomeIcon(): SVGSVGElement {
+  return createSvgIcon({
+    className: "seq-home-icon",
+    viewBox: "0 0 16 16",
+    elements: [
+      {
+        tag: "path",
+        attrs: {
+          d: "M4.5 3v10",
+          stroke: "currentColor",
+          "stroke-width": "1.8",
+          "stroke-linecap": "round",
+        },
+      },
+      {
+        tag: "path",
+        attrs: {
+          d: "M12.5 3.5 6.5 8l6 4.5z",
+          fill: "currentColor",
+        },
+      },
+    ],
+  });
+}
+
+export function createSequencerPlayIcon(): SVGSVGElement {
+  return createSvgIcon({
+    className: "seq-play-icon",
+    viewBox: "0 0 16 16",
+    elements: [
+      {
+        tag: "path",
+        attrs: {
+          d: "M4.5 3.75 12.5 8l-8 4.25z",
+          fill: "currentColor",
+        },
+      },
+    ],
+  });
+}
+
+export function createSequencerPauseIcon(): SVGSVGElement {
+  return createSvgIcon({
+    className: "seq-pause-icon",
+    viewBox: "0 0 16 16",
+    elements: [
+      {
+        tag: "path",
+        attrs: {
+          d: "M5.25 3.5v9",
+          stroke: "currentColor",
+          "stroke-width": "2.4",
+          "stroke-linecap": "round",
+        },
+      },
+      {
+        tag: "path",
+        attrs: {
+          d: "M10.75 3.5v9",
+          stroke: "currentColor",
+          "stroke-width": "2.4",
+          "stroke-linecap": "round",
+        },
+      },
+    ],
+  });
+}
+
+export function createSequencerStopIcon(): SVGSVGElement {
+  return createSvgIcon({
+    className: "seq-stop-icon",
+    viewBox: "0 0 16 16",
+    elements: [
+      {
+        tag: "path",
+        attrs: {
+          d: "M4.5 4.5h7v7h-7z",
+          fill: "currentColor",
+        },
+      },
+    ],
+  });
+}

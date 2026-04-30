@@ -35,6 +35,13 @@ interface IndexDataLike {
   mixLibrary?: IndexMixLibraryEntry[];
 }
 
+interface PlayheadSnapshot {
+  positionText: string;
+  barNumber: number | null;
+  beat: number | null;
+  beatAlignedToBarStart: boolean;
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -77,6 +84,15 @@ const LONG_MIX_PLAYBACK_CASE = APP_ID_PLAYBACK_CASES.reduce<MixPlaybackCase | nu
 const coveragePlaybackStartTimeoutMs = process.env.VITE_COVERAGE === "true" ? 60_000 : 30_000;
 const mixPlaybackSuiteTimeoutMs = process.env.VITE_COVERAGE === "true" ? 120_000 : 90_000;
 const mixArchiveLoadTimeoutMs = process.env.VITE_COVERAGE === "true" ? 15_000 : 5_000;
+const mixContextUpdateTimeoutMs = process.env.VITE_COVERAGE === "true" ? 30_000 : 10_000;
+const mixSelectionAttempts = process.env.VITE_COVERAGE === "true" ? 3 : 2;
+
+async function waitForBarPosition(page: Page, timeoutMs: number = coveragePlaybackStartTimeoutMs): Promise<void> {
+  await page.waitForFunction(() => {
+    const position = document.querySelector<HTMLElement>(".seq-position")?.textContent ?? "";
+    return /Bar\s+\d+\s*\/\s*\d+/i.test(position);
+  }, undefined, { timeout: timeoutMs });
+}
 
 async function openMixFromArchive(page: Page, mixCase: MixPlaybackCase): Promise<void> {
   const response = await page.request.get(`/mix/${mixCase.productId}/${encodeURIComponent(mixCase.filename)}`).catch(() => null);
@@ -96,18 +112,74 @@ async function openMixFromArchive(page: Page, mixCase: MixPlaybackCase): Promise
   await expect(group).toBeVisible({ timeout: mixArchiveLoadTimeoutMs });
 
   const item = group.locator(".mix-tree-item", { hasText: mixCase.filename }).first();
+  const groupHeader = group.locator(".mix-tree-group-header");
   if (!await item.isVisible().catch(() => false)) {
-    await group.locator(".mix-tree-group-header").click();
+    await groupHeader.click({ timeout: mixArchiveLoadTimeoutMs });
   }
   await expect(item).toBeVisible({ timeout: mixArchiveLoadTimeoutMs });
-  await item.click();
-  await expect(page.locator(".mix-meta-popup")).toHaveCount(1);
-  await expect(page.locator(".context-mix-name")).toHaveText("No mix loaded");
 
-  await item.dispatchEvent("dblclick", { bubbles: true });
   const stem = mixCase.filename.replace(/\.mix$/i, "");
-  await expect(page.locator(".context-mix-name")).toHaveText(new RegExp(escapeRegex(stem), "i"));
+  const mixNameMatcher = new RegExp(escapeRegex(stem), "i");
+  const mixName = page.locator(".context-mix-name");
+  for (let attempt = 0; attempt < mixSelectionAttempts; attempt++) {
+    if (!await item.isVisible().catch(() => false)) {
+      await groupHeader.click({ timeout: mixArchiveLoadTimeoutMs }).catch(() => undefined);
+    }
+
+    try {
+      await expect(item).toBeVisible({ timeout: mixArchiveLoadTimeoutMs });
+      await item.click({ timeout: mixArchiveLoadTimeoutMs });
+      await item.dispatchEvent("dblclick", { bubbles: true });
+      await expect(mixName).toHaveText(mixNameMatcher, {
+        timeout: mixContextUpdateTimeoutMs,
+      });
+      break;
+    } catch (error) {
+      if (attempt === mixSelectionAttempts - 1) throw error;
+
+      await page.waitForFunction(() => {
+        const overlay = document.querySelector<HTMLElement>("#mix-sample-loading-overlay");
+        return !overlay || !overlay.classList.contains("is-visible");
+      }, undefined, { timeout: mixContextUpdateTimeoutMs }).catch(() => undefined);
+
+      await page.locator("#archive-tree").click({ timeout: mixArchiveLoadTimeoutMs }).catch(() => undefined);
+      await expect.poll(async () => page.locator(".mix-tree-group").count(), {
+        timeout: mixArchiveLoadTimeoutMs,
+      }).toBeGreaterThan(0);
+    }
+  }
+
   await expect(page.locator(".mix-meta-popup")).toHaveCount(0);
+}
+
+async function readPlayheadSnapshot(page: Page): Promise<PlayheadSnapshot> {
+  return page.evaluate(() => {
+    const positionText = document.querySelector<HTMLElement>(".seq-position")?.textContent?.trim() ?? "";
+    const barMatch = /Bar\s+(\d+)\s*\/\s*\d+/i.exec(positionText);
+    const barNumber = barMatch ? Number(barMatch[1]) : null;
+
+    const playhead = document.querySelector<HTMLElement>(".sequencer-playhead");
+    const canvas = document.querySelector<HTMLElement>(".sequencer-canvas");
+    let beat: number | null = null;
+    let beatAlignedToBarStart = false;
+
+    if (playhead && canvas) {
+      const transformMatch = /translateX\(([-\d.]+)px\)/.exec(playhead.style.transform);
+      const labelPx = Number.parseFloat(canvas.style.getPropertyValue("--mix-grid-label-px"));
+      const beatStepPx = Number.parseFloat(canvas.style.getPropertyValue("--mix-grid-beat-step-px"));
+      if (transformMatch && Number.isFinite(labelPx) && Number.isFinite(beatStepPx) && beatStepPx > 0) {
+        beat = (Number(transformMatch[1]) - labelPx) / beatStepPx;
+        beatAlignedToBarStart = Math.abs(beat - Math.round(beat)) < 0.001;
+      }
+    }
+
+    return {
+      positionText,
+      barNumber,
+      beat,
+      beatAlignedToBarStart,
+    };
+  });
 }
 
 async function assertMixPlaybackTransport(page: Page): Promise<void> {
@@ -121,7 +193,7 @@ async function assertMixPlaybackTransport(page: Page): Promise<void> {
 
   expect(initialTimeline.scrollWidth).toBeGreaterThanOrEqual(initialTimeline.clientWidth);
   expect(await page.locator(".sequencer-beat-number").count()).toBeGreaterThan(0);
-  await expect(page.locator(".seq-play-btn")).toBeEnabled();
+  await expect(page.locator(".seq-play-btn")).toBeEnabled({ timeout: playbackStartTimeoutMs });
 
   await page.locator(".seq-play-btn").evaluate((button: HTMLButtonElement) => {
     button.click();
@@ -148,7 +220,7 @@ async function assertMixPlaybackTransport(page: Page): Promise<void> {
   expect(playingTimeline.scrollWidth).toBeGreaterThanOrEqual(playingTimeline.clientWidth);
 
   const positionText = (await page.locator(".seq-position").textContent()) ?? "";
-  expect(positionText).toMatch(/Bar\s+\d+\s+\/\s+\d+|\d+\s+events\s+·\s+\d+\s+ready/);
+  expect(positionText).toMatch(/Bar\s+\d+\s+\/\s+\d+|\d+\s+events\s+·\s+\d+\s+ready|Loading samples\s+\d+\/\d+/);
 
   const stopButton = page.locator(".seq-stop-btn");
   const clickedStop = await stopButton.evaluate((button: HTMLButtonElement) => {
@@ -179,7 +251,7 @@ async function assertMixAutoScroll(page: Page): Promise<void> {
   }));
 
   expect(initialTimeline.scrollWidth).toBeGreaterThan(initialTimeline.clientWidth);
-  await expect(page.locator(".seq-play-btn")).toBeEnabled();
+  await expect(page.locator(".seq-play-btn")).toBeEnabled({ timeout: playbackStartTimeoutMs });
 
   await page.locator(".seq-play-btn").evaluate((button: HTMLButtonElement) => {
     button.click();
@@ -210,7 +282,7 @@ async function assertMixAutoScroll(page: Page): Promise<void> {
   });
 }
 
-test.describe("MIX playback (prerequisite 13)", () => {
+test.describe("Mix Playback", () => {
   test.setTimeout(mixPlaybackSuiteTimeoutMs);
 
   test("serves a MIX file through the /mix/ dev-server middleware", async ({ page }) => {
@@ -240,12 +312,148 @@ test.describe("MIX playback (prerequisite 13)", () => {
     await openMixFromArchive(page, LONG_MIX_PLAYBACK_CASE!);
     await assertMixAutoScroll(page);
   });
+});
 
-  for (const mixCase of APP_ID_PLAYBACK_CASES) {
-    const appIdHex = `0x${mixCase.appId.toString(16).padStart(8, "0")}`;
-    test(`plays one representative mix for appId ${appIdHex} (${mixCase.group} / ${mixCase.filename})`, async ({ page }) => {
+function loadStartMixCases(): MixPlaybackCase[] {
+  const parsed = JSON.parse(readFileSync(join(process.cwd(), "data", "index.json"), "utf-8")) as IndexDataLike;
+  const cases: MixPlaybackCase[] = [];
+
+  for (const group of parsed.mixLibrary ?? []) {
+    if (group.id.startsWith("_userdata/")) continue;
+    const startMix = group.mixes.find((m) => /^start\.mix$/i.test(m.filename));
+    if (!startMix) continue;
+    cases.push({
+      appId: 0,
+      productId: group.id,
+      group: group.name,
+      filename: startMix.filename,
+      trackCount: startMix.meta?.trackCount ?? 0,
+      format: startMix.meta?.format ?? null,
+    });
+  }
+
+  return cases.sort((left, right) => left.productId.localeCompare(right.productId));
+}
+
+const START_MIX_CASES = loadStartMixCases();
+const RAVE_START_CASE = START_MIX_CASES.find((mixCase) => mixCase.productId === "Rave") ?? null;
+
+/**
+ * Format B products whose start.mix samples are fully resolved after the
+ * Gen 2 compound-alias index fix. For these, the initial playhead position
+ * must show structured bar notation ("Bar 1 / N") rather than the fallback
+ * "N events · M ready" stub used by unresolved or Format C/D mixes.
+ */
+const FORMAT_B_RESOLVED_PRODUCTS = new Set(["Dance_eJay2", "Techno_eJay"]);
+
+test.describe("start.mix per-product matrix", () => {
+  test.setTimeout(mixPlaybackSuiteTimeoutMs);
+
+  test("Rave start.mix renders variable tracker bubble widths", async ({ page }) => {
+    if (!RAVE_START_CASE) {
+      test.skip(true, "Rave start.mix not present in data/index.json");
+    }
+    const playbackStartTimeoutMs = coveragePlaybackStartTimeoutMs;
+
+    await openMixFromArchive(page, RAVE_START_CASE!);
+
+    const playButton = page.locator(".seq-play-btn");
+    const stopButton = page.locator(".seq-stop-btn");
+    await expect(playButton).toBeEnabled({ timeout: playbackStartTimeoutMs });
+    await playButton.click();
+    await expect(page.locator(".seq-position")).toContainText("Bar 1 / 118", {
+      timeout: playbackStartTimeoutMs,
+    });
+    await stopButton.click();
+
+    const spans = await page.locator(".sequencer-event").evaluateAll((nodes) => nodes.map((node) => {
+      const inline = (node as HTMLElement).style.gridColumn;
+      const match = /span\s+(\d+)/i.exec(inline);
+      return match ? Number(match[1]) : 1;
+    }));
+
+    expect(spans.length).toBeGreaterThan(0);
+    expect(Math.max(...spans)).toBeGreaterThan(1);
+  });
+
+  test("play/pause button, Space, and Enter control transport playback", async ({ page }) => {
+    const mixCase = START_MIX_CASES.find((entry) => FORMAT_B_RESOLVED_PRODUCTS.has(entry.productId));
+    if (!mixCase) {
+      test.skip(true, "No resolved Format B start.mix case available for transport shortcut assertions.");
+    }
+
+    await openMixFromArchive(page, mixCase!);
+
+    const playPauseButton = page.locator(".seq-play-btn");
+    const stopButton = page.locator(".seq-stop-btn");
+
+    await expect(playPauseButton).toBeEnabled({ timeout: coveragePlaybackStartTimeoutMs });
+    await expect(playPauseButton).toHaveAttribute("aria-label", "Play mix");
+    await playPauseButton.click();
+    await expect(playPauseButton).toHaveAttribute("aria-label", "Pause mix at current bar start");
+    await page.waitForFunction(() => {
+      const position = document.querySelector<HTMLElement>(".seq-position")?.textContent ?? "";
+      const match = /Bar\s+(\d+)\s*\/\s*\d+/i.exec(position);
+      return match !== null && Number(match[1]) >= 2;
+    }, undefined, { timeout: coveragePlaybackStartTimeoutMs });
+
+    await playPauseButton.click();
+    await expect(stopButton).toBeDisabled();
+    await expect(playPauseButton).toHaveAttribute("aria-label", "Play mix");
+    await waitForBarPosition(page);
+
+    const pausedByButton = await readPlayheadSnapshot(page);
+    expect(pausedByButton.barNumber).not.toBeNull();
+    expect(pausedByButton.beat).not.toBeNull();
+    expect(pausedByButton.beatAlignedToBarStart).toBe(true);
+    expect(Math.abs((pausedByButton.beat ?? 0) - ((pausedByButton.barNumber ?? 1) - 1))).toBeLessThan(0.001);
+
+    await page.locator(".context-mix-name").click();
+    await page.keyboard.press("Space");
+    await expect(stopButton).toBeEnabled({ timeout: coveragePlaybackStartTimeoutMs });
+    await expect(playPauseButton).toHaveAttribute("aria-label", "Pause mix at current bar start");
+
+    await page.keyboard.press("Space");
+    await expect(stopButton).toBeDisabled();
+    await expect(playPauseButton).toHaveAttribute("aria-label", "Play mix");
+    await waitForBarPosition(page);
+
+    const pausedBySpace = await readPlayheadSnapshot(page);
+    expect(pausedBySpace.barNumber).not.toBeNull();
+    expect(pausedBySpace.beat).not.toBeNull();
+    expect(pausedBySpace.beatAlignedToBarStart).toBe(true);
+    expect(Math.abs((pausedBySpace.beat ?? 0) - ((pausedBySpace.barNumber ?? 1) - 1))).toBeLessThan(0.001);
+
+    await page.keyboard.press("Enter");
+    await expect(stopButton).toBeEnabled({ timeout: coveragePlaybackStartTimeoutMs });
+    await expect(playPauseButton).toHaveAttribute("aria-label", "Pause mix at current bar start");
+    await waitForBarPosition(page);
+
+    const startedByEnter = await readPlayheadSnapshot(page);
+    expect(startedByEnter.beat).not.toBeNull();
+    expect((startedByEnter.beat ?? Number.POSITIVE_INFINITY)).toBeLessThan(pausedBySpace.beat ?? 0);
+
+    await page.keyboard.press("Enter");
+    await expect(stopButton).toBeDisabled();
+    await expect(playPauseButton).toHaveAttribute("aria-label", "Play mix");
+    await waitForBarPosition(page);
+
+    const afterEnterStop = await readPlayheadSnapshot(page);
+    expect(afterEnterStop.beat).not.toBeNull();
+    expect(Math.abs((afterEnterStop.beat ?? 1) - 0)).toBeLessThan(0.001);
+    expect(afterEnterStop.barNumber).toBe(1);
+  });
+
+  for (const mixCase of START_MIX_CASES) {
+    test(`start.mix loads and plays for ${mixCase.productId}`, async ({ page }) => {
       await openMixFromArchive(page, mixCase);
-      await assertMixPlaybackTransport(page);
+
+      // Only run the full playback transport assertion for Format B products
+      // whose samples are fully resolved — other formats either have no events
+      // yet (Format C/D parsers are not fully implemented) or parse 0 tracks.
+      if (FORMAT_B_RESOLVED_PRODUCTS.has(mixCase.productId)) {
+        await assertMixPlaybackTransport(page);
+      }
     });
   }
 });

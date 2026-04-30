@@ -27,7 +27,7 @@ empty), not a collapsed 2-lane view.
 > Implication for the player: the sequencer view must source its lane count
 > from the parsed `MixIR.format` / `MixIR.product`, **not** from the set of
 > channels that happen to carry events. See
-> [`docs/milestone-3-plan.md`](milestone-3-plan.md) for the corresponding
+> [`docs/refactor-plan.md`](refactor-plan.md) for the corresponding
 > rendering work.
 
 ## File Inventory
@@ -123,6 +123,10 @@ is an entry count / metadata offset.
 All other products have BPM1 === BPM2. Hypothesis: BPM2 is the user-adjusted
 playback tempo while BPM1 is the original library BPM. Default to BPM1 for
 playback.
+
+Techno-specific clarification: `bpmAdjusted` values around 134/135 do occur in
+some Techno `.mix` files, but the base product/library BPM remains 140.
+Treat those values as per-mix tempo edits, not as the default Techno BPM.
 
 ---
 
@@ -319,11 +323,10 @@ section of `file-formats.md` and the generated
 #### Remaining Follow-ups
 
 The four open questions previously listed here have been investigated against
-the full 83-file Gen 1 `.mix` corpus via
-[`scripts/investigate-mix-followups.ts`](../scripts/investigate-mix-followups.ts)
-and [`scripts/probe-header-aux.ts`](../scripts/probe-header-aux.ts). The
-findings are summarised below; only the column-to-channel mapping remains
-genuinely undetermined (requires UI inspection of the original engine).
+the full 83-file Gen 1 `.mix` corpus via temporary April 2026 analysis tools.
+Those one-off scripts were retired after the findings were folded into this
+document; only the column-to-channel mapping remains genuinely undetermined
+(requires UI inspection of the original engine).
 
 ##### 1. Column-to-channel assignment — partially resolved
 
@@ -495,6 +498,42 @@ Some track entries also contain **ticker text** for the UI's scrolling message
 display, with text labels like "You", "can", "even", "create", "some", "funky",
 "lines", "with", "your", "Groove", "generat", "or  if", "you", "want", "!!!!".
 
+#### Format B Channel Field — Resolved (April 2026)
+
+**Finding:** the byte currently labelled `channelByte` in `parseFormatBTracks`
+(consumed at `offset += 2` immediately after the two-byte sample-ID field) is
+confirmed as the **zero-indexed lane index**.
+
+**Evidence summary (April 2026 run):** all 45 Gen 2 mixes were cross-tabbed
+(Dance eJay 2, Techno eJay, HipHop eJay 2 — 453 track placements total). For
+each product, every observed `channelByte` value maps to exactly one group in
+the seiten Soundgruppe table, and the byte value equals the channel's zero-based
+position in that table:
+
+| Product | channelByte | seiten name (0-indexed) | Count |
+|---------|------------|-------------------------|-------|
+| Dance_eJay2 | 6 | rap (index 6) | 11 |
+| Dance_eJay2 | 7 | voice (index 7) | 7 |
+| Dance_eJay2 | 8 | effect (index 8) | 33 |
+| Dance_eJay2 | 9 | xtra (index 9) | 20 |
+| Dance_eJay2 | 10 | groove (index 10) | 8 |
+| Dance_eJay2 | 11 | wave (index 11) | 32 |
+| HipHop_eJay2 | 5 | layer (index 5) | 1 |
+| HipHop_eJay2 | 6 | scratch (index 6) | 46 |
+| HipHop_eJay2 | 7 | voice (index 7) | 20 |
+| HipHop_eJay2 | 8 | effect (index 8) | 53 |
+| HipHop_eJay2 | 9 | xtra (index 9) | 72 |
+
+The demo mixes use only the higher-numbered channels (rap, voice, effect, …);
+lower channels (loop, drum, bass, guitar, sequence, layer) are present but
+receive no placements in the archived demo mixes. This accounts for the absence
+of bytes 0–4 in the histogram — not a gap in the format.
+
+**Conclusion:** no parser change is required. `track.channel = channelByte` in
+`parseFormatBTracks` is already correct. The field correctly identifies the
+zero-based lane index, consistent with the 17-lane Gen 2 layout
+(`LANE_COUNT_BY_FORMAT.B = 17`).
+
 ---
 
 ### Format C — Gen 3 Early (Mixer State + Text Tracks)
@@ -608,39 +647,83 @@ Empty catalog slots use `0x02 0x00 0x00 0x01` (marking unused pack entries).
 
 #### Track Entry Section
 
-Each placed sample is a variable-length record:
+For ongoing Format C/D reverse-engineering, run:
 
-```text
-For each track entry:
-  0x00  2     Binary metadata (offset/size related)
-  0x02  2     Tag: 0x01
-  0x04  2     Unknown / record length
-  0x06  4     File offset or ID (uint32 LE)
-  0x0A  2     Unknown
-  0x0C  ...   Display name (length-prefixed, null-terminated), e.g., "kick28"
-  0x??  ...   Padding (null bytes)
-  0x??  4     Sample data size (uint32 LE)
-  0x??  2     Path length (uint16 LE)
-  0x??  ...   Left temp path (null-terminated), e.g., "c:\windows\TEMP\pxd32pd.tmp"
-  0x??  2     Path length (uint16 LE)
-  0x??  ...   Right temp path (null-terminated) — same path for mono, different for stereo
-  0x??  2     Terminator: 0xFFFF
-  0x??  ...   Padding / additional metadata
+```bash
+npm run mix:dump-cd -- --product Dance_eJay3
 ```
 
-The temp file paths (`c:\windows\TEMP\pxd32p{x}.tmp`) are artifacts of the
-original eJay application's runtime — it decompressed PXD samples to temp WAV
-files during session load. The alphabetical suffix (`d`, `e`, `f`, ...) indicates
-the loading order, not a persistent identifier.
+The command is diagnostic-only: it writes hex/field dumps to
+`logs/format-cd/` and does not modify `output/` or any extraction artifacts.
+Re-run it when parser heuristics for C/D records change, or when new archive
+mix sets are added and need fresh offset evidence.
 
-> **Timeline rendering limitation**: The temp-path records carry no beat or
-> channel index. The parser emits `beat: null` and `channel: null` for every
-> Format C `TrackPlacement`. Timeline position is irretrievably lost for these
-> files — only the sample list is recoverable. Format C mixes cannot be
-> rendered on a sequencer grid without further reverse-engineering of the
-> on-disk format to locate beat/channel fields. Until that work is done, the
-> player must degrade gracefully (e.g. flat sample list, or all tracks at
-> beat 0).
+Two sub-formats exist within Format C, both using the same regex path scan
+(`pxd32p[a-z]\.tmp`).
+
+##### Compact track record (gap 8–12 bytes)
+
+Used by files such as `start.mix` in Dance eJay 3 / HipHop eJay 3:
+
+```text
+[marker:     4 bytes = 02 00 00 01]
+[nameLen:    2 bytes uint16 LE]   ← printable char count only (no trailer)
+[name:       nameLen bytes]       ← display alias, e.g. "kick12"
+[8–12 bytes  state / padding]
+[pathLen:    2 bytes uint16 LE]
+[leftPath:   pathLen bytes]       ← e.g. "c:\windows\TEMP\pxd32pd.tmp"
+[pathLen:    2 bytes uint16 LE]
+[rightPath:  pathLen bytes]       ← same as left for mono
+[FF FF       record terminator]
+```
+
+The parser yields `beat: null` and `channel: null` for these records — no
+beat or lane index is recoverable from the compact format.
+
+##### Big track record (gap === 40 bytes)
+
+Used by project-save files such as `french.mix` in Dance eJay 3, confirmed
+by binary analysis of `archive/Dance_eJay3/MIX/french.mix` and
+cross-referenced with the decompiled VB6 save routine in
+`decompiled/dance3/sample.bas`. German identifiers from disassembly:
+`zeitpos` = beat index, `Spur` = lane/channel.
+
+```text
+[marker:       4 bytes = 02 00 00 01]
+[nameLen:      2 bytes uint16 LE]   ← chars + 2 (includes \0\x01 trailer)
+[name:         nameLen - 2 bytes]   ← product name, e.g. "Dance eJay 3.0"
+[\0\x01        2-byte trailer included in nameLen count]
+[18 bytes      track state block (EQ/volume data; not all zeros)]
+[dataLen:      4 bytes uint32 LE]   ← sample data size
+[zeitpos:      4 bytes uint32 LE]   ← beat index (pathStart − 18)
+[0x00:         1 byte padding]
+[Spur:         1 byte uint8]        ← lane/channel index (pathStart − 13)
+[8 bytes       state block (may contain non-zero EQ bytes)]
+[mystery:      2 bytes uint16]      ← purpose unknown
+[pathLen:      2 bytes uint16 LE]
+[leftPath:     pathLen bytes]       ← e.g. "c:\windows\TEMP\pxd32pd.tmp"
+[pathLen:      2 bytes uint16 LE]
+[rightPath:    pathLen bytes]
+[FF FF         record terminator]
+```
+
+Total gap from `nameEnd` to `pathStart` = 40 bytes (fixed).
+
+Verified field offsets relative to `pathStart`:
+
+| Offset        | Field       | Type      | Example |
+|---------------|-------------|-----------|---------|
+| `pathStart−22`| `dataLen`   | uint32 LE | 253     |
+| `pathStart−18`| `zeitpos`   | uint32 LE | 1       |
+| `pathStart−14`| padding     | uint8     | 0x00    |
+| `pathStart−13`| `Spur`      | uint8     | 2       |
+| `pathStart−4` | mystery     | uint16 LE | varies  |
+| `pathStart−2` | `pathLen`   | uint16 LE | 27      |
+
+Secondary placements (same channel, different beat) appear after the `FF FF`
+terminator in a shorter continuation format (not yet fully decoded). The
+parser skips these — only the first-occurrence record per sample voice is
+extracted.
 
 ---
 
@@ -1064,10 +1147,9 @@ applies the following rules:
 | **D** | `appId`, `bpm`, title/author/catalogs, mixer raw text, drum-machine state, `displayName`/`internalName`. | `beat` and `channel` remain unrecovered; drum-machine and mixer parameters are parsed but not yet reproduced faithfully in the browser transport. |
 
 The largest currently measured archive mix is `archive/HipHop 4/MIX/monochroid.mix`
-(23,721 bytes). The current timing baseline lives in
-`logs/mix-playback-performance-baseline.json`; that run shows fast parse and
-plan times but `0` resolved events because HipHop 4 Format D tracks still reach
-the player without usable identifiers.
+(23,721 bytes). A local timing baseline run in April 2026 showed fast parse
+and plan times but `0` resolved events because HipHop 4 Format D tracks still
+reach the player without usable identifiers.
 
 ---
 

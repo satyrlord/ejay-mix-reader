@@ -9,6 +9,8 @@ import { fileURLToPath } from "url";
 
 import { detectFormat, parseMix } from "./mix-parser.js";
 import { canonicalizeProduct, loadGen1Catalogs, PRODUCT_FALLBACKS } from "./mix-resolver.js";
+import { normalisePxdPath, parsePxddanceFile } from "./gen1-catalog.js";
+import { parseInfCatalog } from "./pxd-parser.js";
 import type { MixFormat } from "./mix-types.js";
 import {
   buildCategoryEntries,
@@ -60,20 +62,21 @@ const MIN_MIX_SIZE = 4;
  * sub-folder. Products without a `.mix` folder (e.g. sample kits, the
  * GenerationPack1 re-releases) are intentionally absent.
  */
-export const ARCHIVE_MIX_DIRS: Record<string, { archiveDir: string; mixSubdir: string }> = {
-  Dance_eJay1:     { archiveDir: "Dance_eJay1",     mixSubdir: "MIX" },
-  Dance_eJay2:     { archiveDir: "Dance_eJay2",     mixSubdir: "MIX" },
-  Dance_eJay3:     { archiveDir: "Dance_eJay3",     mixSubdir: "MIX" },
-  Dance_eJay4:     { archiveDir: "Dance_eJay4",     mixSubdir: "Mix" },
-  Dance_SuperPack: { archiveDir: "Dance_SuperPack", mixSubdir: "MIX" },
-  HipHop_eJay2:    { archiveDir: "HipHop 2",        mixSubdir: "MIX" },
-  HipHop_eJay3:    { archiveDir: "HipHop 3",        mixSubdir: "MIX" },
-  HipHop_eJay4:    { archiveDir: "HipHop 4",        mixSubdir: "MIX" },
-  House_eJay:      { archiveDir: "House_eJay",      mixSubdir: "Mix" },
-  Rave:            { archiveDir: "Rave",            mixSubdir: "MIX" },
-  Techno_eJay3:    { archiveDir: "Techno 3",        mixSubdir: "MIX" },
-  Techno_eJay:     { archiveDir: "TECHNO_EJAY",     mixSubdir: "MIX" },
-  Xtreme_eJay:     { archiveDir: "Xtreme_eJay",     mixSubdir: "mix" },
+export const ARCHIVE_MIX_DIRS: Record<string, { archiveDir: string; archiveDirAliases?: string[]; mixSubdir: string; mixSubdirAliases?: string[] }> = {
+  Dance_eJay1:     { archiveDir: "Dance_eJay1",     archiveDirAliases: ["Dance eJay 1"], mixSubdir: "MIX" },
+  Dance_eJay2:     { archiveDir: "Dance_eJay2",     archiveDirAliases: ["Dance eJay 2", "Dance eJay 2 OLD", "Dance eJay 2 NEW"], mixSubdir: "MIX", mixSubdirAliases: ["D2/MIX"] },
+  Dance_eJay3:     { archiveDir: "Dance_eJay3",     archiveDirAliases: ["Dance eJay 3"], mixSubdir: "MIX" },
+  Dance_eJay4:     { archiveDir: "Dance_eJay4",     archiveDirAliases: ["Dance eJay 4"], mixSubdir: "Mix" },
+  Dance_SuperPack: { archiveDir: "Dance_SuperPack", archiveDirAliases: ["Dance SuperPack"], mixSubdir: "MIX" },
+  HipHop_eJay1:    { archiveDir: "HipHop 1",        archiveDirAliases: ["HipHop eJay 1"], mixSubdir: "MIX" },
+  HipHop_eJay2:    { archiveDir: "HipHop 2",        archiveDirAliases: ["HipHop eJay 2"], mixSubdir: "MIX" },
+  HipHop_eJay3:    { archiveDir: "HipHop 3",        archiveDirAliases: ["HipHop eJay 3"], mixSubdir: "MIX" },
+  HipHop_eJay4:    { archiveDir: "HipHop 4",        archiveDirAliases: ["HipHop eJay 4"], mixSubdir: "MIX" },
+  House_eJay:      { archiveDir: "House_eJay",      archiveDirAliases: ["House eJay"], mixSubdir: "Mix" },
+  Rave:            { archiveDir: "Rave",            archiveDirAliases: ["Rave eJay"], mixSubdir: "MIX" },
+  Techno_eJay3:    { archiveDir: "Techno 3",        archiveDirAliases: ["Techno eJay 3"], mixSubdir: "MIX" },
+  Techno_eJay:     { archiveDir: "TECHNO_EJAY",     archiveDirAliases: ["Techno eJay 2", "Techno eJay"], mixSubdir: "MIX", mixSubdirAliases: ["eJay/mix", "eJay/MIX"] },
+  Xtreme_eJay:     { archiveDir: "Xtreme_eJay",     archiveDirAliases: ["Xtreme"], mixSubdir: "mix" },
 };
 
 type RawSample = Sample;
@@ -225,6 +228,42 @@ export function findMixSubdir(productArchivePath: string): string | null {
   return null;
 }
 
+function archiveDirCandidates(productId: string): string[] {
+  const layout = ARCHIVE_MIX_DIRS[productId];
+  if (!layout) return [];
+  return [layout.archiveDir, ...(layout.archiveDirAliases ?? [])];
+}
+
+export function resolveProductArchivePath(productId: string, archiveDir: string): string | null {
+  for (const candidate of archiveDirCandidates(productId)) {
+    const productArchivePath = join(archiveDir, candidate);
+    if (existsSync(productArchivePath)) return productArchivePath;
+  }
+  return null;
+}
+
+export function resolveProductMixDir(
+  productId: string,
+  archiveDir: string,
+): { productArchivePath: string; mixDir: string } | null {
+  const layout = ARCHIVE_MIX_DIRS[productId];
+  if (!layout) return null;
+  const productArchivePath = resolveProductArchivePath(productId, archiveDir);
+  if (!productArchivePath) return null;
+
+  const explicitMixCandidates = [layout.mixSubdir, ...(layout.mixSubdirAliases ?? [])];
+  for (const relMixPath of explicitMixCandidates) {
+    const mixDir = join(productArchivePath, relMixPath);
+    if (existsSync(mixDir)) {
+      return { productArchivePath, mixDir };
+    }
+  }
+
+  const mixDir = findMixSubdir(productArchivePath);
+  if (!mixDir) return null;
+  return { productArchivePath, mixDir };
+}
+
 /**
  * Scan a `.mix` directory and return one inventory entry per valid file.
  * Files smaller than `MIN_MIX_SIZE` and files that `detectFormat()` cannot
@@ -300,13 +339,10 @@ export function scanMixDir(mixDir: string, productId?: string): MixFileEntry[] {
  * MIX sub-folder is absent.
  */
 export function collectProductMixes(productId: string, archiveDir: string): MixFileEntry[] {
-  const layout = ARCHIVE_MIX_DIRS[productId];
-  if (!layout) return [];
-  const productArchivePath = join(archiveDir, layout.archiveDir);
-  if (!existsSync(productArchivePath)) return [];
-  const mixDir = findMixSubdir(productArchivePath);
-  if (!mixDir) return [];
-  return scanMixDir(mixDir, productId);
+  if (!ARCHIVE_MIX_DIRS[productId]) return [];
+  const resolved = resolveProductMixDir(productId, archiveDir);
+  if (!resolved) return [];
+  return scanMixDir(resolved.mixDir, productId);
 }
 
 /**
@@ -465,6 +501,7 @@ export function buildSampleIndex(
     source?: string;
     internal_name?: string;
     sample_id?: number;
+    beats?: number;
   }
 
   const baseSamples = readRootCatalogSamples(outputDir);
@@ -486,6 +523,8 @@ export function buildSampleIndex(
         byInternalName: {},
         bySampleId: {},
         byGen1Id: {},
+        byPath: {},
+        byPathBeats: {},
       };
     }
     const entry = index[product];
@@ -511,6 +550,23 @@ export function buildSampleIndex(
       entry.bySampleId[String(sample.sample_id)] = relPath;
     }
 
+    // Forward map path → human label, so the mix renderer can resolve a
+    // displayable name from a resolved audio path. Prefer the sample's
+    // alias, then internal_name, then the filename stem.
+    const byPath = entry.byPath ?? (entry.byPath = {});
+    if (!byPath[relPath]) {
+      const dotPos = filename.lastIndexOf(".");
+      const stemLabel = dotPos >= 0 ? filename.slice(0, dotPos) : filename;
+      byPath[relPath] = sample.alias || sample.internal_name || stemLabel;
+    }
+
+    if (typeof sample.beats === "number" && Number.isFinite(sample.beats) && sample.beats > 0) {
+      const byPathBeats = entry.byPathBeats ?? (entry.byPathBeats = {});
+      if (typeof byPathBeats[relPath] !== "number") {
+        byPathBeats[relPath] = sample.beats;
+      }
+    }
+
     if (sample.source) {
       const normalizedSource = sample.source.replace(/\\/g, "/").toLowerCase();
       entry.bySource[normalizedSource] = relPath;
@@ -531,13 +587,173 @@ export function buildSampleIndex(
   }
 
   appendGen1Lookups(index, archiveDir);
+  appendGen2CompoundAliases(index, archiveDir);
 
   return index;
+}
+
+/**
+ * INF catalog paths for Gen 2 Format B products, relative to the archive root.
+ * Each INF file maps internal filenames (e.g. "D5MA066") to a group prefix
+ * (e.g. "euro") and an alias (e.g. "kick5"). The concatenation of group+alias
+ * forms the compound name ("eurokick5") stored in Format B .mix files.
+ */
+const GEN2_INF_PATHS: Record<string, string[]> = {
+  Dance_eJay2: [
+    "Dance_eJay2/D_ejay2/PXD/DANCE20.INF",
+    "Dance eJay 2/D_EJAY2/PXD/DANCE20.INF",
+    "Dance eJay 2/D2/PXD/dance20.inf",
+    "Dance eJay 2 OLD/D_EJAY2/PXD/DANCE20.INF",
+    "Dance eJay 2 NEW/D2/PXD/Dancesk4.inf",
+    "Dance eJay 2 NEW/D2/PXD/Dancesk5.inf",
+    "Dance eJay 2 NEW/D2/PXD/Dancesk6.inf",
+  ],
+  Techno_eJay: [
+    "TECHNO_EJAY/EJAY/PXD/RAVE20.INF",
+    "Techno eJay 2/eJay/PXD/rave20.inf",
+  ],
+  Dance_eJay3: [
+    "Dance_eJay3/eJay/pxd/dance30.inf",
+    "Dance eJay 3/eJay/pxd/dance30.inf",
+  ],
+  Dance_eJay4: [
+    "Dance_eJay4/ejay/PXD/DANCE40.inf",
+    "Dance eJay 4/eJay/PXD/DANCE40.inf",
+  ],
+  HipHop_eJay2: [
+    "HipHop 2/eJay/pxd/HipHop20.inf",
+    "HipHop eJay 2/eJay/pxd/HipHop20.inf",
+  ],
+  HipHop_eJay3: [
+    "HipHop 3/eJay/pxd/hiphop30.inf",
+    "HipHop eJay 3/eJay/pxd/hiphop30.inf",
+  ],
+  HipHop_eJay4: [
+    "HipHop 4/eJay/pxd/HipHop40.inf",
+    "HipHop eJay 4/eJay/pxd/HipHop40.inf",
+  ],
+  House_eJay: [
+    "House_eJay/ejay/PXD/HOUSE10.inf",
+    "House eJay/ejay/PXD/HOUSE10.inf",
+  ],
+  Techno_eJay3: [
+    "Techno 3/eJay/pxd/rave30.inf",
+    "Techno eJay 3/eJay/pxd/rave30.inf",
+  ],
+  Xtreme_eJay: [
+    "Xtreme_eJay/eJay/PXD/xejay10.inf",
+    "Xtreme/eJay/PXD/xejay10.inf",
+  ],
+};
+
+/**
+ * Augment each product's `byInternalName` lookup with compound alias keys
+ * built from Gen 2 INF catalog files (group prefix + alias, e.g. "eurokick5").
+ * This lets Format B .mix files that embed compound names as their internal
+ * sample reference resolve correctly via `byInternalName`.
+ *
+ * Also adds a hyphen-stripped variant (e.g. "darabuka2" from "dara-buka2") to
+ * handle the minor transcription difference seen in some Techno_eJay mixes.
+ */
+function appendGen2CompoundAliases(
+  index: Record<string, SampleLookupEntry>,
+  archiveDir: string,
+): void {
+  if (!existsSync(archiveDir) || Object.keys(index).length === 0) return;
+
+  for (const [product, infPaths] of Object.entries(GEN2_INF_PATHS)) {
+    const entry = index[product];
+    if (!entry) continue;
+
+    for (const relPath of infPaths) {
+      const infAbsPath = join(archiveDir, relPath);
+      if (!existsSync(infAbsPath)) continue;
+
+      let infEntries: ReturnType<typeof parseInfCatalog>;
+      try {
+        infEntries = parseInfCatalog(infAbsPath);
+      } catch {
+        continue;
+      }
+
+      for (const infEntry of infEntries) {
+        if (!infEntry.category && !infEntry.alias) continue;
+        const compound = (infEntry.category + infEntry.alias).toLowerCase().trim();
+        if (!compound || compound === infEntry.alias.toLowerCase().trim()) continue;
+
+        // Resolve the audio path via the internal filename already indexed.
+        const resolved = entry.byInternalName[infEntry.filename.toLowerCase()];
+        if (!resolved) continue;
+
+        if (!entry.byInternalName[compound]) {
+          entry.byInternalName[compound] = resolved;
+        }
+        // Hyphen-stripped variant handles minor transcription drift
+        // (e.g. "dara-buka2" in INF vs "darabuka2" stored in some mixes).
+        const stripped = compound.replace(/-/g, "");
+        if (stripped !== compound && !entry.byInternalName[stripped]) {
+          entry.byInternalName[stripped] = resolved;
+        }
+      }
+    }
+  }
 }
 
 const GEN1_BROWSER_CATALOG_ALIASES: Record<string, string> = {
   HipHop_eJay1: "GenerationPack1_HipHop",
 };
+
+const RAVE_PXD_ID_OFFSET = 731;
+const RAVE_PXD_PATH_CANDIDATES = [
+  "Rave eJay/eJay/eJay/PXD",
+  "Rave/RAVE/EJAY/PXD",
+  "GenerationPack1/Rave/RAVE/EJAY/PXD",
+];
+
+function appendRavePxdLookups(
+  index: Record<string, SampleLookupEntry>,
+  archiveDir: string,
+): void {
+  const rave = index.Rave;
+  if (!rave) return;
+
+  let pxdCatalogPath: string | null = null;
+  for (const relPath of RAVE_PXD_PATH_CANDIDATES) {
+    const candidate = join(archiveDir, relPath);
+    if (existsSync(candidate)) {
+      pxdCatalogPath = candidate;
+      break;
+    }
+  }
+  if (!pxdCatalogPath) return;
+
+  let records: ReturnType<typeof parsePxddanceFile>;
+  try {
+    records = parsePxddanceFile(readFileSync(pxdCatalogPath, "utf8"));
+  } catch {
+    return;
+  }
+
+  const byGen1Id = rave.byGen1Id ?? (rave.byGen1Id = {});
+  for (let i = 0; i < records.length; i += 1) {
+    const rawId = RAVE_PXD_ID_OFFSET + i;
+    const normalized = normalisePxdPath(records[i].path);
+    if (!normalized.path) continue;
+
+    const fromSource = rave.bySource[normalized.path];
+    if (fromSource) {
+      byGen1Id[String(rawId)] = fromSource;
+      continue;
+    }
+
+    const fileStem = normalized.file?.toLowerCase() ?? null;
+    if (!fileStem) continue;
+    const fromStem = rave.byStem[fileStem];
+    if (fromStem) {
+      byGen1Id[String(rawId)] = fromStem;
+    }
+  }
+}
 
 function appendGen1Lookups(
   index: Record<string, SampleLookupEntry>,
@@ -546,6 +762,10 @@ function appendGen1Lookups(
   if (!existsSync(archiveDir) || Object.keys(index).length === 0) {
     return;
   }
+
+  // Rave's runtime sample-id mapping is derived from the PXD row table
+  // (rawId = rowIndex + 731), not directly from MAX line numbers.
+  appendRavePxdLookups(index, archiveDir);
 
   const gen1Catalogs = loadGen1Catalogs(archiveDir);
   for (const [alias, canonical] of Object.entries(GEN1_BROWSER_CATALOG_ALIASES)) {

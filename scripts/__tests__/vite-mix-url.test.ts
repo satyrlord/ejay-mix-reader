@@ -65,6 +65,15 @@ describe("resolveMixUrl", () => {
     expect(resolveMixUrl("/mix/Dance_eJay1/MISSING.MIX", archiveRoot)).toBeNull();
   });
 
+  it("resolves canonical product ids from recreated archive folder aliases", () => {
+    mkdirSync(join(archiveRoot, "Dance eJay 2", "MIX"), { recursive: true });
+    writeFileSync(join(archiveRoot, "Dance eJay 2", "MIX", "START.MIX"), "payload");
+
+    const resolved = resolveMixUrl("/mix/Dance_eJay2/START.MIX", archiveRoot);
+    expect(resolved).not.toBeNull();
+    expect(resolved?.absolutePath).toBe(resolve(archiveRoot, "Dance eJay 2", "MIX", "START.MIX"));
+  });
+
   it("returns null when the archive path is a directory", () => {
     mkdirSync(join(archiveRoot, "Dance_eJay1", "MIX", "folder.mix"));
     expect(resolveMixUrl("/mix/Dance_eJay1/folder.mix", archiveRoot)).toBeNull();

@@ -89,10 +89,15 @@ npm run setup              # (re)build output/ after adding products
 npm run setup -- --force   # re-extract even products already done
 npm run build              # regenerate data/index.json only
 npm run mix:meta           # rescan archive/ for .mix file metadata
+npm run mix:dump-cd -- --product Dance_eJay3  # dump Format C/D track records for one product
 npm test                   # run Playwright tests
 npm run test:unit          # run unit tests
 npm run typecheck          # check TypeScript types
 ```
+
+`npm run mix:dump-cd` is a reverse-engineering helper for Format C/D record
+analysis only. It writes diagnostics to `logs/format-cd/` and is not part of
+the normal extraction/index build pipeline.
 
 ## More information
 

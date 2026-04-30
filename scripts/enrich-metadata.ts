@@ -672,11 +672,13 @@ function main(): void {
     process.exit(1);
   }
 
-  // Load the DanceSP Pxddance for Dance_eJay1 enrichment
-  const pxddancePath = resolve("archive/Dance_SuperPack/dance/EJAY/Pxddance");
-  const pxddanceMap = existsSync(pxddancePath)
-    ? parsePxddanceCatalog(pxddancePath)
-    : null;
+  // Load the DanceSP Pxddance for Dance_eJay1 enrichment.
+  const pxddanceCandidates = [
+    resolve("archive/Dance_SuperPack/dance/EJAY/Pxddance"),
+    resolve("archive/Dance SuperPack/dance/EJAY/Pxddance"),
+  ];
+  const pxddancePath = pxddanceCandidates.find((candidate) => existsSync(candidate)) ?? null;
+  const pxddanceMap = pxddancePath ? parsePxddanceCatalog(pxddancePath) : null;
 
   if (pxddanceMap) {
     console.log(`Loaded Pxddance catalog: ${pxddanceMap.size} entries`);

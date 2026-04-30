@@ -22,6 +22,7 @@ import {
   buildResolverIndex,
   resolveMix,
   canonicalizeProduct,
+  gen1CatalogCandidates,
   type NormalizedMetadata,
 } from "./mix-resolver.js";
 import type { Gen1CatalogEntry } from "./gen1-catalog.js";
@@ -43,31 +44,57 @@ const PATH_PRODUCT_HINTS: Array<[string, string]> = [
   // Dance SuperPack DMKIT expansion mix files
   ["Dance_SuperPack/eJay SampleKit/DMKIT1/", "Dance_SuperPack"],
   ["Dance_SuperPack/eJay SampleKit/DMKIT2/", "Dance_SuperPack"],
+  ["Dance SuperPack/eJay SampleKit/DMKIT1/", "Dance_SuperPack"],
+  ["Dance SuperPack/eJay SampleKit/DMKIT2/", "Dance_SuperPack"],
   ["Dance_SuperPack/", "Dance_SuperPack"],
+  ["Dance SuperPack/", "Dance_SuperPack"],
   // Standard product dirs
   ["Dance_eJay1/", "Dance_eJay1"],
+  ["Dance eJay 1/", "Dance_eJay1"],
   ["Dance_eJay2/", "Dance_eJay2"],
+  ["Dance eJay 2/", "Dance_eJay2"],
+  ["Dance eJay 2 OLD/", "Dance_eJay2"],
+  ["Dance eJay 2 NEW/", "Dance_eJay2"],
   ["Dance_eJay3/", "Dance_eJay3"],
+  ["Dance eJay 3/", "Dance_eJay3"],
   ["Dance_eJay4/", "Dance_eJay4"],
+  ["Dance eJay 4/", "Dance_eJay4"],
+  ["HipHop 1/", "HipHop_eJay1"],
+  ["HipHop eJay 1/", "HipHop_eJay1"],
   ["HipHop 2/", "HipHop_eJay2"],
+  ["HipHop eJay 2/", "HipHop_eJay2"],
   ["HipHop 3/", "HipHop_eJay3"],
+  ["HipHop eJay 3/", "HipHop_eJay3"],
   ["HipHop 4/", "HipHop_eJay4"],
+  ["HipHop eJay 4/", "HipHop_eJay4"],
   ["House_eJay/", "House_eJay"],
+  ["House eJay/", "House_eJay"],
   ["Rave/", "Rave"],
+  ["Rave eJay/", "Rave"],
   ["Techno 3/", "Techno_eJay3"],
+  ["Techno eJay 3/", "Techno_eJay3"],
   ["TECHNO_EJAY/", "Techno_eJay"],
+  ["Techno eJay 2/", "Techno_eJay"],
+  ["Techno eJay/", "Techno_eJay"],
   ["Xtreme_eJay/", "Xtreme_eJay"],
+  ["Xtreme/", "Xtreme_eJay"],
   // GenerationPack1 sub-products
   ["GenerationPack1/Dance/", "GenerationPack1_Dance"],
   ["GenerationPack1/HipHop/", "GenerationPack1_HipHop"],
   ["GenerationPack1/Rave/", "GenerationPack1_Rave"],
   // User-data mixes grouped by product
   ["_userdata/Dance and House/Dance2/", "Dance_eJay2"],
+  ["_user/Dance and House/Dance2/", "Dance_eJay2"],
   ["_userdata/Dance and House/Dance3/", "Dance_eJay3"],
+  ["_user/Dance and House/Dance3/", "Dance_eJay3"],
   ["_userdata/Dance and House/Dance4/", "Dance_eJay4"],
+  ["_user/Dance and House/Dance4/", "Dance_eJay4"],
   ["_userdata/Hip Hop/", "HipHop_eJay4"],
+  ["_user/Hip Hop/", "HipHop_eJay4"],
   ["_userdata/Rave/", "Rave"],
+  ["_user/Rave/", "Rave"],
   ["_userdata/Techno/", "Techno_eJay"],
+  ["_user/Techno/", "Techno_eJay"],
 ];
 
 // ---------------------------------------------------------------------------
@@ -221,9 +248,13 @@ function gen1EntryForRef(
   gen1Catalogs?: Map<string, { entries: Gen1CatalogEntry[] }> | null,
 ): Gen1CatalogEntry | null {
   if (!gen1Catalogs || ref.rawId <= 0) return null;
-  const catalog = gen1Catalogs.get(product);
-  if (!catalog || ref.rawId >= catalog.entries.length) return null;
-  return catalog.entries[ref.rawId] ?? null;
+  for (const productId of gen1CatalogCandidates(product)) {
+    const catalog = gen1Catalogs.get(productId);
+    if (!catalog || ref.rawId >= catalog.entries.length) continue;
+    const entry = catalog.entries[ref.rawId] ?? null;
+    if (entry?.path) return entry;
+  }
+  return null;
 }
 
 /** Stable deduplication key for an unresolved ref. */

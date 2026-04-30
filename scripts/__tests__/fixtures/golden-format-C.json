@@ -12,88 +12,88 @@
       "beat": null,
       "channel": null,
       "sampleRef": {
-        "rawId": -4,
+        "rawId": 0,
         "internalName": null,
         "displayName": "kick09",
         "resolvedPath": null,
-        "dataLength": 1802239
+        "dataLength": null
       }
     },
     {
       "beat": null,
       "channel": null,
       "sampleRef": {
-        "rawId": 12,
+        "rawId": 0,
         "internalName": null,
         "displayName": "kick04",
         "resolvedPath": null,
-        "dataLength": 1788254
+        "dataLength": null
       }
     },
     {
       "beat": null,
       "channel": null,
       "sampleRef": {
-        "rawId": 8,
+        "rawId": 0,
         "internalName": null,
         "displayName": "hihat06",
         "resolvedPath": null,
-        "dataLength": 1798962
+        "dataLength": null
       }
     },
     {
       "beat": null,
       "channel": null,
       "sampleRef": {
-        "rawId": -5,
+        "rawId": 0,
         "internalName": null,
         "displayName": "drumfx77",
         "resolvedPath": null,
-        "dataLength": 1793254
+        "dataLength": null
       }
     },
     {
       "beat": null,
       "channel": null,
       "sampleRef": {
-        "rawId": -4,
+        "rawId": 0,
         "internalName": null,
         "displayName": "drumfx43",
         "resolvedPath": null,
-        "dataLength": 1794047
+        "dataLength": null
       }
     },
     {
       "beat": null,
       "channel": null,
       "sampleRef": {
-        "rawId": -4,
+        "rawId": 0,
         "internalName": null,
         "displayName": "drumfx51",
         "resolvedPath": null,
-        "dataLength": 1791669
+        "dataLength": null
       }
     },
     {
       "beat": null,
       "channel": null,
       "sampleRef": {
-        "rawId": 4,
+        "rawId": 0,
         "internalName": null,
         "displayName": "drumfx48",
         "resolvedPath": null,
-        "dataLength": 1793254
+        "dataLength": null
       }
     },
     {
       "beat": null,
       "channel": null,
       "sampleRef": {
-        "rawId": 6,
+        "rawId": 0,
         "internalName": null,
         "displayName": "snare35",
         "resolvedPath": null,
-        "dataLength": 1794047
+        "dataLength": null
       }
     },
     {
@@ -104,7 +104,7 @@
         "internalName": null,
         "displayName": "snare48",
         "resolvedPath": null,
-        "dataLength": 1793254
+        "dataLength": null
       }
     },
     {
@@ -115,7 +115,7 @@
         "internalName": null,
         "displayName": "snare46",
         "resolvedPath": null,
-        "dataLength": 1791669
+        "dataLength": null
       }
     },
     {
@@ -126,7 +126,7 @@
         "internalName": null,
         "displayName": "snare70",
         "resolvedPath": null,
-        "dataLength": 1795633
+        "dataLength": null
       }
     },
     {
@@ -137,7 +137,7 @@
         "internalName": null,
         "displayName": "drumfx42",
         "resolvedPath": null,
-        "dataLength": 1791669
+        "dataLength": null
       }
     },
     {
@@ -148,7 +148,7 @@
         "internalName": null,
         "displayName": "snare06",
         "resolvedPath": null,
-        "dataLength": 1794047
+        "dataLength": null
       }
     },
     {
@@ -159,7 +159,7 @@
         "internalName": null,
         "displayName": "snare75",
         "resolvedPath": null,
-        "dataLength": 1793254
+        "dataLength": null
       }
     },
     {
@@ -170,7 +170,7 @@
         "internalName": null,
         "displayName": "snare69",
         "resolvedPath": null,
-        "dataLength": 1794047
+        "dataLength": null
       }
     },
     {
@@ -181,7 +181,7 @@
         "internalName": null,
         "displayName": "snare63",
         "resolvedPath": null,
-        "dataLength": 1794047
+        "dataLength": null
       }
     }
   ],

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync } from "fs";
 import { resolve } from "path";
+import { collectProductMixes, resolveProductMixDir } from "../build-index.js";
 import {
   FORMAT_A_CELL_BYTES,
   FORMAT_A_COLS,
@@ -22,6 +23,19 @@ import {
 
 const ARCHIVE = resolve("archive");
 const hasArchive = existsSync(ARCHIVE);
+
+function resolveMixPath(productId: string, filename: string): string {
+  const resolved = resolveProductMixDir(productId, ARCHIVE);
+  if (!resolved) {
+    throw new Error(`Missing archive mix directory for ${productId}`);
+  }
+  const entry = collectProductMixes(productId, ARCHIVE)
+    .find((mix) => mix.filename.toLowerCase() === filename.toLowerCase());
+  if (!entry) {
+    throw new Error(`Missing mix ${filename} for ${productId}`);
+  }
+  return resolve(resolved.mixDir, entry.filename);
+}
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -234,7 +248,7 @@ describe("summarise", () => {
 
 describe.skipIf(!hasArchive)("archive spot-checks", () => {
   it("parses Dance eJay 1 START.MIX with no trailer", () => {
-    const p = resolve(ARCHIVE, "Dance_eJay1/MIX/START.MIX");
+    const p = resolveMixPath("Dance_eJay1", "START.MIX");
     const a = analyzeFile(p);
     expect(a.product).toBe("dance");
     expect(a.fileSize).toBe(11234);
@@ -244,7 +258,7 @@ describe.skipIf(!hasArchive)("archive spot-checks", () => {
   });
 
   it("parses Rave START.MIX and recovers the 'Dance eJay 1.01' trailer", () => {
-    const p = resolve(ARCHIVE, "Rave/MIX/START.MIX");
+    const p = resolveMixPath("Rave", "START.MIX");
     const a = analyzeFile(p);
     expect(a.product).toBe("rave");
     expect(a.fileSize).toBe(11276);
@@ -257,7 +271,7 @@ describe.skipIf(!hasArchive)("archive spot-checks", () => {
   });
 
   it("recovers the NODRUGS.MIX external WAV path reference", () => {
-    const p = resolve(ARCHIVE, "Rave/MIX/NODRUGS.MIX");
+    const p = resolveMixPath("Rave", "NODRUGS.MIX");
     const a = analyzeFile(p);
     expect(a.trailer).not.toBeNull();
     const joined = a.trailer!.strings.join("|");
@@ -268,13 +282,11 @@ describe.skipIf(!hasArchive)("archive spot-checks", () => {
     // Dance_SuperPack and GenerationPack1 were intentionally removed from the
     // archive in April 2026; the remaining Gen 1 mix directories are listed
     // here. HipHop 1 is the renamed home of the HipHop_eJay1 mixes.
-    const dirs = [
-      "Dance_eJay1/MIX",
-      "Rave/MIX",
-      "HipHop 1/MIX",
-    ];
-    for (const d of dirs) {
-      const files = listMixFiles(resolve(ARCHIVE, d));
+    const products = ["Dance_eJay1", "Rave", "HipHop_eJay1"];
+    for (const productId of products) {
+      const resolved = resolveProductMixDir(productId, ARCHIVE);
+      expect(resolved).not.toBeNull();
+      const files = listMixFiles(resolved!.mixDir);
       expect(files.length).toBeGreaterThan(0);
     }
   });

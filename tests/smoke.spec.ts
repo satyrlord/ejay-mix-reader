@@ -12,7 +12,7 @@ const expectedTransportVersion = buildDisplayVersion(packageJson.version, {
   cwd: new URL("..", import.meta.url),
   deploymentCount: process.env.EJAY_GITHUB_DEPLOYMENT_COUNT,
 });
-const appStartupTimeoutMs = process.env.VITE_COVERAGE === "true" ? 15_000 : 5_000;
+const appStartupTimeoutMs = process.env.VITE_COVERAGE === "true" ? 30_000 : 5_000;
 
 test("page title is set", async ({ page }) => {
   await page.goto("/");
@@ -29,20 +29,28 @@ test("SPA shell renders sidebar, tabs, and sample grid", async ({ page }) => {
 test("category sidebar renders the normalized category matrix", async ({ page }) => {
   await page.goto("/");
   const buttons = page.locator(".category-btn");
-  await expect(buttons.first()).toBeVisible();
-  expect(await buttons.count()).toBeGreaterThanOrEqual(10);
+  await expect(buttons.first()).toBeVisible({ timeout: appStartupTimeoutMs });
+  await expect.poll(async () => buttons.count(), {
+    timeout: appStartupTimeoutMs,
+  }).toBeGreaterThanOrEqual(10);
   await expect(page.locator('.category-system-btn[data-category-id="Unsorted"]')).toBeVisible();
   await expect(page.locator(".load-json-btn.category-system-btn")).toBeVisible();
 });
 
 test("first category is active by default", async ({ page }) => {
   await page.goto("/");
+  await expect.poll(async () => page.locator(".category-btn").count(), {
+    timeout: appStartupTimeoutMs,
+  }).toBeGreaterThan(0);
   await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: appStartupTimeoutMs });
   await expect(page.locator(".category-btn.is-active").first()).toBeVisible({ timeout: appStartupTimeoutMs });
 });
 
 test("tab bar shows at least one tab and the add button", async ({ page }) => {
   await page.goto("/");
+  await expect.poll(async () => page.locator(".category-btn").count(), {
+    timeout: appStartupTimeoutMs,
+  }).toBeGreaterThan(0);
   await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: appStartupTimeoutMs });
   await expect.poll(async () => page.locator("#subcategory-tabs .subcategory-tab").count(), {
     timeout: appStartupTimeoutMs,
@@ -266,6 +274,14 @@ test("duplicate sample names surface provenance in the grid", async ({ page }) =
   });
 
   await page.goto("/");
+
+  await expect(page.locator('.category-btn[data-category-id="Drum"]')).toBeVisible({
+    timeout: appStartupTimeoutMs,
+  });
+  await page.locator('.category-btn[data-category-id="Drum"]').click();
+  await expect.poll(async () => page.locator(".sample-block").count(), {
+    timeout: appStartupTimeoutMs,
+  }).toBe(2);
 
   const blocks = page.locator(".sample-block");
   const labels = page.locator(".sample-block-label");

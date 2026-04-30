@@ -3,6 +3,8 @@ import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { describe, expect, it, vi } from "vitest";
 
+import { collectProductMixes, resolveProductMixDir } from "../build-index.js";
+
 import {
   MIN_FILE_SIZE,
   APP_SIG_DANCE1,
@@ -27,6 +29,19 @@ import {
 
 const ARCHIVE = resolve("archive");
 const hasArchive = existsSync(ARCHIVE);
+
+function resolveMixPath(productId: string, filename: string): string {
+  const resolved = resolveProductMixDir(productId, ARCHIVE);
+  if (!resolved) {
+    throw new Error(`Missing archive mix directory for ${productId}`);
+  }
+  const entry = collectProductMixes(productId, ARCHIVE)
+    .find((mix) => mix.filename.toLowerCase() === filename.toLowerCase());
+  if (!entry) {
+    throw new Error(`Missing mix ${filename} for ${productId}`);
+  }
+  return resolve(resolved.mixDir, entry.filename);
+}
 
 function buildFormatA(
   appSig: number,
@@ -241,13 +256,17 @@ describe("CLI entry", () => {
   });
 
   it("prints a summary for a single file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mix-parser-file-"));
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     try {
-      const code = main(["--file", resolve(ARCHIVE, "Dance_eJay1/MIX/START.MIX")]);
+      const filePath = join(dir, "start.mix");
+      writeFileSync(filePath, buildFormatA(APP_SIG_DANCE1, [{ row: 0, col: 0, id: 7 }]));
+      const code = main(["--file", filePath]);
       expect(code).toBe(0);
-      expect(logSpy.mock.calls.some((call) => String(call[0]).includes("[A] START.MIX"))).toBe(true);
+      expect(logSpy.mock.calls.some((call) => String(call[0]).includes("[A] start.mix"))).toBe(true);
     } finally {
       logSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -299,7 +318,7 @@ describe("CLI entry", () => {
 
 describe.skipIf(!hasArchive)("archive spot checks", () => {
   it("parses Dance eJay 1 START.MIX as Format A", () => {
-    const mix = parseFile(resolve(ARCHIVE, "Dance_eJay1/MIX/START.MIX"));
+    const mix = parseFile(resolveMixPath("Dance_eJay1", "START.MIX"));
     expect(mix).not.toBeNull();
     expect(mix!.format).toBe("A");
     expect(mix!.product).toBe("Dance_eJay1");
@@ -310,7 +329,7 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
   });
 
   it("parses Dance eJay 2 STEP.MIX as Format B", () => {
-    const mix = parseFile(resolve(ARCHIVE, "Dance_eJay2/MIX/STEP.MIX"));
+    const mix = parseFile(resolveMixPath("Dance_eJay2", "STEP.MIX"));
     expect(mix).not.toBeNull();
     expect(mix!.format).toBe("B");
     expect(mix!.title).toBe("Duck Dance");
@@ -326,7 +345,7 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
   });
 
   it("parses Dance eJay 3 START.MIX as early Gen 3 with alias tracks", () => {
-    const mix = parseFile(resolve(ARCHIVE, "Dance_eJay3/MIX/start.mix"));
+    const mix = parseFile(resolveMixPath("Dance_eJay3", "start.mix"));
     expect(mix).not.toBeNull();
     expect(mix!.format).toBe("C");
     expect(mix!.title).toBe("Dance eJay 3 Demo Mix");
@@ -345,7 +364,7 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
   });
 
   it("parses HipHop 3 START.MIX with WINDOWS TEMP path records", () => {
-    const mix = parseFile(resolve(ARCHIVE, "HipHop 3/MIX/start.mix"));
+    const mix = parseFile(resolveMixPath("HipHop_eJay3", "start.mix"));
     expect(mix).not.toBeNull();
     expect(mix!.format).toBe("C");
     expect(mix!.title).toBe("-");
@@ -358,8 +377,31 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
     expect(mix!.tracks.at(-1)?.sampleRef.displayName).toBe("Perc159");
   });
 
+  it("parses Dance eJay 3 french.mix (big-format C) and extracts beat and channel", () => {
+    // french.mix uses the big-format track record (gap === 40) with an explicit
+    // product-name field ("Dance eJay 3.0\0\x01"), zeitpos, and Spur (channel).
+    // Confirmed by binary analysis: marker at 0x424, nameLen=16, beat=1, channel=2.
+    const mix = parseFile(resolveMixPath("Dance_eJay3", "french.mix"));
+    expect(mix).not.toBeNull();
+    expect(mix!.format).toBe("C");
+    expect(mix!.author).toBe("marc");
+    expect(mix!.catalogs).toHaveLength(4);
+    // Only the first occurrence (path 'd') produces a parseable record; the
+    // secondary placement uses a compact continuation format without a name field
+    // and is currently skipped.
+    expect(mix!.tracks).toHaveLength(1);
+    expect(mix!.tracks[0]).toMatchObject({
+      beat: 1,
+      channel: 2,
+      sampleRef: {
+        displayName: "Dance eJay 3.0",
+        dataLength: 253,
+      },
+    });
+  });
+
   it("parses HipHop 4 START.MIX as late Gen 3 with drum machine state", () => {
-    const mix = parseFile(resolve(ARCHIVE, "HipHop 4/MIX/start.mix"));
+    const mix = parseFile(resolveMixPath("HipHop_eJay4", "start.mix"));
     expect(mix).not.toBeNull();
     expect(mix!.format).toBe("D");
     expect(mix!.title).toBe("nothingbutCRAP");
@@ -374,7 +416,7 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
   });
 
   it("ignores Xtreme VideoMix payloads in audio-only parsing", () => {
-    const mix = parseFile(resolve(ARCHIVE, "Xtreme_eJay/mix/start.mix"));
+    const mix = parseFile(resolveMixPath("Xtreme_eJay", "start.mix"));
     expect(mix).not.toBeNull();
     expect(mix!.format).toBe("C");
     expect(mix!.title).toBe("-");
