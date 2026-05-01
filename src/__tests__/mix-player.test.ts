@@ -253,6 +253,7 @@ describe("buildMixPlaybackPlan", () => {
     // beat 4 → maxBeat+1 = 5 → rounded up to next 4-beat bar = 8.
     expect(plan.loopBeats).toBe(8);
     expect(plan.timelineRecovered).toBe(true);
+    expect(plan.timelineUnitBeats).toBe(4);
     expect(plan.lanes).toHaveLength(17); // Format B = Gen 2 = 17 lanes
     expect(plan.channelIds).toEqual(["lane-2"]);
     expect(plan.events[0]).toMatchObject({
@@ -731,9 +732,10 @@ describe("buildMixPlaybackPlan", () => {
 
     expect(plan.loopBeats).toBe(8);
     const lane0 = plan.events.filter((event) => event.channelId === "lane-0");
-    // First event uses metadata beats (2) even though next event starts much later.
+    // Format B now uses bar timeline units (4 quarter-note beats per unit), so
+    // a 2-beat metadata length collapses to the minimum 1 timeline unit.
     // Second event is clamped to lane gap (loop end at beat 8 => gap 2).
-    expect(lane0.map((event) => event.lengthBeats)).toEqual([2, 2]);
+    expect(lane0.map((event) => event.lengthBeats)).toEqual([1, 2]);
   });
 
   it("converts metadata quarter-note beats for Format A and extends loop to 2-bar boundary", () => {

@@ -36,6 +36,11 @@ export class MixBuffer {
     return this.view.getUint32(offset, true);
   }
 
+  /** Read signed 32-bit little-endian integer at `offset`. */
+  readInt32LE(offset: number): number {
+    return this.view.getInt32(offset, true);
+  }
+
   /** Read signed 16-bit little-endian integer at `offset`. */
   readInt16LE(offset: number): number {
     return this.view.getInt16(offset, true);

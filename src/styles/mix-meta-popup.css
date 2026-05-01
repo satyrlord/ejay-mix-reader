@@ -1,0 +1,58 @@
+/* ── Mix metadata popup ─────────────────────────────────── */
+
+.mix-meta-popup {
+  position: fixed;
+  z-index: 200;
+  min-width: 13rem;
+  max-width: 22rem;
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: 0.45rem;
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(var(--accent-rgb), 0.1);
+  padding: 0.6rem 0.75rem;
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  animation: mix-popup-in 120ms ease forwards;
+}
+
+@keyframes mix-popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.mix-meta-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.78rem;
+  font-family: "Ubuntu", var(--font-sans);
+  font-weight: 400;
+  font-variant-caps: normal;
+  letter-spacing: 0.01em;
+}
+
+.mix-meta-table th {
+  text-align: left;
+  font-weight: 400;
+  font-style: italic;
+  color: rgba(242, 241, 236, 0.42);
+  padding: 0.15rem 0.55rem 0.15rem 0;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.mix-meta-table td {
+  color: rgba(242, 241, 236, 0.9);
+  font-weight: 400;
+  padding: 0.15rem 0;
+  word-break: break-word;
+}
+

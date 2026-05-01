@@ -1,0 +1,35 @@
+:root {
+  --category-btn-text: color-mix(in srgb, var(--accent) 6%, #f1f3f2 94%);
+  --category-btn-border: color-mix(in srgb, var(--accent) 52%, #2a3434 48%);
+  --category-btn-bg-start: color-mix(in srgb, var(--accent) 60%, #2c3f40 40%);
+  --category-btn-bg-end: color-mix(in srgb, var(--accent) 42%, #172224 58%);
+  --category-system-border: color-mix(in srgb, var(--accent) 48%, #253133 52%);
+  --category-system-bg-start: color-mix(in srgb, var(--accent) 56%, #2a393b 44%);
+  --category-system-bg-end: color-mix(in srgb, var(--accent) 40%, #152123 60%);
+  --category-active-border: var(--theme-highlight);
+  --category-active-glow: rgba(var(--accent-rgb), 0.58);
+
+  --subcategory-btn-border: color-mix(in srgb, var(--accent) 48%, #2a3434 52%);
+  --subcategory-btn-bg-start: color-mix(in srgb, var(--accent) 54%, #2f4142 46%);
+  --subcategory-btn-bg-end: color-mix(in srgb, var(--accent) 38%, #162224 62%);
+  --subcategory-btn-text: color-mix(in srgb, var(--accent) 8%, #edf2ef 92%);
+  --subcategory-active-bg-start: color-mix(in srgb, var(--theme-highlight) 82%, #ffffff 18%);
+  --subcategory-active-bg-end: color-mix(in srgb, var(--accent) 52%, #1b2523 48%);
+  --subcategory-active-border: color-mix(in srgb, var(--theme-highlight) 84%, #ffffff 16%);
+  --subcategory-active-text: #0e1311;
+  --subcategory-input-bg: color-mix(in srgb, var(--theme-highlight) 24%, #f3f4f3 76%);
+  --subcategory-input-border: color-mix(in srgb, var(--accent) 62%, #324042 38%);
+  --subcategory-input-text: #111514;
+  --subcategory-input-placeholder: color-mix(in srgb, var(--accent) 35%, #2f3635 65%);
+  --subcategory-input-focus: rgba(var(--accent-rgb), 0.62);
+
+  --menu-bg: color-mix(in srgb, var(--accent) 11%, #050707 89%);
+  --menu-border: rgba(var(--accent-rgb), 0.28);
+  --menu-hover-bg: color-mix(in srgb, var(--theme-highlight) 30%, #0f1313 70%);
+
+  --sample-grid-bg: color-mix(in srgb, var(--accent) 10%, #030404 90%);
+  --sample-block-tint: color-mix(in srgb, var(--theme-highlight) 72%, #ffffff 28%);
+  --sample-block-border: color-mix(in srgb, var(--theme-highlight) 52%, #5a5f5d 48%);
+  --sample-block-text: #15191a;
+  --sample-block-gloss: color-mix(in srgb, var(--theme-highlight) 42%, #ffffff 58%);
+}

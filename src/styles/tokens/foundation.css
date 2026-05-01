@@ -1,0 +1,65 @@
+:root {
+  /* Product-themable accent (default = Emerald Green core). Both forms are
+     kept in sync so we can use solid (var(--accent)) and translucent
+     (rgba(var(--accent-rgb), x)) in the same stylesheet. */
+  --accent: #00a277;
+  --accent-rgb: 0, 162, 119;
+  --accent-darker: #007656;
+
+  --panel-border: rgba(var(--accent-rgb), 0.24);
+  --header-ribbon-h: 2.2rem;
+  --header-ribbon-inner-h: calc(var(--header-ribbon-h) - 1px);
+  --header-ribbon-bg: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 22%, #131515 78%),
+    color-mix(in srgb, var(--accent) 12%, #060808 88%)
+  );
+  --mix-grid-label-px: 160px;
+  --mix-grid-beat-step-px: 48px;
+  --mix-grid-major-step-px: 384px;
+  --shell-editor-height: clamp(18rem, 58vh, 34rem);
+  --theme-tint-rgb: var(--accent-rgb);
+  --app-bg-start: color-mix(in srgb, var(--accent) 22%, #111214 78%);
+  --app-bg-mid: color-mix(in srgb, var(--accent) 14%, #090a0b 86%);
+  --app-bg-end: color-mix(in srgb, var(--accent) 7%, #040505 93%);
+  --body-font-variant: all-small-caps;
+  --body-letter-spacing: 0.03em;
+  --chrome-panel-bg: color-mix(in srgb, var(--accent) 13%, #060808 87%);
+  --chrome-panel-border: rgba(var(--accent-rgb), 0.26);
+  --theme-highlight: color-mix(in srgb, var(--accent) 34%, #ffffff 66%);
+
+  --transport-bg: color-mix(in srgb, var(--accent) 14%, #060707 86%);
+  --transport-border: rgba(var(--accent-rgb), 0.24);
+  --transport-stop-fill: color-mix(in srgb, var(--theme-highlight) 75%, #ffffff 25%);
+  --transport-progress-track: color-mix(in srgb, var(--accent) 36%, #1d2323 64%);
+  --transport-progress-start: var(--accent);
+  --transport-progress-end: var(--theme-highlight);
+
+  --seq-canvas-start: color-mix(in srgb, var(--accent) 16%, #050606 84%);
+  --seq-canvas-end: color-mix(in srgb, var(--accent) 9%, #020303 91%);
+  --seq-canvas-mix-start: color-mix(in srgb, var(--accent) 20%, #070808 80%);
+  --seq-canvas-mix-end: color-mix(in srgb, var(--accent) 11%, #030404 89%);
+  --seq-lane-base: color-mix(in srgb, var(--accent) 12%, #0a0b0b 88%);
+  --seq-lane-grid-line: rgba(var(--accent-rgb), 0.14);
+  --seq-lane-grid-major-line: rgba(var(--accent-rgb), 0.27);
+  --seq-lane-border: rgba(var(--accent-rgb), 0.2);
+  --seq-lane-label-start: color-mix(in srgb, var(--accent) 20%, #111515 80%);
+  --seq-lane-label-end: color-mix(in srgb, var(--accent) 12%, #090b0b 88%);
+  --seq-lane-label-border: rgba(var(--accent-rgb), 0.28);
+  --seq-lane-label-text: color-mix(in srgb, var(--theme-highlight) 30%, #f1f3f2 70%);
+  --seq-event-border: color-mix(in srgb, var(--theme-highlight) 52%, #646464 48%);
+  --seq-event-bg-start: color-mix(in srgb, var(--theme-highlight) 78%, #ffffff 22%);
+  --seq-event-bg-end: color-mix(in srgb, var(--accent) 52%, #2a3230 48%);
+  --seq-event-text: #161819;
+  --seq-event-shadow: color-mix(in srgb, var(--theme-highlight) 42%, #ffffff 58%);
+  --seq-missing-border: color-mix(in srgb, var(--theme-highlight) 58%, #ff7a6b 42%);
+  --seq-missing-text: color-mix(in srgb, var(--theme-highlight) 24%, #291611 76%);
+  --seq-missing-bg-start: color-mix(in srgb, var(--theme-highlight) 42%, #ffb68e 58%);
+  --seq-missing-bg-end: color-mix(in srgb, var(--accent) 32%, #291912 68%);
+  --playhead-start: color-mix(in srgb, var(--theme-highlight) 70%, #ffffff 30%);
+  --playhead-end: color-mix(in srgb, var(--accent) 74%, #ffffff 26%);
+  --playhead-glow: rgba(var(--accent-rgb), 0.45);
+
+  --ui-deliberate-1000ms-effect-duration: 1000ms;
+  --sample-bubble-zoom-scale: 1;
+}

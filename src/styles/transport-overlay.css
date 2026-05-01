@@ -1,0 +1,211 @@
+.transport-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2rem;
+  padding: 0.3rem 1rem;
+  background: var(--transport-bg);
+  border-top: 1px solid var(--transport-border);
+}
+
+.transport-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  justify-self: start;
+  overflow: hidden;
+}
+
+.transport-center {
+  min-width: 0;
+  justify-self: center;
+  text-align: center;
+  padding: 0 1rem;
+}
+
+.transport-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  justify-content: flex-end;
+  justify-self: end;
+}
+
+.transport-stop {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.transport-stop span {
+  display: block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 0.15rem;
+  background: var(--transport-stop-fill);
+}
+
+.transport-name {
+  min-width: 0;
+  font-size: 1.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(18rem, 30vw);
+}
+
+.transport-name.is-idle {
+  color: rgba(242, 241, 236, 0.56);
+}
+
+.transport-progress {
+  width: min(10rem, 20vw);
+  flex-shrink: 0;
+  height: 0.45rem;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.transport-progress::-webkit-progress-bar {
+  background: var(--transport-progress-track);
+}
+
+.transport-progress::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--transport-progress-start), var(--transport-progress-end));
+}
+
+.transport-progress::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--transport-progress-start), var(--transport-progress-end));
+}
+
+.transport-build-label {
+  display: block;
+  max-width: min(48vw, 44rem);
+  font-size: 0.88rem;
+  color: rgba(242, 241, 236, 0.42);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  transition: opacity var(--ui-deliberate-1000ms-effect-duration) ease;
+  opacity: 1;
+}
+
+.transport-build-label.is-hidden {
+  opacity: 0;
+}
+
+.transport-version {
+  font-size: 0.88rem;
+  color: rgba(242, 241, 236, 0.42);
+  white-space: nowrap;
+}
+
+.transport-github {
+  font-size: 0.88rem;
+  color: rgba(242, 241, 236, 0.42);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 120ms ease;
+}
+
+.transport-github:hover {
+  color: var(--color-primary);
+}
+
+.mix-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1rem, 4vw, 2.5rem);
+  background:
+    radial-gradient(circle at 20% 20%, rgba(var(--accent-rgb), 0.2), transparent 45%),
+    linear-gradient(180deg, rgba(3, 11, 8, 0.9), rgba(2, 8, 6, 0.95));
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
+
+.mix-loading-overlay.is-visible {
+  display: flex;
+}
+
+.mix-loading-card {
+  width: min(24rem, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 0.8rem;
+  padding: 1.4rem 1.25rem;
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  border-radius: 0.6rem;
+  background: var(--menu-bg);
+  box-shadow:
+    0 20px 44px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(var(--accent-rgb), 0.18);
+  text-align: center;
+}
+
+.mix-loading-spinner {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 999px;
+  border: 3px solid rgba(var(--accent-rgb), 0.28);
+  border-top-color: rgba(var(--accent-rgb), 0.95);
+  animation: mix-loading-spin 720ms linear infinite;
+}
+
+.mix-loading-title {
+  margin: 0;
+  color: rgba(242, 241, 236, 0.92);
+  font: 700 1.05rem var(--font-sans);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.06em;
+}
+
+.mix-loading-detail {
+  margin: 0;
+  color: rgba(242, 241, 236, 0.64);
+  font: 600 0.9rem var(--font-sans);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+}
+
+@keyframes mix-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+body.mix-loading-active {
+  cursor: progress;
+}
+
+.error-toast {
+  position: fixed;
+  right: 1rem;
+  bottom: 4.5rem;
+  z-index: 40;
+  max-width: 20rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(255, 124, 124, 0.35);
+  border-radius: 0.45rem;
+  background: #331417;
+  color: #ffd7d7;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+

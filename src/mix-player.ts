@@ -416,7 +416,7 @@ export function buildMixPlaybackPlan(
   const primaryProduct = products[0] ?? canonicalPlaybackProduct(mix.product);
   const lanes = lanesForMix(mix);
   const bpm = normalizePlaybackBpm(mix.bpm, mix.bpmAdjusted);
-  const timelineUnitBeats = mix.format === "A" ? 4 : 1;
+  const timelineUnitBeats = mix.format === "A" || mix.format === "B" ? 4 : 1;
   const authoritativeLoopBeats = typeof mix.loopBeats === "number" && Number.isFinite(mix.loopBeats) && mix.loopBeats > 0
     ? Math.min(MAX_TIMELINE_BEAT, Math.max(1, Math.round(mix.loopBeats)))
     : null;

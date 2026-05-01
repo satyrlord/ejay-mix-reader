@@ -1,0 +1,48 @@
+:root {
+  /* Category/sidebar/sample/sequencer shared palette.
+     All 14 slots are mapped directly from the supplied palette. */
+  --category-palette-1: #830000;
+  --category-palette-2: #982a00;
+  --category-palette-3: #ab4700;
+  --category-palette-4: #bf6601;
+  --category-palette-5: #d48915;
+  --category-palette-6: #e6ad33;
+  --category-palette-7: #bfad00;
+  --category-palette-8: #7da500;
+  --category-palette-9: #009c48;
+  --category-palette-10: #008694;
+  --category-palette-11: #005dad;
+  --category-palette-12: #3d3f96;
+  --category-palette-13: #442e77;
+  --category-palette-14: #422158;
+
+  --category-color-loop: var(--category-palette-1);
+  --category-color-drum: var(--category-palette-2);
+  --category-color-bass: var(--category-palette-3);
+  --category-color-guitar: var(--category-palette-4);
+  --category-color-keys: var(--category-palette-5);
+  --category-color-sequence: var(--category-palette-6);
+  --category-color-voice: var(--category-palette-7);
+  --category-color-effect: var(--category-palette-8);
+  --category-color-scratch: var(--category-palette-9);
+  --category-color-orchestral: var(--category-palette-10);
+  --category-color-pads: var(--category-palette-11);
+  --category-color-extra: var(--category-palette-12);
+  --category-color-unsorted: var(--category-palette-13);
+  --category-color-system-load: var(--category-palette-14);
+
+  /* Keep channel variables aligned for legacy hooks and tests. */
+  --channel-loop: var(--category-color-loop);
+  --channel-drum: var(--category-color-drum);
+  --channel-bass: var(--category-color-bass);
+  --channel-guitar: var(--category-color-guitar);
+  --channel-keys: var(--category-color-keys);
+  --channel-sequence: var(--category-color-sequence);
+  --channel-voice: var(--category-color-voice);
+  --channel-effect: var(--category-color-effect);
+  --channel-scratch: var(--category-color-scratch);
+  --channel-orchestral: var(--category-color-orchestral);
+  --channel-pads: var(--category-color-pads);
+  --channel-extra: var(--category-color-extra);
+  --channel-unsorted: var(--category-color-unsorted);
+}

@@ -33,7 +33,7 @@ async function runCloseBundle(plugin: Plugin): Promise<void> {
   const hook = plugin.closeBundle;
   if (!hook) throw new Error("Plugin has no closeBundle hook");
   const fn = typeof hook === "function" ? hook : hook.handler;
-  await fn();
+  await fn.call({} as never);
 }
 
 afterEach(() => {

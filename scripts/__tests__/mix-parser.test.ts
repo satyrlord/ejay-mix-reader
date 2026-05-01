@@ -344,6 +344,22 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
     });
   });
 
+  it("recovers Techno eJay start.mix timeline placements from the Gen 2 chunk", () => {
+    const mix = parseFile(resolveMixPath("Techno_eJay", "start.mix"));
+    expect(mix).not.toBeNull();
+    expect(mix!.format).toBe("B");
+    expect(mix!.product).toContain("Techno_eJay");
+    expect(mix!.tracks.length).toBeGreaterThan(400);
+
+    const recoveredBeats = mix!.tracks
+      .map((track) => track.beat)
+      .filter((beat): beat is number => typeof beat === "number" && Number.isFinite(beat));
+    expect(recoveredBeats.length).toBeGreaterThan(400);
+    expect(Math.max(...recoveredBeats)).toBeGreaterThan(131);
+    expect(Math.max(...recoveredBeats)).toBeLessThan(132);
+    expect(mix!.tracks.some((track) => track.sampleRef.rawId === 14765)).toBe(true);
+  });
+
   it("parses Dance eJay 3 START.MIX as early Gen 3 with alias tracks", () => {
     const mix = parseFile(resolveMixPath("Dance_eJay3", "start.mix"));
     expect(mix).not.toBeNull();

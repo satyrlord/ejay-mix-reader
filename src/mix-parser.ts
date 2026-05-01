@@ -112,6 +112,11 @@ const SKKENNUNG_PREFIX = "#SKKENNUNG#:";
 const DEFAULT_GEN23_BPM = 120;
 const MAX_REASONABLE_MIX_BPM = 400;
 const MAX_RECOVERED_FORMAT_CD_BEAT = 16_384;
+const FORMAT_B_TIMELINE_SENTINEL = 0x018a7aa9;
+const FORMAT_B_CHANNEL_COUNT = 17;
+const FORMAT_B_MAX_EVENTS_PER_CHANNEL = 0x09c5;
+const FORMAT_B_POSITION_SCALE = 128;
+const FORMAT_B_LONG_RECORD_BYTES = 10;
 
 function isValidMixBpm(value: number): boolean {
   return Number.isFinite(value) && value > 0 && value <= MAX_REASONABLE_MIX_BPM;
@@ -550,7 +555,8 @@ export function parseFormatB(buf: MixBuffer, productHint?: string): MixIR {
 
   const catalogStart = findCatalogStart(buf, sectionEnd);
   const { catalogs, endOffset: afterCatalogs } = parseCatalogs(buf, catalogStart);
-  const tracks = parseFormatBTracks(buf, afterCatalogs);
+  const tracks = parseFormatBTimelineTracks(buf, afterCatalogs)
+    ?? parseFormatBTracks(buf, afterCatalogs);
   const tickerText = extractTickerText(buf, afterCatalogs);
 
   const product = productHint ?? inferProduct(catalogs, header.appId) ?? "Unknown_Gen2";
@@ -570,6 +576,82 @@ export function parseFormatB(buf: MixBuffer, productHint?: string): MixIR {
     tickerText,
     catalogs,
   };
+}
+
+function parseFormatBTimelineTracks(buf: MixBuffer, startOffset: number): TrackPlacement[] | null {
+  const start = Math.max(0, startOffset);
+
+  for (let chunkOffset = start; chunkOffset + 12 <= buf.length; chunkOffset++) {
+    const chunkLen = buf.readUInt32LE(chunkOffset);
+    if (chunkLen < 4) continue;
+
+    const chunkEnd = chunkOffset + chunkLen;
+    if (chunkEnd + 4 > buf.length) continue;
+    if (buf.readUInt32LE(chunkEnd) !== FORMAT_B_TIMELINE_SENTINEL) continue;
+
+    const tracks = parseFormatBTimelineChunk(buf, chunkOffset, chunkEnd);
+    if (tracks) return tracks;
+  }
+
+  return null;
+}
+
+function parseFormatBTimelineChunk(buf: MixBuffer, chunkOffset: number, chunkEnd: number): TrackPlacement[] | null {
+  let offset = chunkOffset + 4;
+  const tracks: TrackPlacement[] = [];
+
+  for (let expectedChannel = 1; expectedChannel <= FORMAT_B_CHANNEL_COUNT; expectedChannel++) {
+    if (offset + 5 > chunkEnd) return null;
+
+    const channelId = buf.at(offset);
+    offset += 1;
+    if (channelId !== expectedChannel) return null;
+
+    const eventCount = buf.readUInt32LE(offset);
+    offset += 4;
+    if (eventCount > FORMAT_B_MAX_EVENTS_PER_CHANNEL) return null;
+
+    for (let index = 0; index < eventCount; index++) {
+      if (offset + 7 > chunkEnd) return null;
+
+      const laneClass = buf.at(offset);
+      offset += 1;
+      if (laneClass !== 0) {
+        // Older Gen 2 files may carry extended record variants. Keep the
+        // parser conservative: bail out and let the legacy scanner recover.
+        return null;
+      }
+
+      const posRaw = buf.readInt32LE(offset);
+      offset += 4;
+
+      const sampleKey = buf.readUInt16LE(offset);
+      offset += 2;
+
+      if (posRaw >= 0) {
+        if (offset + FORMAT_B_LONG_RECORD_BYTES > chunkEnd) return null;
+        offset += FORMAT_B_LONG_RECORD_BYTES;
+      }
+
+      const decodedPos = posRaw < 0 ? (-posRaw - 1) : posRaw;
+      if (!Number.isFinite(decodedPos) || decodedPos < 0) return null;
+
+      tracks.push({
+        beat: decodedPos / FORMAT_B_POSITION_SCALE,
+        channel: channelId - 1,
+        sampleRef: {
+          rawId: sampleKey,
+          internalName: null,
+          displayName: null,
+          resolvedPath: null,
+          dataLength: null,
+        },
+      });
+    }
+  }
+
+  if (offset !== chunkEnd) return null;
+  return tracks;
 }
 
 function findCatalogStart(buf: MixBuffer, searchFrom: number): number {

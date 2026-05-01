@@ -3,7 +3,6 @@
 import type { CategoryEntry } from "../data.js";
 import {
   gridSortKeyLabel,
-  UNSORTED_CATEGORY_ID,
   UNSORTED_SUBCATEGORY_ID,
 } from "../data.js";
 import type { GridSortDir, GridSortKey } from "../data.js";
@@ -244,8 +243,6 @@ export function buildSampleMoveMenu(
   menu.appendChild(header);
 
   for (const category of categories) {
-    if (category.sampleCount === 0 && category.id !== UNSORTED_CATEGORY_ID) continue;
-
     const isCurrent = category.id === currentCategory;
 
     const item = document.createElement("div");
