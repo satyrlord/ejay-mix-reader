@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 
@@ -77,6 +77,26 @@ describe("listMixFilesForCopy", () => {
     const entries = listMixFilesForCopy(archiveRoot, outDir);
     const folderEntry = entries.find((e) => e.filename === "folder.mix");
     expect(folderEntry).toBeUndefined();
+  });
+
+  it("skips symlinked .mix files", () => {
+    const outsideRoot = mkdtempSync(join(tmpdir(), "mix-files-outside-"));
+    try {
+      const outsideMix = join(outsideRoot, "outside.mix");
+      writeFileSync(outsideMix, "payload");
+      const linkPath = join(archiveRoot, "Dance_eJay1", "MIX", "link.mix");
+      try {
+        symlinkSync(outsideMix, linkPath);
+      } catch {
+        return;
+      }
+
+      const entries = listMixFilesForCopy(archiveRoot, outDir);
+      const symlinkEntry = entries.find((entry) => entry.filename === "link.mix");
+      expect(symlinkEntry).toBeUndefined();
+    } finally {
+      rmSync(outsideRoot, { recursive: true, force: true });
+    }
   });
 
   it("exposes productId and filename on every entry", () => {

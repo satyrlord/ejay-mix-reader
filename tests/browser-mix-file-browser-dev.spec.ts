@@ -622,6 +622,70 @@ test.describe("mix-file-browser module", () => {
     expect(result.emptyText).toBe("No .mix files found for House");
   });
 
+  test("DEV mode: flat product list keeps source group mapping for Dance 3 multi-group mode", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { initMixFileBrowser } = await import(/* @vite-ignore */ modPath);
+
+      const host = document.createElement("div");
+      host.innerHTML = `
+        <aside id="at-dance3-mode" class="archive-sidebar">
+          <div class="archive-header"><span class="archive-title">Mix Archive</span></div>
+          <div class="archive-tree-content">
+            <p class="archive-placeholder">Load a .mix file to begin</p>
+          </div>
+        </aside>
+      `;
+      document.body.appendChild(host);
+
+      const refs: Array<{ label: string; group: string; productId: string }> = [];
+      const sidebar = host.querySelector<HTMLElement>("#at-dance3-mode")!;
+      const controller = initMixFileBrowser(sidebar, {
+        isDev: true,
+        mixLibrary: [
+          {
+            id: "Dance_eJay3",
+            name: "Dance eJay 3",
+            mixes: [{ filename: "D3-ONLY.MIX", sizeBytes: 100, format: "C" }],
+          },
+          {
+            id: "Dance_SuperPack",
+            name: "Dance SuperPack",
+            mixes: [{ filename: "SP-ONLY.MIX", sizeBytes: 100, format: "C" }],
+          },
+        ],
+        onSelectFile: (ref: { label: string; group: string; productId: string }) => refs.push(ref),
+      });
+
+      sidebar.click();
+      controller.setProductMode("dance3");
+
+      const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
+      const d3 = [...content.querySelectorAll<HTMLButtonElement>(".mix-tree-item")]
+        .find((btn) => btn.textContent?.includes("D3-ONLY.MIX"));
+      const sp = [...content.querySelectorAll<HTMLButtonElement>(".mix-tree-item")]
+        .find((btn) => btn.textContent?.includes("SP-ONLY.MIX"));
+
+      d3?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      sp?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+
+      return refs;
+    }, MFB_MOD);
+
+    expect(result).toMatchObject([
+      {
+        label: "D3-ONLY.MIX",
+        group: "Dance eJay 3",
+        productId: "Dance_eJay3",
+      },
+      {
+        label: "SP-ONLY.MIX",
+        group: "Dance SuperPack",
+        productId: "Dance_SuperPack",
+      },
+    ]);
+  });
+
   // ── formatMetaTooltip ──────────────────────────────────────────────────────
 
   test("formatMetaTooltip: returns empty string when meta is undefined", async ({ page }) => {

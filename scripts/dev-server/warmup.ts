@@ -18,11 +18,12 @@
 /**
  * Browser runtime TypeScript source files subject to Istanbul
  * instrumentation during coverage runs. Order does not matter.
+ * Type-only modules are intentionally excluded because they emit no runtime
+ * JavaScript and cannot contribute executable coverage.
  */
 export const COVERAGE_SOURCE_FILES = [
   "src/main.ts",
   "src/app-controller.ts",
-  "src/main-controller-types.ts",
   "src/category-config-controller.ts",
   "src/sample-browser-controller.ts",
   "src/mix-playback-controller.ts",

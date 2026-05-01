@@ -30,6 +30,16 @@ The Sound Browser reinterprets this through a modern dark-first design:
 
 ## Core Rules
 
+- Each individual theme, including the default theme, must be built from one
+  central anchor color and its controlled variations (shades, tints, tones,
+  and nearby hues). Do not mix unrelated anchor colors inside a single theme
+  definition.
+- Category coloring uses one shared 14-slot palette: 13 slots for the
+  category buttons and one slot for the special `Load JSON` button.
+  Sample bubbles and sequencer event blocks inherit colors from this same
+  palette mapping.
+- Subcategory tabs inherit the active category color and render as shaded
+  variants of that category, rather than using a fixed global accent.
 - All runtime CSS lives in [src/app.css](../src/app.css). Do not add
   page-local `<style>` blocks or extra stylesheets.
 - The stylesheet starts with Tailwind CSS and DaisyUI configuration. Treat it as
@@ -50,48 +60,97 @@ The app customizes DaisyUI's `dark` theme inside
 [src/app.css](../src/app.css). Color tokens are mapped to the original eJay
 palette:
 
+- **Default theme anchor color:** Emerald Green (`#00674F`)
+- **Default theme rule:** The default theme is a monochromatic Emerald-Green-led
+  system, with all tokens derived from Emerald Green variation families
+  (shades, tints, tones, and close hue shifts) rather than independent,
+  unrelated base colors.
+
 | Token | Hex | Origin | Use |
 |-------|-----|--------|-----|
-| `--color-primary` | `#00ff88` | — | Primary green accents, play state, active highlights |
-| `--color-primary-content` | `#031b10` | — | Text on primary backgrounds |
-| `--color-secondary` | `#ff3366` | — | Secondary pink/red accents, stop state, warnings |
-| `--color-accent` | `#6f63ff` | — | Tertiary violet, decorative glow, alt-highlights |
-| `--color-base-100` | `#0f0f1a` | eJay deep navy | Global page background |
-| `--color-base-200` | `#1a1a2e` | eJay panel navy | Card and panel surfaces |
-| `--color-base-300` | `#25253e` | eJay lighter navy | Nested surfaces, borders, hover states |
-| `--color-base-content` | `#e0e0e8` | — | Default text on dark backgrounds |
+| `--color-primary` | `var(--accent)` (`#00A277` by default) | Emerald variation | Primary interactive accents, play state, active highlights |
+| `--color-primary-content` | `#08110E` | — | Text on primary backgrounds |
+| `--color-secondary` | `color-mix(in srgb, var(--accent) 64%, #2E9878 36%)` | Emerald-led variation (default) | Secondary accents and supporting states |
+| `--color-accent` | `color-mix(in srgb, var(--accent) 54%, #59C3A0 46%)` | Emerald-led variation (default) | Tertiary highlights and decorative accents |
+| `--color-base-100` | `color-mix(in srgb, var(--accent) 14%, #0B0C0D 86%)` | Accent-derived dark base | Global page background |
+| `--color-base-200` | `color-mix(in srgb, var(--accent) 18%, #121415 82%)` | Accent-derived dark base | Card and panel surfaces |
+| `--color-base-300` | `color-mix(in srgb, var(--accent) 24%, #1B1F20 76%)` | Accent-derived dark base | Nested surfaces, borders, hover states |
+| `--color-base-content` | `#E8F0EC` | — | Default text on dark backgrounds |
 
 Design intent:
 
-- Backgrounds use the deep navy ramp (`base-100` → `base-200` → `base-300`)
-  that echoes the original eJay navy-blue desktop.
-- Primary green is a luminous electronic accent, not pastel or muted.
-- Secondary pink/red provides contrast for destructive actions and
-  attention-drawing UI without clashing with the green primary.
+- Backgrounds use an Emerald-tinted deep-dark ramp (`base-100` → `base-200` →
+  `base-300`) rather than neutral black.
+- Primary and supporting accents stay in the Emerald family so one central
+  color system drives the whole default theme.
+- Default-shell chrome (archive header ribbon, sequencer canvas, context strip,
+  transport strip, search controls, and popup/menu surfaces) uses Emerald-tinted
+  dark values instead of neutral gray/blue ramps.
 
-## Channel Color Palette
+### Product Mode Theme Anchors
 
-The original eJay UI assigns distinct colors to sample categories. The Sound
-Browser preserves this by mapping channel names to accent hues for sample cards,
-badges, and waveform tints.
+When Product Mode is set to one specific product (anything other than `All`),
+the app re-anchors shell/base token derivation around that product's base color.
+This affects primary accents plus derived shades/tints/tones used by panel
+surfaces, borders, controls, and sequencer chrome.
 
-| Channel | Reference Color | CSS Variable | Original eJay Mapping |
-|---------|-----------------|--------------|----------------------|
-| Loop | `#d4a574` | `--channel-loop` | Warm tan/orange blocks |
-| Drum | `#d4a574` | `--channel-drum` | Warm tan/orange blocks |
-| Bass | `#d4a574` | `--channel-bass` | Warm tan/orange blocks |
-| Effect | `#e8a0a0` | `--channel-effect` | Pink/salmon blocks |
-| Voice | `#e8a0a0` | `--channel-voice` | Pink/salmon blocks |
-| Keys / Seq | `#a0c8e8` | `--channel-keys` | Light blue blocks |
-| Guitar | `#a0c8e8` | `--channel-guitar` | Light blue blocks |
-| Scratch | `#e8a0a0` | `--channel-scratch` | Pink/salmon blocks |
-| Sphere | `#59d7ea` | `--channel-sphere` | Bright cyan pad/sphere blocks |
-| Xtra / Hyper | `#b8d8b0` | `--channel-xtra` | Light green blocks |
-| Wave / Groove | `#b8d8b0` | `--channel-wave` | Light green blocks |
+| Product Mode | Base Color | Hex | Notes |
+|--------------|------------|-----|-------|
+| All (default) | Emerald Green | `#00674F` (anchor), `#00A277` (runtime accent) | `data-product-theme` removed |
+| Rave eJay | Sapphire Blue | `#0F52BA` | — |
+| Dance eJay 1 | Spanish Orange | `#E86100` | — |
+| HipHop eJay 1 | Bronze | `#CE8946` | — |
+| Dance eJay 2 | Red-Orange | `#FF4B33` | — |
+| Techno eJay | Cobalt Blue | `#0047AB` | — |
+| HipHop eJay 2 | Gold | `#EFBF04` | — |
+| Dance eJay 3 | Salmon | `#FF7E70` | — |
+| Dance eJay 4 | Dark Pink | `#C11C84` | — |
+| HipHop eJay 3 | Wine | `#722F37` | — |
+| Techno eJay 3 | Pastel Blue | `#B3EBF2` | Highlight override: `#F2BAB3` |
+| Xtreme eJay | Slate Gray | `#708090` | — |
+| HipHop eJay 4 | Ebony | `#506658` | — |
+| House eJay | Beige | `#EDE8D0` | — |
 
-These are drawn directly from the four sample-block color families visible in
-the original eJay interface: tan/orange (rhythmic), pink/salmon (tonal/vocal),
-light blue (melodic/harmonic), and light green (atmospheric/textural).
+Implementation notes:
+
+- Product Mode sets `<html data-product-theme="...">`, and each product theme
+  only overrides anchor vars (`--accent`, `--accent-rgb`,
+  `--accent-darker`, and optional `--theme-highlight`).
+- Shared shell/component vars in `:root` derive shades/tints/tones from those
+  anchor vars, so the whole chrome retints when Product Mode changes.
+
+## Category Color Palette
+
+The browser uses a shared 14-slot palette for category-level color coding.
+This mapping drives:
+
+- Category sidebar buttons
+- Sample bubbles in the sample grid
+- Sequencer event blocks in the timeline
+
+All 14 slots map directly to the provided palette.
+
+| Slot | Color | Mapped Item | CSS Variable |
+|------|-------|-------------|--------------|
+| 1 | `#830000` | Loop | `--category-color-loop` |
+| 2 | `#982A00` | Drum | `--category-color-drum` |
+| 3 | `#AB4700` | Bass | `--category-color-bass` |
+| 4 | `#BF6601` | Guitar | `--category-color-guitar` |
+| 5 | `#D48915` | Keys | `--category-color-keys` |
+| 6 | `#E6AD33` | Sequence | `--category-color-sequence` |
+| 7 | `#BFAD00` | Voice | `--category-color-voice` |
+| 8 | `#7DA500` | Effect | `--category-color-effect` |
+| 9 | `#009C48` | Scratch | `--category-color-scratch` |
+| 10 | `#008694` | Orchestral | `--category-color-orchestral` |
+| 11 | `#005DAD` | Pads | `--category-color-pads` |
+| 12 | `#3D3F96` | Extra | `--category-color-extra` |
+| 13 | `#442E77` | Unsorted | `--category-color-unsorted` |
+| 14 | `#422158` | Load JSON (non-category button) | `--category-color-system-load` |
+
+Implementation note:
+
+- Legacy `--channel-*` variables remain as aliases to `--category-color-*` so
+  older hooks and tests keep working while visual output stays aligned.
 
 ## Typography
 
@@ -136,9 +195,11 @@ A narrow strip sits between the editor shell and the sample browser.
 The left sidebar displays all top-level categories (Bass, Drum, Effect,
 etc.) as a vertical two-column grid of buttons.
 
-- Buttons use a dark navy fill (`bg-base-200` or deeper) with white text.
-- Active category uses a brighter fill or border accent from the channel
-  color palette.
+- Each category button uses its own color from the shared 14-slot palette.
+- The `Load JSON` button uses slot 14 and is visually distinct from all
+  category buttons.
+- Active category state brightens and outlines the same base button color,
+  rather than switching to an unrelated accent.
 - The sidebar is fixed-height and scrolls independently when categories
   overflow.
 - Selecting a category populates the subcategory tab bar and sample grid.
@@ -148,9 +209,10 @@ etc.) as a vertical two-column grid of buttons.
 A horizontal row of tabs sits above the sample grid, scoped to the
 active category.
 
-- Tabs use a teal/primary accent background with contrasting text.
+- Tabs inherit the currently active category color and use darker/lighter
+  shades of that same hue family for idle vs active states.
 - A `+` button at the trailing end allows adding or importing new
-  subcategory groupings.
+  subcategory groupings; it uses the same inherited category shading model.
 - Active tab is visually distinguished (filled vs. outlined).
 - Tabs scroll horizontally when they overflow.
 
@@ -161,11 +223,20 @@ rectangular blocks, closely matching the original eJay UI.
 
 - Each row represents a channel/lane.
 - Each block represents a sample; its width may reflect beat length.
-- Blocks use a light accent fill (channel-color tinted) on a dark grid
-  background.
-- Clicking a block previews the sample; active/playing block shows a
-  `primary` highlight or glow.
+- Blocks use the same category palette mapping as the category sidebar
+  buttons, so each sample bubble inherits its category color consistently.
+- Sample bubbles intentionally render without border outlines or drop shadows
+  to preserve text legibility across saturated category colors.
+- Bubble text is white and uses a 50% gray drop shadow.
+- Clicking a block previews the sample.
 - Empty grid cells use a subtle outline to maintain the grid rhythm.
+
+### Sequencer Timeline Blocks
+
+- Sequencer event blocks inherit the same category palette mapping used by
+  both the sidebar buttons and sample bubbles.
+- Missing/unresolved blocks keep the warning style and do not use category
+  color.
 
 ### BPM Filter
 

@@ -10,7 +10,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "http";
-import { existsSync, statSync, writeFileSync } from "fs";
+import { existsSync, lstatSync, realpathSync, writeFileSync } from "fs";
 import { resolve, sep } from "path";
 
 import { ARCHIVE_MIX_DIRS, resolveProductMixDir } from "../build-index.js";
@@ -60,6 +60,16 @@ function resolveUserdataRoot(archiveRoot: string): string {
   return resolve(archiveRoot, USERDATA_CANONICAL_ROOT);
 }
 
+function isContainedRealpath(pathToCheck: string, rootPath: string): boolean {
+  try {
+    const resolvedPath = realpathSync(pathToCheck);
+    const resolvedRoot = realpathSync(rootPath);
+    return resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}${sep}`);
+  } catch {
+    return false;
+  }
+}
+
 // ── resolveMixUrl ─────────────────────────────────────────────────────────
 
 /**
@@ -106,10 +116,15 @@ export function resolveMixUrl(
     if (!absolutePath.startsWith(expectedPrefix)) return null;
     if (!existsSync(absolutePath)) return null;
     try {
-      if (!statSync(absolutePath).isFile()) return null;
+      const stats = lstatSync(absolutePath);
+      // Reject symlinks as early as possible for clear intent and cheaper checks.
+      if (!stats.isFile() || stats.isSymbolicLink()) return null;
     } catch {
       return null;
     }
+    // Realpath containment stays as a defense-in-depth guard even if the lstat
+    // check is changed later, and it protects against odd filesystem aliases.
+    if (!isContainedRealpath(absolutePath, userdataRoot)) return null;
     const canonicalProductId = `${USERDATA_CANONICAL_ROOT}/${relPath}`;
     return { absolutePath, productId: canonicalProductId, filename };
   }
@@ -122,10 +137,15 @@ export function resolveMixUrl(
   if (!absolutePath.startsWith(expectedPrefix)) return null;
   if (!existsSync(absolutePath)) return null;
   try {
-    if (!statSync(absolutePath).isFile()) return null;
+    const stats = lstatSync(absolutePath);
+    // Reject symlinks as early as possible for clear intent and cheaper checks.
+    if (!stats.isFile() || stats.isSymbolicLink()) return null;
   } catch {
     return null;
   }
+  // Realpath containment stays as a defense-in-depth guard even if the lstat
+  // check is changed later, and it protects against odd filesystem aliases.
+  if (!isContainedRealpath(absolutePath, resolvedProduct.mixDir)) return null;
   return { absolutePath, productId, filename };
 }
 
@@ -185,6 +205,7 @@ export function applySampleMoveToManifest(
  * - shell/path-special characters (`[:*?"<>|]`) in every segment
  * - path-traversal sequences (`..`, `/`, `\\`) in category/subcategory fields
  * - path-separator characters (`/`, `\\`) in the filename
+ * - required filename extension: `.wav` (case-insensitive)
  * - containment: both resolved absolute paths must start with `outputRoot +
  *   path.sep` (guards against drive-letter injection such as `"C:"` and
  *   against a literal `".."` filename escaping the category directory)
@@ -198,17 +219,42 @@ export function validateSampleMovePaths(
   newCategory: string,
   newSubcategory: string | null,
 ): string | null {
-  for (const field of [oldCategory, oldSubcategory ?? "", newCategory, newSubcategory ?? ""]) {
-    if (field.includes("..") || field.includes("/") || field.includes("\\") || UNSAFE_SEGMENT_CHARS.test(field)) {
-      return "Invalid path component";
-    }
-  }
-  if (filename.includes("/") || filename.includes("\\") || UNSAFE_SEGMENT_CHARS.test(filename)) {
+  const filenameTrimmed = filename.trim();
+  if (
+    filenameTrimmed.length === 0 ||
+    filenameTrimmed === "." ||
+    filenameTrimmed === ".." ||
+    !/\.wav$/i.test(filenameTrimmed)
+  ) {
     return "Invalid path component";
   }
 
-  const oldParts = [outputRoot, oldCategory, ...(oldSubcategory ? [oldSubcategory] : []), filename];
-  const newParts = [outputRoot, newCategory, ...(newSubcategory ? [newSubcategory] : []), filename];
+  const categoryFields = [oldCategory, newCategory];
+  for (const category of categoryFields) {
+    const trimmed = category.trim();
+    if (trimmed.length === 0 || trimmed === ".") {
+      return "Invalid path component";
+    }
+  }
+
+  for (const field of [oldCategory, oldSubcategory ?? "", newCategory, newSubcategory ?? ""]) {
+    const trimmed = field.trim();
+    if (
+      trimmed === "." ||
+      field.includes("..") ||
+      field.includes("/") ||
+      field.includes("\\") ||
+      UNSAFE_SEGMENT_CHARS.test(field)
+    ) {
+      return "Invalid path component";
+    }
+  }
+  if (filenameTrimmed.includes("/") || filenameTrimmed.includes("\\") || UNSAFE_SEGMENT_CHARS.test(filenameTrimmed)) {
+    return "Invalid path component";
+  }
+
+  const oldParts = [outputRoot, oldCategory, ...(oldSubcategory ? [oldSubcategory] : []), filenameTrimmed];
+  const newParts = [outputRoot, newCategory, ...(newSubcategory ? [newSubcategory] : []), filenameTrimmed];
   const oldWav = resolve(...(oldParts as [string, ...string[]]));
   const newWav = resolve(...(newParts as [string, ...string[]]));
   const prefix = outputRoot + sep;

@@ -95,12 +95,13 @@ export function manageSampleMetadata(outputRoot: string): Plugin {
 
             const { filename, oldCategory, oldSubcategory, newCategory, newSubcategory } =
               parsed as SampleMoveRequest;
+            const safeFilename = filename.trim();
 
             // Security: validate all path components and enforce containment within
             // outputRoot before touching the filesystem.
             const validationError = validateSampleMovePaths(
               outputRoot,
-              filename,
+              safeFilename,
               oldCategory,
               oldSubcategory,
               newCategory,
@@ -118,13 +119,13 @@ export function manageSampleMetadata(outputRoot: string): Plugin {
               outputRoot,
               oldCategory,
               ...(oldSubcategory ? [oldSubcategory] : []),
-              filename,
+              safeFilename,
             ];
             const newParts = [
               outputRoot,
               newCategory,
               ...(newSubcategory ? [newSubcategory] : []),
-              filename,
+              safeFilename,
             ];
             const oldWav = resolve(...(oldParts as [string, ...string[]]));
             const newWav = resolve(...(newParts as [string, ...string[]]));
@@ -133,28 +134,56 @@ export function manageSampleMetadata(outputRoot: string): Plugin {
               newCategory,
               ...(newSubcategory ? [newSubcategory] : []),
             );
+            const isSamePath = oldWav === newWav;
 
-            // Move the WAV file (create target dir if needed).
-            if (existsSync(oldWav)) {
-              mkdirSync(newDir, { recursive: true });
-              renameSync(oldWav, newWav);
-            } else {
-              server.config.logger.warn(
-                `[manage-sample-metadata] WAV not found at ${oldWav}; metadata will still be updated`,
-              );
-            }
-
-            // Patch output/metadata.json.
+            // Patch output/metadata.json first so invalid requests fail before any file mutation.
             const metaPath = resolve(outputRoot, "metadata.json");
             const meta = JSON.parse(readFileSync(metaPath, "utf-8")) as SampleMetadataManifest;
-            applySampleMoveToManifest(meta, {
-              filename,
+            const manifestUpdated = applySampleMoveToManifest(meta, {
+              filename: safeFilename,
               oldCategory,
               oldSubcategory,
               newCategory,
               newSubcategory,
             });
-            writeFileSync(metaPath, JSON.stringify(meta, null, 2) + "\n", "utf-8");
+            if (!manifestUpdated) {
+              const sourceLabel = oldSubcategory ? `${oldCategory}/${oldSubcategory}` : oldCategory;
+              res.statusCode = 404;
+              res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              res.end(`Sample not found in metadata: ${safeFilename} in ${sourceLabel}`);
+              return;
+            }
+
+            if (!isSamePath && existsSync(newWav)) {
+              res.statusCode = 409;
+              res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              res.end("Destination file already exists");
+              return;
+            }
+
+            let movedWav = false;
+            if (!isSamePath && existsSync(oldWav)) {
+              mkdirSync(newDir, { recursive: true });
+              renameSync(oldWav, newWav);
+              movedWav = true;
+            } else if (!isSamePath) {
+              server.config.logger.warn(
+                `[manage-sample-metadata] WAV not found at ${oldWav}; metadata will still be updated`,
+              );
+            }
+
+            try {
+              writeFileSync(metaPath, JSON.stringify(meta, null, 2) + "\n", "utf-8");
+            } catch (error) {
+              if (movedWav) {
+                try {
+                  renameSync(newWav, oldWav);
+                } catch (rollbackError) {
+                  server.config.logger.warn(`[manage-sample-metadata] Rollback failed: ${String(rollbackError)}`);
+                }
+              }
+              throw error;
+            }
 
             server.ws.send({ type: "custom", event: SAMPLE_METADATA_UPDATED_EVENT, data: null });
             res.statusCode = 204;

@@ -219,7 +219,7 @@ describe("manageSampleMetadata", () => {
       expect(existsSync(join(outputRoot, "Bass", "sample01.wav"))).toBe(false);
     });
 
-    it("updates metadata.json when WAV is missing (still patches manifest)", () => {
+    it("updates metadata when the source WAV is missing", () => {
       // Remove the WAV first
       unlinkSync(join(outputRoot, "Bass", "sample01.wav"));
 
@@ -241,6 +241,55 @@ describe("manageSampleMetadata", () => {
       expect(server.config.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining("WAV not found"),
       );
+      expect(server.ws.send).toHaveBeenCalledWith({
+        type: "custom",
+        event: SAMPLE_METADATA_UPDATED_EVENT,
+        data: null,
+      });
+    });
+
+    it("responds 404 when no matching sample is found in metadata", () => {
+      const server = makeMockServer();
+      const mw = getMw(outputRoot, server);
+      const req = makeReq("/__sample-move");
+      const res = makeRes();
+      mw(req, res, vi.fn());
+      req.emit("data", JSON.stringify({
+        filename: "missing.wav",
+        oldCategory: "Bass",
+        oldSubcategory: null,
+        newCategory: "Guitar",
+        newSubcategory: null,
+      }));
+      req.emit("end");
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body).toContain("Sample not found in metadata:");
+      expect(res.body).toContain("missing.wav");
+      expect(res.body).toContain("Bass");
+      expect(server.ws.send).not.toHaveBeenCalled();
+    });
+
+    it("responds 409 when destination WAV already exists", () => {
+      writeFileSync(join(outputRoot, "Guitar", "sample01.wav"), "existing");
+
+      const server = makeMockServer();
+      const mw = getMw(outputRoot, server);
+      const req = makeReq("/__sample-move");
+      const res = makeRes();
+      mw(req, res, vi.fn());
+      req.emit("data", JSON.stringify({
+        filename: "sample01.wav",
+        oldCategory: "Bass",
+        oldSubcategory: null,
+        newCategory: "Guitar",
+        newSubcategory: null,
+      }));
+      req.emit("end");
+
+      expect(res.statusCode).toBe(409);
+      expect(res.body).toBe("Destination file already exists");
+      expect(server.ws.send).not.toHaveBeenCalled();
     });
 
     it("responds 500 when metadata.json cannot be read", () => {

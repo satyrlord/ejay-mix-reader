@@ -81,6 +81,11 @@ interface TreeFile {
   meta?: MixFileMeta;
 }
 
+interface FlatTreeFile extends TreeFile {
+  groupId: string;
+  groupLabel: string;
+}
+
 interface RelativeMixFile {
   relativeParts: string[];
   label: string;
@@ -98,6 +103,9 @@ interface BrowserState {
   activeKey: string | null;
   expandedIds: Set<string>;
 }
+
+const MIX_SCAN_MAX_FILES = 1024;
+const MIX_META_READ_CONCURRENCY = 8;
 
 /* -------------------------------------------------------------------------- */
 /* SVG helpers                                                                */
@@ -294,6 +302,38 @@ async function readMixFileMeta(source: MixFileSource, productHint?: string): Pro
   }
 }
 
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  limit: number,
+  mapper: (value: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (values.length === 0) return [];
+
+  const results = new Array<R>(values.length);
+  const concurrency = Math.max(1, Math.min(limit, values.length));
+  let cursor = 0;
+
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (true) {
+      const currentIndex = cursor;
+      cursor += 1;
+      if (currentIndex >= values.length) {
+        return;
+      }
+      results[currentIndex] = await mapper(values[currentIndex]!, currentIndex);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+function limitScannedMixFiles(files: RelativeMixFile[]): RelativeMixFile[] {
+  if (files.length <= MIX_SCAN_MAX_FILES) return files;
+  console.warn(`Mix browser scan truncated to ${MIX_SCAN_MAX_FILES} files.`);
+  return files.slice(0, MIX_SCAN_MAX_FILES);
+}
+
 async function buildGroupsFromRelativeFiles(
   rootName: string,
   files: RelativeMixFile[],
@@ -312,15 +352,20 @@ async function buildGroupsFromRelativeFiles(
   }
 
   const groups = await Promise.all([...grouped.values()].map(async ({ descriptor, files: groupFiles }) => {
-    const filesWithMeta = await Promise.all(groupFiles
+    const sortedFiles = groupFiles
       .slice()
-      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }))
-      .map(async (file) => ({
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+
+    const filesWithMeta = await mapWithConcurrency(
+      sortedFiles,
+      MIX_META_READ_CONCURRENCY,
+      async (file) => ({
         key: `${descriptor.id}/${file.relativeParts.join("/")}`,
         label: file.label,
         source: file.source,
         meta: await readMixFileMeta(file.source, descriptor.productHint),
-      })));
+      }),
+    );
 
     return {
       id: descriptor.id,
@@ -692,7 +737,7 @@ async function buildFsaGroups(
 ): Promise<TreeGroup[]> {
   const files: RelativeMixFile[] = [];
   await scanDirectory(root, 0, [], files);
-  return buildGroupsFromRelativeFiles(root.name, files);
+  return buildGroupsFromRelativeFiles(root.name, limitScannedMixFiles(files));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -713,7 +758,7 @@ async function buildFileInputGroups(rootName: string, files: File[]): Promise<Tr
       };
     });
 
-  return buildGroupsFromRelativeFiles(rootName, relativeFiles);
+  return buildGroupsFromRelativeFiles(rootName, limitScannedMixFiles(relativeFiles));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -807,8 +852,8 @@ export function initMixFileBrowser(
     }
     const allowed = new Set(productMode.mixGroupIds);
     const matching = allGroups.filter((group) => allowed.has(group.id));
-    const flatFiles = matching.flatMap((group) =>
-      group.files.map((file) => ({ ...file, _groupLabel: group.label })),
+    const flatFiles: FlatTreeFile[] = matching.flatMap((group) =>
+      group.files.map((file) => ({ ...file, groupId: group.id, groupLabel: group.label })),
     );
     renderFlatProductList(content, flatFiles, state, productMode, options.onSelectFile);
   }
@@ -935,7 +980,7 @@ export function initMixFileBrowser(
  */
 function renderFlatProductList(
   content: HTMLElement,
-  files: TreeFile[],
+  files: FlatTreeFile[],
   state: BrowserState,
   productMode: ProductModeEntry,
   onSelect: (ref: MixFileRef) => void,
@@ -979,7 +1024,7 @@ function renderFlatProductList(
         active.classList.remove("is-active");
       }
       btn.classList.add("is-active");
-      showMixMetaPopup(file.label, productMode.label, file.meta, btn);
+      showMixMetaPopup(file.label, file.groupLabel, file.meta, btn);
     });
 
     btn.addEventListener("dblclick", (e) => {
@@ -988,8 +1033,8 @@ function renderFlatProductList(
       dismissMixMetaPopup();
       onSelect({
         label: file.label,
-        group: productMode.label,
-        productId: productMode.mixGroupIds[0] ?? productMode.id,
+        group: file.groupLabel,
+        productId: file.groupId,
         source: file.source,
       });
     });

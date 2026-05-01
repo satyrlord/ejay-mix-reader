@@ -344,6 +344,7 @@ describe("decodePxdFile", () => {
 
   it("caps decodedSize to the 64 MiB hard ceiling", () => {
     const MiB64 = 64 * 1024 * 1024;
+    const minCompressedBytesForCeiling = (MiB64 / 8) + 1;
     const meta = "A";
     const metaBuf = Buffer.from(meta, "ascii");
     const header = Buffer.alloc(5 + metaBuf.length + 7);
@@ -355,8 +356,9 @@ describe("decodePxdFile", () => {
     header.writeUInt32LE(MiB64 + 1, metaEnd + 1); // just over the ceiling
     header.writeUInt16LE(0, metaEnd + 5);
 
-    // compressed payload large enough that 8× expansion > 64 MiB
-    const compressed = Buffer.alloc(MiB64); // 64 MiB of zeros → 8× = 512 MiB
+    // Keep fixture smaller than 64 MiB while still forcing the hard ceiling:
+    // 8× expansion of this payload is just over 64 MiB.
+    const compressed = Buffer.alloc(minCompressedBytesForCeiling);
     const full = Buffer.concat([header, compressed]);
 
     const result = decodePxdFile(full);

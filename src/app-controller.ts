@@ -111,7 +111,8 @@ const SAMPLE_BUBBLE_ZOOM_MIN = 0.5;
 const SAMPLE_BUBBLE_ZOOM_MAX = 2;
 const MIX_TIMELINE_LABEL_PX = 160;
 const MIX_TIMELINE_BEAT_PX = 48;
-const MIX_PLAYHEAD_AUTO_SCROLL_RATIO = 0.4;
+const MIX_PLAYHEAD_AUTO_SCROLL_TARGET_RATIO = 0.72;
+const MIX_PLAYHEAD_AUTO_SCROLL_TRIGGER_RATIO = 0.88;
 const MIX_GRID_MAJOR_EVERY_BEATS = 8;
 const SEQUENCER_EVENT_CLICK_DELAY_MS = 220;
 const MIX_PLAYBACK_DRIFT_GRACE_MS = 350;
@@ -153,10 +154,12 @@ export function createAppController(app: HTMLElement): () => void {
   let stopCategoryConfigWatch: () => void = noop;
   let cleanupShellSplitter: () => void = noop;
   let cleanupTransportShortcuts: () => void = noop;
+  let cleanupSequencerScrollIntent: () => void = noop;
   const categoryConfigController = createCategoryConfigController();
   let cleanupSubcategoryContextMenu: () => void = noop;
   let currentGridSamples: Sample[] = [];
   let activeMixPlan: MixPlaybackPlan | null = null;
+  let renderedMixPlan: MixPlaybackPlan | null = null;
   let activeMixName: string | null = null;
   let mixPlaybackHost: MixPlayerHost | null = null;
   let mixAudioContext: AudioContext | null = null;
@@ -165,6 +168,7 @@ export function createAppController(app: HTMLElement): () => void {
   let mixPlaybackStartedAtMs: number | null = null;
   let mixTransportPlaying = false;
   let mixPlayheadBeat = 0;
+  let mixAutoScrollSuppressedByUser = false;
   // Monotonic token used to cancel stale async decode/play attempts.
   let mixPlaybackRequestId = 0;
   // Monotonic token used to cancel stale async sample preload attempts.
@@ -205,6 +209,8 @@ export function createAppController(app: HTMLElement): () => void {
     cleanupShellSplitter = noop;
     cleanupTransportShortcuts();
     cleanupTransportShortcuts = noop;
+    cleanupSequencerScrollIntent();
+    cleanupSequencerScrollIntent = noop;
     clearProgressUpdateInterval();
     stopMixPlayback();
     setMixSampleLoadingState(false, 0, 0);
@@ -232,6 +238,20 @@ export function createAppController(app: HTMLElement): () => void {
       SAMPLE_BUBBLE_ZOOM_CSS_VAR,
       String(state.sampleBubbleZoomScale),
     );
+  }
+
+  function activeCategoryColorVar(categoryId: string | null | undefined): string {
+    if (!categoryId) {
+      return "var(--category-color-unsorted, var(--category-palette-13))";
+    }
+
+    const token = categoryId
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    return `var(--category-color-${token || "unsorted"}, var(--category-color-unsorted, var(--category-palette-13)))`;
   }
 
   function adjustSampleBubbleZoom(delta: number): void {
@@ -328,6 +348,39 @@ export function createAppController(app: HTMLElement): () => void {
       position: sequencer.querySelector<HTMLElement>(".seq-position")!,
       scroll: sequencer.querySelector<HTMLElement>(".sequencer-scroll")!,
       playhead: sequencer.querySelector<HTMLElement>(".sequencer-playhead"),
+    };
+  }
+
+  function isPointerOnHorizontalScrollbar(scroll: HTMLElement, clientY: number): boolean {
+    const scrollbarHeight = scroll.offsetHeight - scroll.clientHeight;
+    if (scrollbarHeight <= 0) return false;
+    const rect = scroll.getBoundingClientRect();
+    return clientY >= rect.bottom - scrollbarHeight;
+  }
+
+  function initSequencerScrollIntentHandlers(currentSlots: SpaShellSlots): () => void {
+    const scroll = currentSlots.sequencer.querySelector<HTMLElement>(".sequencer-scroll");
+    if (!scroll) return noop;
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (!activeMixPlan || activeMixPlan.loopBeats === null) return;
+      if (!isPointerOnHorizontalScrollbar(scroll, event.clientY)) return;
+      mixAutoScrollSuppressedByUser = true;
+    };
+
+    const handleWheel = (event: WheelEvent): void => {
+      if (!activeMixPlan || activeMixPlan.loopBeats === null) return;
+      const horizontalIntent = Math.abs(event.deltaX) > 0 || (event.shiftKey && Math.abs(event.deltaY) > 0);
+      if (!horizontalIntent) return;
+      mixAutoScrollSuppressedByUser = true;
+    };
+
+    scroll.addEventListener("pointerdown", handlePointerDown);
+    scroll.addEventListener("wheel", handleWheel, { passive: true });
+
+    return () => {
+      scroll.removeEventListener("pointerdown", handlePointerDown);
+      scroll.removeEventListener("wheel", handleWheel);
     };
   }
 
@@ -501,6 +554,8 @@ export function createAppController(app: HTMLElement): () => void {
   function seekMixPlaybackToBeat(beat: number): void {
     if (!activeMixPlan || activeMixPlan.loopBeats === null) return;
     const startBeat = clampMixStartBeat(beat);
+    // A direct timeline seek is an explicit "follow this point" action.
+    mixAutoScrollSuppressedByUser = false;
     setMixPlayheadBeat(startBeat, true);
     updateMixPlaybackProgress(startBeat);
     void playSelectedMix(startBeat);
@@ -530,11 +585,16 @@ export function createAppController(app: HTMLElement): () => void {
     const leftPx = MIX_TIMELINE_LABEL_PX + (clampedBeat * MIX_TIMELINE_BEAT_PX);
     ui.playhead.style.transform = `translateX(${leftPx}px)`;
 
-    if (!autoScroll) return;
+    if (!autoScroll || mixAutoScrollSuppressedByUser) return;
 
-    const targetLeft = leftPx - (ui.scroll.clientWidth * MIX_PLAYHEAD_AUTO_SCROLL_RATIO);
+    const triggerLeft = ui.scroll.scrollLeft + (ui.scroll.clientWidth * MIX_PLAYHEAD_AUTO_SCROLL_TRIGGER_RATIO);
+    if (leftPx < triggerLeft) return;
+
+    const targetLeft = leftPx - (ui.scroll.clientWidth * MIX_PLAYHEAD_AUTO_SCROLL_TARGET_RATIO);
     const maxLeft = Math.max(0, ui.scroll.scrollWidth - ui.scroll.clientWidth);
-    ui.scroll.scrollLeft = Math.max(0, Math.min(maxLeft, targetLeft));
+    const clampedLeft = Math.max(0, Math.min(maxLeft, targetLeft));
+    if (clampedLeft <= ui.scroll.scrollLeft) return;
+    ui.scroll.scrollLeft = clampedLeft;
   }
 
   function stopMixPlaybackAnimation(): void {
@@ -637,6 +697,8 @@ export function createAppController(app: HTMLElement): () => void {
     const ui = getMixUi();
     /* v8 ignore next -- renderMixPlan only runs after the sequencer shell has mounted */
     if (!ui) return;
+
+    mixAutoScrollSuppressedByUser = false;
 
     const beatCount = Math.max(1, plan.loopBeats ?? 0);
     syncSequencerHeader(beatCount);
@@ -761,6 +823,8 @@ export function createAppController(app: HTMLElement): () => void {
     if (!ui) return;
 
     if (!activeMixPlan || !activeMixName) {
+      mixAutoScrollSuppressedByUser = false;
+      renderedMixPlan = null;
       ui.mixName.textContent = "No mix loaded";
       ui.bpmDisplay.innerHTML = "&mdash; BPM";
       ui.position.textContent = "0 events · 0 ready";
@@ -792,8 +856,12 @@ export function createAppController(app: HTMLElement): () => void {
     ui.playButton.disabled = activeMixPlan.events.length === 0;
     ui.stopButton.disabled = !mixTransportPlaying;
 
-    renderMixPlan(activeMixPlan);
-    if (!mixTransportPlaying) {
+    const planChanged = renderedMixPlan !== activeMixPlan;
+    if (planChanged) {
+      renderMixPlan(activeMixPlan);
+      renderedMixPlan = activeMixPlan;
+    }
+    if (!mixTransportPlaying && planChanged) {
       ui.scroll.scrollTo({ left: 0 });
     }
   }
@@ -898,7 +966,7 @@ export function createAppController(app: HTMLElement): () => void {
     }));
   }
 
-  function stopMixPlayback(): void {
+  function stopMixPlayback(resetScrollToStart: boolean = true): void {
     mixPlaybackRequestId += 1;
     clearMixPlaybackStopTimeout();
     stopMixPlaybackAnimation();
@@ -907,13 +975,19 @@ export function createAppController(app: HTMLElement): () => void {
     mixPlaybackHost = null;
     setTransportBuildLabelAudioPlaying("mix", false);
     syncMixUi();
+    if (resetScrollToStart) {
+      const ui = getMixUi();
+      if (ui) {
+        ui.scroll.scrollTo({ left: 0 });
+      }
+    }
   }
 
   function pauseMixPlaybackAtCurrentBarStart(): void {
     if (!activeMixPlan || !mixTransportPlaying) return;
 
     const pausedBeat = currentMixBarStartBeat();
-    stopMixPlayback();
+    stopMixPlayback(false);
     setMixPlayheadBeat(pausedBeat, true);
     updateMixPlaybackProgress(pausedBeat);
   }
@@ -947,7 +1021,8 @@ export function createAppController(app: HTMLElement): () => void {
 
     const plan = activeMixPlan;
     const requestedStartBeat = plan.loopBeats === null ? 0 : clampMixStartBeat(startBeat);
-    stopMixPlayback();
+    const resetScrollToStart = requestedStartBeat <= 0;
+    stopMixPlayback(resetScrollToStart);
     player.stop();
     const requestId = ++mixPlaybackRequestId;
     const playableEvents = plan.events.filter((event) => event.audioUrl !== null && event.beat >= requestedStartBeat);
@@ -1046,6 +1121,11 @@ export function createAppController(app: HTMLElement): () => void {
     const requestId = ++mixLoadRequestId;
     stopMixPlayback();
     setMixSampleLoadingState(false, 0, 0);
+    mixAutoScrollSuppressedByUser = false;
+    activeMixName = null;
+    activeMixPlan = null;
+    renderedMixPlan = null;
+    syncMixUi();
 
     try {
       const productHint = ref.productId.startsWith("_userdata/") ? undefined : ref.productId;
@@ -1078,6 +1158,8 @@ export function createAppController(app: HTMLElement): () => void {
   function showHome(): void {
     cleanupTransportShortcuts();
     cleanupTransportShortcuts = noop;
+    cleanupSequencerScrollIntent();
+    cleanupSequencerScrollIntent = noop;
     cleanupShellSplitter();
     cleanupShellSplitter = noop;
     app.replaceChildren();
@@ -1115,8 +1197,11 @@ export function createAppController(app: HTMLElement): () => void {
     slots = renderSpaShell(app);
     cleanupTransportShortcuts();
     cleanupTransportShortcuts = noop;
+    cleanupSequencerScrollIntent();
+    cleanupSequencerScrollIntent = noop;
     cleanupShellSplitter();
     cleanupShellSplitter = initShellSplitter(slots);
+    cleanupSequencerScrollIntent = initSequencerScrollIntentHandlers(slots);
     setMixSampleLoadingState(false, 0, 0);
     const currentSlots = slots;
 
@@ -1289,6 +1374,10 @@ export function createAppController(app: HTMLElement): () => void {
     const addState = subcategoryAddState();
 
     closeSubcategoryContextMenu();
+    currentSlots.tabs.style.setProperty(
+      "--active-category-color",
+      activeCategoryColorVar(state.activeCategory?.id),
+    );
 
     renderSubcategoryTabs(
       currentSlots.tabs,

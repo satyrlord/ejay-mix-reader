@@ -178,6 +178,27 @@ export function maxRecoveredBeat(tracks: readonly { beat: number | null }[]): nu
   return maxBeat >= 0 ? maxBeat : null;
 }
 
+const MAX_TIMELINE_BEAT = 16_384;
+const DEFAULT_PLAYBACK_BPM = 120;
+const MAX_PLAYBACK_BPM = 400;
+
+function normalizePlaybackBpm(primaryBpm: number, fallbackBpm: number | null): number {
+  if (Number.isFinite(primaryBpm) && primaryBpm > 0 && primaryBpm <= MAX_PLAYBACK_BPM) {
+    return primaryBpm;
+  }
+  if (typeof fallbackBpm === "number" && Number.isFinite(fallbackBpm) && fallbackBpm > 0 && fallbackBpm <= MAX_PLAYBACK_BPM) {
+    return fallbackBpm;
+  }
+  return DEFAULT_PLAYBACK_BPM;
+}
+
+function normalizeTimelineBeat(beat: number | null): number {
+  if (typeof beat !== "number" || !Number.isFinite(beat)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(MAX_TIMELINE_BEAT, Math.floor(beat)));
+}
+
 const MIX_PLAYBACK_PRODUCT_ALIASES: Record<string, string> = {
   Dance_eJay_10: "Dance_eJay1",
   Dance_eJay_20: "Dance_eJay2",
@@ -394,21 +415,16 @@ export function buildMixPlaybackPlan(
   const products = playbackLookupOrder(mix);
   const primaryProduct = products[0] ?? canonicalPlaybackProduct(mix.product);
   const lanes = lanesForMix(mix);
+  const bpm = normalizePlaybackBpm(mix.bpm, mix.bpmAdjusted);
   const timelineUnitBeats = mix.format === "A" ? 4 : 1;
   const authoritativeLoopBeats = typeof mix.loopBeats === "number" && Number.isFinite(mix.loopBeats) && mix.loopBeats > 0
-    ? Math.max(1, Math.round(mix.loopBeats))
+    ? Math.min(MAX_TIMELINE_BEAT, Math.max(1, Math.round(mix.loopBeats)))
     : null;
   const channelIds: string[] = [];
-  // Track whether the parser recovered any positional data for this mix.
-  // If every track has `beat === null`, we drop into "list view" — no loop,
-  // no sequencer grid placement, just a flat list of samples.
-  const recoveredMaxBeat = maxRecoveredBeat(mix.tracks);
-  const anyBeatKnown = recoveredMaxBeat !== null;
+  const anyTrackBeatRecovered = mix.tracks.some((track) => typeof track.beat === "number" && Number.isFinite(track.beat));
 
   const events = mix.tracks.map((track, index) => {
-    const beat = typeof track.beat === "number" && Number.isFinite(track.beat)
-      ? Math.max(0, track.beat)
-      : 0;
+    const beat = normalizeTimelineBeat(track.beat);
     const channelId = typeof track.channel === "number" && Number.isFinite(track.channel)
       ? `lane-${track.channel}`
       : `track-${index}`;
@@ -439,6 +455,13 @@ export function buildMixPlaybackPlan(
       resolved: audioUrl !== null,
     } satisfies MixPlaybackPlanEvent;
   }).sort((left, right) => left.beat - right.beat || left.channelId.localeCompare(right.channelId));
+
+  // If every track has `beat === null`, we drop into "list view" — no loop,
+  // no sequencer grid placement, just a flat list of samples.
+  const recoveredMaxBeat = anyTrackBeatRecovered
+    ? events.reduce((maxBeat, event) => Math.max(maxBeat, event.beat), 0)
+    : null;
+  const anyBeatKnown = recoveredMaxBeat !== null;
 
   const resolvedEvents = events.filter((event) => event.resolved).length;
 
@@ -475,11 +498,11 @@ export function buildMixPlaybackPlan(
 
     // Format A timeline units are bars; rounding to the next 2-bar boundary
     // matches original Gen-1 START mix lengths (e.g. Rave START = 118 bars).
-    loopBeats = Math.max(1, Math.ceil(inferredLength / 2) * 2);
+    loopBeats = Math.min(MAX_TIMELINE_BEAT, Math.max(1, Math.ceil(inferredLength / 2) * 2));
   } else {
     // Gen-2/3 stay quantized to 4-beat bars.
     const rawLength = recoveredMaxBeat + 1;
-    loopBeats = Math.max(1, Math.ceil(rawLength / 4) * 4);
+    loopBeats = Math.min(MAX_TIMELINE_BEAT, Math.max(1, Math.ceil(rawLength / 4) * 4));
   }
 
   if (
@@ -491,7 +514,7 @@ export function buildMixPlaybackPlan(
     const recoveredLength = recoveredMaxBeat + 1;
     const extension = loopBeats - recoveredLength;
     if (extension > DANCE1_FORMAT_A_OUTLIER_EXTENSION_BARS) {
-      loopBeats = recoveredLength + DANCE1_FORMAT_A_TAIL_EXTENSION_CAP_BARS;
+      loopBeats = Math.min(MAX_TIMELINE_BEAT, recoveredLength + DANCE1_FORMAT_A_TAIL_EXTENSION_CAP_BARS);
     }
   }
 
@@ -516,7 +539,7 @@ export function buildMixPlaybackPlan(
   }
 
   return {
-    bpm: mix.bpm,
+    bpm,
     timelineUnitBeats,
     loopBeats,
     timelineRecovered: anyBeatKnown,

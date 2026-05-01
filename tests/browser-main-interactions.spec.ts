@@ -966,8 +966,14 @@ test.describe("main edge cases", () => {
     await page.goto("/");
     await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
     await page.locator("#archive-tree").click();
+    await expect.poll(async () => page.locator(".mix-tree-group").count(), {
+      timeout: browserAppStartupTimeoutMs,
+    }).toBeGreaterThan(0);
 
     const productMode = page.locator(".archive-header .product-mode-select");
+    await expect.poll(async () => productMode.count(), {
+      timeout: browserAppStartupTimeoutMs,
+    }).toBeGreaterThan(0);
     await expect(productMode).toBeVisible({ timeout: browserAppStartupTimeoutMs });
 
     await productMode.selectOption("rave");

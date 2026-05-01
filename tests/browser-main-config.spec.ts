@@ -1,11 +1,12 @@
 import { test, expect } from "./baseFixtures.js";
+import { browserAppStartupTimeoutMs } from "./playwright-test-helpers.js";
 
 test.describe("main edge cases", () => {
   const LIBRARY_MOD = "/src/library.ts";
 
   test("beforeunload handler runs without crashing", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator(".category-btn").first()).toBeVisible();
+    await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
 
     const result = await page.evaluate(() => {
       try {

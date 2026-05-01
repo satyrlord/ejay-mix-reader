@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { resolve } from "path";
 
 import tailwindcss from "@tailwindcss/vite";
@@ -43,6 +43,26 @@ const APP_VERSION = (() => {
 })();
 
 const DEV_WEBSOCKET_PORT = resolveDevWebSocketPort(process.env.VITE_DEV_SERVER_PORT, 3000);
+// Optional build flag: include archive `.mix` files in `dist/mix/`.
+// Keep this off for normal browser-only builds to reduce bundle output size.
+const INCLUDE_MIX_FILES_IN_DIST = process.env.EJAY_INCLUDE_MIX_IN_DIST === "true";
+
+// Ensure runtime metadata (`data/index.json`) is available in production builds
+// even when mix archive copying is disabled.
+function copyRuntimeIndexPlugin(): Plugin {
+  return {
+    name: "copy-runtime-index",
+    apply: "build",
+    closeBundle() {
+      const source = resolve(process.cwd(), "data", "index.json");
+      if (!existsSync(source)) return;
+
+      const destination = resolve(process.cwd(), "dist", "data", "index.json");
+      mkdirSync(resolve(process.cwd(), "dist", "data"), { recursive: true });
+      copyFileSync(source, destination);
+    },
+  };
+}
 
 export default defineConfig(({ command }) => ({
   appType: "spa",
@@ -65,7 +85,8 @@ export default defineConfig(({ command }) => ({
     manageCategoryConfig(resolve(process.cwd(), "output")),
     manageSampleMetadata(resolve(process.cwd(), "output")),
     serveMixFiles(resolve(process.cwd(), "archive")),
-    copyMixFilesPlugin(resolve(process.cwd(), "archive")),
+    copyRuntimeIndexPlugin(),
+    ...(INCLUDE_MIX_FILES_IN_DIST ? [copyMixFilesPlugin(resolve(process.cwd(), "archive"))] : []),
     ...(process.env.VITE_COVERAGE === "true"
       ? [istanbulPlugin({
           include: [...COVERAGE_SOURCE_FILES],

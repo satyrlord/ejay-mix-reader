@@ -33,12 +33,27 @@ function hasSubcategoryDraftValue(value: string): boolean {
   return value.trim().length > 0;
 }
 
+function normalizeCategoryToken(value: string): string {
+  const token = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return token || "unsorted";
+}
+
+function categoryColorVar(categoryId: string): string {
+  const token = normalizeCategoryToken(categoryId);
+  return `var(--category-color-${token}, var(--category-color-unsorted, var(--category-palette-13)))`;
+}
+
 function createSidebarButton(options: {
   className: string;
   label: string;
   isActive?: boolean;
   categoryId?: string;
   sidebarRole?: string;
+  colorVar?: string;
   onClick?: () => void;
 }): HTMLButtonElement {
   const button = document.createElement("button");
@@ -51,6 +66,9 @@ function createSidebarButton(options: {
   }
   if (options.sidebarRole) {
     button.dataset.sidebarRole = options.sidebarRole;
+  }
+  if (options.colorVar) {
+    button.style.setProperty("--category-chip-color", options.colorVar);
   }
   if (options.isActive) {
     button.classList.add("is-active");
@@ -88,6 +106,7 @@ export function renderCategorySidebar(
       className: "category-btn",
       label: category.name,
       categoryId: category.id,
+      colorVar: categoryColorVar(category.id),
       isActive: activeId === category.id,
       onClick: () => onSelect(category),
     }));
@@ -98,6 +117,7 @@ export function renderCategorySidebar(
     label: unsortedCategory.name,
     categoryId: unsortedCategory.id,
     sidebarRole: "system-feature",
+    colorVar: categoryColorVar(unsortedCategory.id),
     isActive: activeId === unsortedCategory.id,
     onClick: () => onSelect(unsortedCategory),
   }));
@@ -106,6 +126,7 @@ export function renderCategorySidebar(
     className: "category-system-btn load-json-btn",
     label: "Load JSON",
     sidebarRole: "system-feature",
+    colorVar: "var(--category-color-system-load, var(--category-palette-14))",
     onClick: onLoadJson,
   }));
 
@@ -178,19 +199,33 @@ export function renderSubcategoryTabs(
     const handleKeydown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
+      cancelOnce();
+    };
+
+    let didCancel = false;
+    const cancelOnce = (): void => {
+      if (didCancel) return;
+      didCancel = true;
       addOptions.onCancel?.();
     };
 
     const handlePointerDown = (event: PointerEvent): void => {
       if (!(event.target instanceof Node) || form.contains(event.target)) return;
-      addOptions.onCancel?.();
+      cancelOnce();
+    };
+
+    const handleClick = (event: MouseEvent): void => {
+      if (!(event.target instanceof Node) || form.contains(event.target)) return;
+      cancelOnce();
     };
 
     document.addEventListener("keydown", handleKeydown);
     document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("click", handleClick, true);
     cleanupInlineSubcategoryAdd = () => {
       document.removeEventListener("keydown", handleKeydown);
       document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("click", handleClick, true);
     };
 
     container.appendChild(form);

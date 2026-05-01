@@ -287,6 +287,73 @@ describe("buildMixPlaybackPlan", () => {
     expect(plan.loopBeats).toBe(13);
   });
 
+  it("normalizes invalid BPM values to a safe tempo", () => {
+    const fallbackPlan = buildMixPlaybackPlan(makeMix({
+      bpm: 0,
+      bpmAdjusted: null,
+      tracks: [
+        {
+          beat: 2,
+          channel: 0,
+          sampleRef: {
+            rawId: 1930,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: 1024,
+          },
+        },
+      ],
+    }));
+    expect(fallbackPlan.bpm).toBe(120);
+
+    const adjustedPlan = buildMixPlaybackPlan(makeMix({
+      bpm: 0,
+      bpmAdjusted: 96,
+      tracks: [
+        {
+          beat: 2,
+          channel: 0,
+          sampleRef: {
+            rawId: 1930,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: 1024,
+          },
+        },
+      ],
+    }));
+    expect(adjustedPlan.bpm).toBe(96);
+  });
+
+  it("clamps recovered beat positions and loop length to avoid runaway timelines", () => {
+    const plan = buildMixPlaybackPlan(makeMix({
+      format: "C",
+      product: "Dance_eJay3",
+      appId: 0x00002571,
+      bpm: 140,
+      loopBeats: 999_999,
+      tracks: [
+        {
+          beat: Number.MAX_SAFE_INTEGER,
+          channel: 0,
+          sampleRef: {
+            rawId: 0,
+            internalName: null,
+            displayName: "Kick",
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    }));
+
+    expect(plan.timelineRecovered).toBe(true);
+    expect(plan.events[0]?.beat).toBe(16_384);
+    expect(plan.loopBeats).toBe(16_384);
+  });
+
   it("falls back to internal name and display-name lookup when no sample id match exists", () => {
     const sampleIndex: Record<string, SampleLookupEntry> = {
       Dance_eJay3: {

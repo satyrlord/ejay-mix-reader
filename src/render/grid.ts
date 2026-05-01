@@ -266,7 +266,7 @@ function categoryColor(category: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return `var(--channel-${token || "unknown"}, #4a90d9)`;
+  return `var(--category-color-${token || "unsorted"}, var(--category-color-unsorted, #4a90d9))`;
 }
 
 export function renderSampleGrid(

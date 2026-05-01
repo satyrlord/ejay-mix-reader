@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 
@@ -77,6 +77,24 @@ describe("resolveMixUrl", () => {
   it("returns null when the archive path is a directory", () => {
     mkdirSync(join(archiveRoot, "Dance_eJay1", "MIX", "folder.mix"));
     expect(resolveMixUrl("/mix/Dance_eJay1/folder.mix", archiveRoot)).toBeNull();
+  });
+
+  it("rejects symlinked mix files that resolve outside the allowed product root", () => {
+    const outsideRoot = mkdtempSync(join(tmpdir(), "vite-mix-url-outside-"));
+    try {
+      const outsideMix = join(outsideRoot, "outside.mix");
+      writeFileSync(outsideMix, "payload");
+      const linkPath = join(archiveRoot, "Dance_eJay1", "MIX", "link.mix");
+      try {
+        symlinkSync(outsideMix, linkPath);
+      } catch {
+        return;
+      }
+
+      expect(resolveMixUrl("/mix/Dance_eJay1/link.mix", archiveRoot)).toBeNull();
+    } finally {
+      rmSync(outsideRoot, { recursive: true, force: true });
+    }
   });
 
   it("returns null for __proto__ as productId (prototype-pollution guard)", () => {
@@ -206,6 +224,15 @@ describe("validateSampleMovePaths", () => {
 
   it("returns null for valid inputs with subcategories", () => {
     expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum", "Perc", "Bass", "fills")).toBeNull();
+  });
+
+  it("rejects non-wav filenames", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.mp3", "Drum", null, "Bass", null)).toBe("Invalid path component");
+  });
+
+  it("rejects empty or dot category segments", () => {
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "", null, "Bass", null)).toBe("Invalid path component");
+    expect(validateSampleMovePaths(outputRoot, "kick.wav", "Drum", null, ".", null)).toBe("Invalid path component");
   });
 
   it("accepts filenames with legitimate embedded .. (e.g. VXB010..wav)", () => {

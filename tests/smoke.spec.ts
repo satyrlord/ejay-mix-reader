@@ -416,8 +416,8 @@ test("DEV — Loop/fills subcategory is persistent and contains samples", async 
 
 // Regression test: filenames containing ".." (e.g. "VXB010..wav") must not
 // be rejected by the path-traversal guard in /__sample-move. The file won't
-// exist on disk, so no actual data is modified; the endpoint should still
-// return 204 rather than 400.
+// exist in metadata, so no actual data is modified; the endpoint should fail
+// with a not-found response from lookup logic rather than a traversal 400.
 test("DEV — /__sample-move accepts filenames that contain double-dot", async ({ page }) => {
   await page.goto("/");
   const response = await page.evaluate(async () => {
@@ -432,7 +432,8 @@ test("DEV — /__sample-move accepts filenames that contain double-dot", async (
         newSubcategory: "misc",
       }),
     });
-    return { status: res.status };
+    return { status: res.status, body: await res.text() };
   });
-  expect(response.status).toBe(204);
+  expect(response.status).toBe(404);
+  expect(response.body).toContain("Sample not found in metadata");
 });

@@ -109,6 +109,13 @@ export const APP_ID_PRODUCTS: Record<number, string> = {
 };
 
 const SKKENNUNG_PREFIX = "#SKKENNUNG#:";
+const DEFAULT_GEN23_BPM = 120;
+const MAX_REASONABLE_MIX_BPM = 400;
+const MAX_RECOVERED_FORMAT_CD_BEAT = 16_384;
+
+function isValidMixBpm(value: number): boolean {
+  return Number.isFinite(value) && value > 0 && value <= MAX_REASONABLE_MIX_BPM;
+}
 
 // Latin1 text cache (same purpose as the Node version's WeakMap).
 const latin1Cache = new WeakMap<MixBuffer, string>();
@@ -263,8 +270,14 @@ function parseGen23Header(buf: MixBuffer): Gen23Header {
 
   const appId = buf.readUInt32LE(0);
   const entryCount = buf.readUInt32LE(4);
-  const bpm = buf.readUInt16LE(8);
-  const bpm2 = buf.readUInt16LE(0x0a);
+  const rawBpm = buf.readUInt16LE(8);
+  const rawBpm2 = buf.readUInt16LE(0x0a);
+  const bpm = isValidMixBpm(rawBpm)
+    ? rawBpm
+    : isValidMixBpm(rawBpm2)
+      ? rawBpm2
+      : DEFAULT_GEN23_BPM;
+  const bpm2 = isValidMixBpm(rawBpm2) ? rawBpm2 : bpm;
   const unknown0C = buf.readUInt16LE(0x0c);
   const metadataLen = buf.readUInt16LE(0x0e);
 
@@ -766,7 +779,8 @@ function parseFormatCTrackRecord(
   let channel: number | null = null;
   let dataLength: number | null = null;
   if (nameField.gap === 40 && pathStart >= 22) {
-    beat = buf.readUInt32LE(pathStart - 18);   // zeitpos
+    const recoveredBeat = buf.readUInt32LE(pathStart - 18);   // zeitpos
+    beat = recoveredBeat <= MAX_RECOVERED_FORMAT_CD_BEAT ? recoveredBeat : null;
     channel = buf.readUInt8(pathStart - 13);   // Spur
     dataLength = buf.readUInt32LE(pathStart - 22);
   } else {

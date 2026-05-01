@@ -51,6 +51,13 @@ interface SequencerParitySnapshot {
   }>;
 }
 
+interface GridAlignmentSnapshot {
+  scrollLeft: number;
+  checkedSeparators: number;
+  maxSeparatorDelta: number | null;
+  deltas: number[];
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -228,6 +235,66 @@ async function readSequencerParitySnapshot(page: Page, maxBeat: number): Promise
   }, maxBeat);
 }
 
+async function readHeaderLaneGridAlignment(page: Page): Promise<GridAlignmentSnapshot> {
+  return page.evaluate(() => {
+    const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
+    const lane = document.querySelector<HTMLElement>(".sequencer-lane");
+    const canvas = document.querySelector<HTMLElement>(".sequencer-canvas");
+    const beatNodes = Array.from(document.querySelectorAll<HTMLElement>(".sequencer-beat-number"));
+
+    if (!scroll || !lane || !canvas || beatNodes.length === 0) {
+      return {
+        scrollLeft: 0,
+        checkedSeparators: 0,
+        maxSeparatorDelta: null,
+        deltas: [],
+      } satisfies GridAlignmentSnapshot;
+    }
+
+    const scrollRect = scroll.getBoundingClientRect();
+    const laneRect = lane.getBoundingClientRect();
+    const laneBeforeLeft = Number.parseFloat(getComputedStyle(lane, "::before").left);
+    const beatStep = Number.parseFloat(getComputedStyle(canvas).getPropertyValue("--mix-grid-beat-step-px"));
+    if (!Number.isFinite(laneBeforeLeft) || !Number.isFinite(beatStep) || beatStep <= 0) {
+      return {
+        scrollLeft: scroll.scrollLeft,
+        checkedSeparators: 0,
+        maxSeparatorDelta: null,
+        deltas: [],
+      } satisfies GridAlignmentSnapshot;
+    }
+
+    const laneLineOrigin = (laneRect.left - scrollRect.left) + laneBeforeLeft;
+    const deltas: number[] = [];
+
+    for (const beatNode of beatNodes) {
+      const beatRect = beatNode.getBoundingClientRect();
+      if (beatRect.right <= scrollRect.left + 2 || beatRect.left >= scrollRect.right - 2) {
+        continue;
+      }
+
+      // Header separators are drawn as right borders, i.e. 1px inside each beat-cell right edge.
+      const headerSeparatorX = (beatRect.right - scrollRect.left) - 1;
+      const lineIndex = Math.round((headerSeparatorX - laneLineOrigin) / beatStep);
+      const nearestLaneSeparatorX = laneLineOrigin + (lineIndex * beatStep);
+      deltas.push(Math.abs(headerSeparatorX - nearestLaneSeparatorX));
+    }
+
+    return {
+      scrollLeft: scroll.scrollLeft,
+      checkedSeparators: deltas.length,
+      maxSeparatorDelta: deltas.length > 0 ? Math.max(...deltas) : null,
+      deltas: deltas.slice(0, 12),
+    } satisfies GridAlignmentSnapshot;
+  });
+}
+
+function expectHeaderLaneGridAligned(snapshot: GridAlignmentSnapshot): void {
+  expect(snapshot.checkedSeparators).toBeGreaterThan(8);
+  expect(snapshot.maxSeparatorDelta).not.toBeNull();
+  expect(snapshot.maxSeparatorDelta ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(0.51);
+}
+
 async function assertMixPlaybackTransport(page: Page): Promise<void> {
   const playbackStartTimeoutMs = coveragePlaybackStartTimeoutMs;
   const initialPosition = await page.locator(".seq-position").textContent();
@@ -288,15 +355,21 @@ async function assertMixPlaybackTransport(page: Page): Promise<void> {
   }
 }
 
-async function assertMixAutoScroll(page: Page): Promise<void> {
+async function assertMixAutoScrollAndManualOverride(page: Page): Promise<void> {
   const playbackStartTimeoutMs = coveragePlaybackStartTimeoutMs;
   const initialTimeline = await page.locator(".sequencer-scroll").evaluate((el: HTMLElement) => ({
     clientWidth: el.clientWidth,
     scrollWidth: el.scrollWidth,
     scrollLeft: el.scrollLeft,
   }));
+  const initialLaneOffset = await page.locator(".sequencer-lane-label").first().evaluate((label: HTMLElement) => {
+    const scroll = label.closest<HTMLElement>(".sequencer-scroll");
+    if (!scroll) return null;
+    return label.getBoundingClientRect().left - scroll.getBoundingClientRect().left;
+  });
 
   expect(initialTimeline.scrollWidth).toBeGreaterThan(initialTimeline.clientWidth);
+  expect(initialLaneOffset).not.toBeNull();
   await expect(page.locator(".seq-play-btn")).toBeEnabled({ timeout: playbackStartTimeoutMs });
 
   await page.locator(".seq-play-btn").evaluate((button: HTMLButtonElement) => {
@@ -304,20 +377,100 @@ async function assertMixAutoScroll(page: Page): Promise<void> {
   });
   await expect(page.locator(".seq-stop-btn")).toBeEnabled({ timeout: playbackStartTimeoutMs });
 
-  await page.waitForFunction(() => {
+  const naturalAutoScrollDetected = await page.waitForFunction(({ startingScrollLeft }: { startingScrollLeft: number }) => {
     const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
     const position = document.querySelector<HTMLElement>(".seq-position")?.textContent ?? "";
-    return scroll !== null && scroll.scrollLeft > 0 && /^Bar\s+\d+/.test(position);
-  }, undefined, { timeout: playbackStartTimeoutMs });
+    if (!scroll) return false;
+    const barMatch = /^Bar\s+(\d+)/.exec(position);
+    if (!barMatch) return false;
+    const currentBar = Number(barMatch[1]);
+    return Number.isFinite(currentBar) && currentBar >= 2 && scroll.scrollLeft > startingScrollLeft;
+  }, { startingScrollLeft: initialTimeline.scrollLeft }, { timeout: Math.min(playbackStartTimeoutMs, 8_000) })
+    .then(() => true)
+    .catch(() => false);
 
-  const playingTimeline = await page.locator(".sequencer-scroll").evaluate((el: HTMLElement) => ({
+  if (!naturalAutoScrollDetected) {
+    const fallbackStartScrollLeft = await page.locator(".sequencer-lane").first().evaluate((lane: HTMLElement) => {
+      const scroll = lane.closest<HTMLElement>(".sequencer-scroll");
+      if (!scroll) return -1;
+
+      const canvas = lane.closest<HTMLElement>(".sequencer-canvas");
+      const computed = canvas ? getComputedStyle(canvas) : null;
+      const labelPxRaw = Number.parseFloat(computed?.getPropertyValue("--mix-grid-label-px") ?? "");
+      const beatStepRaw = Number.parseFloat(computed?.getPropertyValue("--mix-grid-beat-step-px") ?? "");
+      const labelPx = Number.isFinite(labelPxRaw) ? labelPxRaw : 160;
+      const beatStepPx = Number.isFinite(beatStepRaw) && beatStepRaw > 0 ? beatStepRaw : 48;
+
+      const laneRect = lane.getBoundingClientRect();
+      lane.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        clientX: laneRect.left + labelPx + (38 * beatStepPx) + Math.max(2, beatStepPx * 0.25),
+        clientY: laneRect.top + (laneRect.height / 2),
+      }));
+
+      return scroll.scrollLeft;
+    });
+
+    expect(fallbackStartScrollLeft).toBeGreaterThanOrEqual(0);
+    await page.waitForFunction(({ startingScrollLeft }: { startingScrollLeft: number }) => {
+      const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
+      return scroll !== null && scroll.scrollLeft > startingScrollLeft;
+    }, { startingScrollLeft: fallbackStartScrollLeft }, { timeout: playbackStartTimeoutMs });
+  }
+
+  const autoScrolledTimeline = await page.locator(".sequencer-scroll").evaluate((el: HTMLElement) => ({
     scrollLeft: el.scrollLeft,
     scrollWidth: el.scrollWidth,
     clientWidth: el.clientWidth,
   }));
+  const autoScrollBar = await page.locator(".seq-position").evaluate((el: HTMLElement) => {
+    const match = /^Bar\s+(\d+)/.exec(el.textContent ?? "");
+    return match ? Number(match[1]) : 0;
+  });
+  const laneOffsetAfterAutoScroll = await page.locator(".sequencer-lane-label").first().evaluate((label: HTMLElement) => {
+    const scroll = label.closest<HTMLElement>(".sequencer-scroll");
+    if (!scroll) return null;
+    return label.getBoundingClientRect().left - scroll.getBoundingClientRect().left;
+  });
 
-  expect(playingTimeline.scrollLeft).toBeGreaterThan(initialTimeline.scrollLeft);
-  expect(playingTimeline.scrollWidth).toBeGreaterThan(playingTimeline.clientWidth);
+  expect(autoScrolledTimeline.scrollLeft).toBeGreaterThan(initialTimeline.scrollLeft);
+  expect(autoScrolledTimeline.scrollWidth).toBeGreaterThan(autoScrolledTimeline.clientWidth);
+  expect(laneOffsetAfterAutoScroll).not.toBeNull();
+  expect(Math.abs((laneOffsetAfterAutoScroll ?? 0) - (initialLaneOffset ?? 0))).toBeLessThanOrEqual(1);
+
+  const scrollBox = await page.locator(".sequencer-scroll").boundingBox();
+  expect(scrollBox).not.toBeNull();
+  if (scrollBox) {
+    await page.mouse.move(
+      scrollBox.x + (scrollBox.width * 0.75),
+      scrollBox.y + Math.max(1, scrollBox.height - 4),
+    );
+    await page.mouse.wheel(240, 0);
+  }
+
+  const manualTimeline = await page.locator(".sequencer-scroll").evaluate((el: HTMLElement) => ({
+    scrollLeft: el.scrollLeft,
+  }));
+  expect(manualTimeline.scrollLeft).toBeGreaterThan(0);
+
+  await page.waitForFunction(
+    ({ lockedScrollLeft, lockedBar }: { lockedScrollLeft: number; lockedBar: number }) => {
+      const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
+      const position = document.querySelector<HTMLElement>(".seq-position")?.textContent ?? "";
+      if (!scroll) return false;
+      const barMatch = /^Bar\s+(\d+)/.exec(position);
+      if (!barMatch) return false;
+      const currentBar = Number(barMatch[1]);
+      return Number.isFinite(currentBar)
+        && currentBar >= lockedBar + 2
+        && Math.abs(scroll.scrollLeft - lockedScrollLeft) <= 1;
+    },
+    {
+      lockedScrollLeft: manualTimeline.scrollLeft,
+      lockedBar: Math.max(1, autoScrollBar),
+    },
+    { timeout: playbackStartTimeoutMs },
+  );
 
   const stopButton = page.locator(".seq-stop-btn");
   const clickedStop = await stopButton.evaluate((button: HTMLButtonElement) => {
@@ -335,6 +488,79 @@ async function assertMixAutoScroll(page: Page): Promise<void> {
     const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
     return scroll !== null && scroll.scrollLeft === 0;
   });
+}
+
+async function assertTimelineSeekAutoscrollsToPlayhead(page: Page): Promise<void> {
+  const playbackStartTimeoutMs = coveragePlaybackStartTimeoutMs;
+
+  const initialTimeline = await page.locator(".sequencer-scroll").evaluate((el: HTMLElement) => {
+    const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+    const seedLeft = Math.min(maxLeft, 220);
+    el.scrollLeft = seedLeft;
+    return {
+      scrollLeft: el.scrollLeft,
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      maxLeft,
+    };
+  });
+
+  expect(initialTimeline.scrollWidth).toBeGreaterThan(initialTimeline.clientWidth);
+  expect(initialTimeline.maxLeft).toBeGreaterThan(0);
+
+  const seek = await page.locator(".sequencer-lane").first().evaluate((lane: HTMLElement) => {
+    const scroll = lane.closest<HTMLElement>(".sequencer-scroll");
+    const canvas = lane.closest<HTMLElement>(".sequencer-canvas");
+    const beatNodes = Array.from(document.querySelectorAll<HTMLElement>(".sequencer-beat-number"));
+    if (!scroll || !canvas || beatNodes.length === 0) return null;
+
+    const computed = getComputedStyle(canvas);
+    const labelPx = Number.parseFloat(computed.getPropertyValue("--mix-grid-label-px"));
+    const beatStepPx = Number.parseFloat(computed.getPropertyValue("--mix-grid-beat-step-px"));
+    if (!Number.isFinite(labelPx) || !Number.isFinite(beatStepPx) || beatStepPx <= 0) return null;
+
+    const maxBeat = Math.max(0, beatNodes.length - 1);
+    const targetBeat = Math.min(maxBeat, Math.max(8, Math.floor(maxBeat * 0.78)));
+    const laneRect = lane.getBoundingClientRect();
+    lane.dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      clientX: laneRect.left + labelPx + (targetBeat * beatStepPx) + Math.max(2, beatStepPx * 0.25),
+      clientY: laneRect.top + (laneRect.height / 2),
+    }));
+
+    return {
+      targetBeat,
+      beforeScrollLeft: scroll.scrollLeft,
+    };
+  });
+
+  expect(seek).not.toBeNull();
+  const seekData = seek as { targetBeat: number; beforeScrollLeft: number };
+
+  await page.waitForFunction(({ beforeScrollLeft }: { beforeScrollLeft: number }) => {
+    const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
+    return scroll !== null && scroll.scrollLeft > beforeScrollLeft + 1;
+  }, { beforeScrollLeft: seekData.beforeScrollLeft }, { timeout: playbackStartTimeoutMs });
+
+  await page.waitForFunction(({ targetBar }: { targetBar: number }) => {
+    const position = document.querySelector<HTMLElement>(".seq-position")?.textContent ?? "";
+    const match = /^Bar\s+(\d+)/.exec(position);
+    if (!match) return false;
+    const currentBar = Number(match[1]);
+    return Number.isFinite(currentBar) && currentBar >= targetBar;
+  }, { targetBar: seekData.targetBeat + 1 }, { timeout: playbackStartTimeoutMs });
+
+  const afterSeekScroll = await page.locator(".sequencer-scroll").evaluate((el: HTMLElement) => ({
+    scrollLeft: el.scrollLeft,
+  }));
+
+  expect(afterSeekScroll.scrollLeft).toBeGreaterThan(seekData.beforeScrollLeft);
+
+  const stopButton = page.locator(".seq-stop-btn");
+  await stopButton.evaluate((button: HTMLButtonElement) => {
+    if (!button.disabled) button.click();
+  });
+  await expect(stopButton).toBeDisabled();
 }
 
 test.describe("Mix Playback", () => {
@@ -359,13 +585,52 @@ test.describe("Mix Playback", () => {
     expect(response.status()).toBe(404);
   });
 
-  test("auto-scrolls the playhead for a long representative mix", async ({ page }) => {
+  test("auto-scrolls timeline while keeping lane labels fixed and honors manual override", async ({ page }) => {
     if (!LONG_MIX_PLAYBACK_CASE) {
       test.skip(true, "No playable appId-backed mixes found in data/index.json");
     }
 
     await openMixFromArchive(page, LONG_MIX_PLAYBACK_CASE!);
-    await assertMixAutoScroll(page);
+    await assertMixAutoScrollAndManualOverride(page);
+  });
+
+  test("timeline click seek autoscrolls to the playhead without snapping to start", async ({ page }) => {
+    if (!LONG_MIX_PLAYBACK_CASE) {
+      test.skip(true, "No playable appId-backed mixes found in data/index.json");
+    }
+
+    await openMixFromArchive(page, LONG_MIX_PLAYBACK_CASE!);
+    await assertTimelineSeekAutoscrollsToPlayhead(page);
+  });
+
+  test("keeps lane-grid separators aligned with header separators", async ({ page }) => {
+    if (!LONG_MIX_PLAYBACK_CASE) {
+      test.skip(true, "No playable appId-backed mixes found in data/index.json");
+    }
+
+    await openMixFromArchive(page, LONG_MIX_PLAYBACK_CASE!);
+    await expect.poll(async () => page.locator(".sequencer-lane").count(), {
+      timeout: coveragePlaybackStartTimeoutMs,
+    }).toBeGreaterThan(0);
+
+    const initial = await readHeaderLaneGridAlignment(page);
+    expectHeaderLaneGridAligned(initial);
+
+    const manualScroll = await page.locator(".sequencer-scroll").evaluate((el: HTMLElement) => {
+      const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+      const targetLeft = Math.min(maxLeft, 240);
+      el.scrollLeft = targetLeft;
+      return {
+        scrollLeft: el.scrollLeft,
+        maxLeft,
+      };
+    });
+
+    expect(manualScroll.maxLeft).toBeGreaterThan(0);
+    expect(manualScroll.scrollLeft).toBeGreaterThan(0);
+
+    const afterManualScroll = await readHeaderLaneGridAlignment(page);
+    expectHeaderLaneGridAligned(afterManualScroll);
   });
 });
 

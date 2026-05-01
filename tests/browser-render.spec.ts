@@ -597,7 +597,7 @@ test.describe("render edge cases", () => {
     expect(result.firstSpan).toBe("8");
     expect(result.secondSpan).toBe("4");
     expect(result.thirdSpan).toBe("2");
-    expect(result.firstColor).toContain("--channel-bass");
+    expect(result.firstColor).toContain("--category-color-bass");
     expect(result.firstResolvedPath).toBe("mock://long.wav");
     expect(result.toggled).toEqual(["mock://long.wav"]);
     expect(result.transportName).toBe("long");

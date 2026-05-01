@@ -34,7 +34,9 @@ describe("mix-playback-controller helpers", () => {
     expect(categoryTokenFromAudioUrl(null)).toBe("unsorted");
     expect(categoryTokenFromAudioUrl("no-slash")).toBe("unsorted");
 
-    expect(categoryColorFromAudioUrl("output/Loop/fill.wav")).toBe("var(--channel-loop, var(--channel-unsorted, #6b83aa))");
+    expect(categoryColorFromAudioUrl("output/Loop/fill.wav")).toBe(
+      "var(--category-color-loop, var(--category-color-unsorted, #6b83aa))",
+    );
   });
 
   it("formats fallback lane labels", () => {

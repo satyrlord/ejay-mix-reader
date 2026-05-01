@@ -718,7 +718,7 @@ test.describe("browser coverage gap", () => {
     expect(result.tokenWithoutPrefix).toBe("drum");
     expect(result.tokenFallbackNull).toBe("unsorted");
     expect(result.tokenFallbackNoSlash).toBe("unsorted");
-    expect(result.channelColor).toBe("var(--channel-loop, var(--channel-unsorted, #6b83aa))");
+    expect(result.channelColor).toBe("var(--category-color-loop, var(--category-color-unsorted, #6b83aa))");
     expect(result.laneLabel).toBe("Lane 1");
     expect(result.trackLabel).toBe("Track 10");
     expect(result.passthroughLabel).toBe("custom");

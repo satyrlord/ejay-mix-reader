@@ -12,8 +12,8 @@
  *   - scripts/__tests__/vite-mix-files.test.ts
  */
 
-import { existsSync, readdirSync, statSync } from "fs";
-import { resolve } from "path";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "fs";
+import { resolve, sep } from "path";
 
 import { ARCHIVE_MIX_DIRS, resolveProductMixDir } from "../build-index.js";
 
@@ -30,6 +30,16 @@ function resolveUserdataSourceDir(archiveRoot: string): string | null {
     if (existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+function isContainedRealpath(pathToCheck: string, rootPath: string): boolean {
+  try {
+    const resolvedPath = realpathSync(pathToCheck);
+    const resolvedRoot = realpathSync(rootPath);
+    return resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}${sep}`);
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +81,12 @@ export function listMixFilesForCopy(
     const resolvedProduct = resolveProductMixDir(productId, archiveRoot);
     if (!resolvedProduct) continue;
     const mixDir = resolvedProduct.mixDir;
+    let mixDirRealPath: string;
+    try {
+      mixDirRealPath = realpathSync(mixDir);
+    } catch {
+      continue;
+    }
 
     let dirEntries: string[];
     try {
@@ -83,10 +99,12 @@ export function listMixFilesForCopy(
       if (!/\.mix$/i.test(filename)) continue;
       const src = resolve(mixDir, filename);
       try {
-        if (!statSync(src).isFile()) continue;
+        const stats = lstatSync(src);
+        if (!stats.isFile() || stats.isSymbolicLink()) continue;
       } catch {
         continue;
       }
+      if (!isContainedRealpath(src, mixDirRealPath)) continue;
       const dest = resolve(outDir, productId, filename);
       entries.push({ src, dest, productId, filename });
     }
@@ -119,6 +137,13 @@ function collectUserdataMixPairs(
   const userdataDir = resolveUserdataSourceDir(archiveRoot);
   if (!userdataDir) return;
 
+  let userdataRootReal: string;
+  try {
+    userdataRootReal = realpathSync(userdataDir);
+  } catch {
+    return;
+  }
+
   function walk(dir: string, relParts: string[]): void {
     let dirEntries: string[];
     try {
@@ -130,10 +155,15 @@ function collectUserdataMixPairs(
     for (const filename of dirEntries) {
       const full = resolve(dir, filename);
       try {
-        const st = statSync(full);
+        const st = lstatSync(full);
+        if (st.isSymbolicLink()) {
+          continue;
+        }
         if (st.isDirectory()) {
+          if (!isContainedRealpath(full, userdataRootReal)) continue;
           subdirs.push(filename);
         } else if (st.isFile() && /\.mix$/i.test(filename) && relParts.length > 0) {
+          if (!isContainedRealpath(full, userdataRootReal)) continue;
           const productId = `${USERDATA_SUBDIR}/${relParts.join("/")}`;
           const dest = resolve(outDir, USERDATA_SUBDIR, ...relParts, filename);
           entries.push({ src: full, dest, productId, filename });

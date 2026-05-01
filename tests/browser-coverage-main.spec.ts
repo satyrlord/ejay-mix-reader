@@ -841,6 +841,297 @@ test.describe("browser coverage gap", () => {
     expect(typeof result.addButtonDisabled).toBe("boolean");
   });
 
+  test("main covers scroll-intent suppression, shortcut guards, and search/product listeners", async ({ page }) => {
+    await page.setViewportSize({ width: 960, height: 720 });
+    await openCoverageHarnessAndWaitForNetworkIdle(page);
+
+    const result = await page.evaluate(async (libraryModPath) => {
+      const library = await import(/* @vite-ignore */ libraryModPath);
+
+      const buildFormatA = (appSig: number, cells: Array<{ row: number; col: number; id: number }>): Uint8Array => {
+        const headerBytes = 2;
+        const rowBytes = 16;
+        const cellBytes = 2;
+        const fullGridRows = 351;
+        const fullLayoutBytes = headerBytes + (fullGridRows * rowBytes * 2);
+        const bytes = new Uint8Array(fullLayoutBytes);
+        const view = new DataView(bytes.buffer);
+        view.setUint16(0, appSig, true);
+        for (const cell of cells) {
+          const offset = headerBytes + (cell.row * rowBytes) + (cell.col * cellBytes);
+          view.setUint16(offset, cell.id, true);
+        }
+        return bytes;
+      };
+
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await Promise.resolve();
+      };
+
+      const waitFor = async (predicate: () => boolean, attempts = 90): Promise<void> => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (predicate()) return;
+          await flush();
+        }
+        throw new Error("Timed out waiting for predicate");
+      };
+
+      class FakeAudioContext {
+        sampleRate = 44100;
+        currentTime = 1;
+        state: "running" | "suspended" | "closed" = "running";
+        destination = { connect: () => {}, disconnect: () => {} };
+
+        async resume(): Promise<void> {
+          this.state = "running";
+        }
+
+        async close(): Promise<void> {
+          this.state = "closed";
+        }
+
+        createGain() {
+          return { gain: { value: 1 }, connect: () => {}, disconnect: () => {} };
+        }
+
+        createStereoPanner() {
+          return { pan: { value: 0 }, connect: () => {}, disconnect: () => {} };
+        }
+
+        createBufferSource() {
+          return {
+            buffer: null,
+            playbackRate: { value: 1 },
+            connect: () => {},
+            disconnect: () => {},
+            start: () => {},
+            stop: () => {},
+          };
+        }
+
+        decodeAudioData(data: ArrayBuffer): Promise<unknown> {
+          return Promise.resolve({ decodedBytes: data.byteLength });
+        }
+      }
+
+      (window as typeof window & { AudioContext: typeof AudioContext }).AudioContext = FakeAudioContext as unknown as typeof AudioContext;
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.endsWith("/mix/Dance_eJay1/LONG.MIX")) {
+          return new Response(buildFormatA(0x0a06, [
+            { row: 0, col: 0, id: 42 },
+            { row: 56, col: 0, id: 300 },
+          ]) as unknown as BodyInit, { status: 200 });
+        }
+        if (url.endsWith("output/Drum/kick.wav") || url.endsWith("output/Drum/snare.wav")) {
+          return new Response(Uint8Array.from([1, 2, 3, 4]), { status: 200 });
+        }
+        return originalFetch(input, init);
+      };
+
+      library.FetchLibrary.prototype.loadIndex = async function () {
+        return {
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "snare"], sampleCount: 2 },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"], sampleCount: 1 },
+          ],
+          mixLibrary: [
+            {
+              id: "Dance_eJay1",
+              name: "Dance eJay 1",
+              mixes: [{ filename: "LONG.MIX", sizeBytes: 80, format: "A" }],
+            },
+          ],
+          sampleIndex: {
+            Dance_eJay1: {
+              byAlias: {},
+              bySource: {},
+              byStem: {},
+              byInternalName: {},
+              bySampleId: {},
+              byGen1Id: {
+                "42": "Drum/kick.wav",
+                "300": "Drum/snare.wav",
+              },
+            },
+          },
+        };
+      };
+
+      library.FetchLibrary.prototype.loadSamples = async function () {
+        return [
+          { filename: "kick.wav", alias: "Kick", category: "Drum", subcategory: "kick", bpm: 120, beats: 1 },
+          { filename: "snare.wav", alias: "Snare", category: "Drum", subcategory: "snare", bpm: 120, beats: 1 },
+          { filename: "bass.wav", alias: "Bass", category: "Bass", subcategory: "unsorted", bpm: 120, beats: 1 },
+        ];
+      };
+
+      library.FetchLibrary.prototype.loadCategoryConfig = async function () {
+        return {
+          categories: [
+            { id: "Drum", name: "Drum", subcategories: ["kick", "snare"] },
+            { id: "Bass", name: "Bass", subcategories: ["unsorted"] },
+          ],
+        };
+      };
+
+      library.FetchLibrary.prototype.dispose = function () {};
+
+      // @ts-expect-error Vite serves browser modules from /src during page-eval tests.
+      await import("/src/main.ts");
+
+      const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
+      if (!scroll) throw new Error("Missing sequencer scroll container");
+
+      // Cover early-return branches before a mix is active.
+      scroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 120 }));
+      scroll.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 8, clientY: 8 }));
+
+      document.querySelector<HTMLElement>(".archive-sidebar")?.click();
+      await waitFor(() => document.querySelectorAll(".mix-tree-item").length === 1);
+
+      const mixButton = document.querySelector<HTMLButtonElement>(".mix-tree-item");
+      if (!mixButton) throw new Error("Missing LONG.MIX item");
+
+      mixButton.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await waitFor(() => (document.querySelector<HTMLElement>(".context-mix-name")?.textContent ?? "").includes("LONG"));
+      await waitFor(() => document.querySelectorAll(".sequencer-event").length === 2);
+
+      const searchInput = document.getElementById("sample-search") as HTMLInputElement | null;
+      const searchClear = document.getElementById("sample-search-clear") as HTMLButtonElement | null;
+      if (!searchInput || !searchClear) {
+        throw new Error("Missing search controls");
+      }
+
+      searchInput.value = "Kick";
+      searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await waitFor(() => !searchClear.classList.contains("is-hidden"));
+
+      // Cover shortcut guards: editable target and non-HTMLElement targets.
+      searchInput.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: " ",
+        code: "Space",
+      }));
+      document.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Spacebar",
+        code: "Spacebar",
+      }));
+
+      searchClear.click();
+      await waitFor(() => searchClear.classList.contains("is-hidden"));
+
+      const productModeSelect = document.querySelector<HTMLSelectElement>(".archive-header .product-mode-select");
+      let switchedProductMode = false;
+      if (productModeSelect && productModeSelect.options.length > 1) {
+        const currentValue = productModeSelect.value;
+        const fallback = [...productModeSelect.options].find((option) => option.value !== currentValue)?.value;
+        if (fallback) {
+          productModeSelect.value = fallback;
+          productModeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+          await flush();
+          switchedProductMode = true;
+        }
+      }
+
+      const lane = document.querySelector<HTMLElement>(".sequencer-lane");
+      const play = document.querySelector<HTMLButtonElement>(".seq-play-btn");
+      const stop = document.querySelector<HTMLButtonElement>(".seq-stop-btn");
+      if (!lane || !play || !stop) {
+        throw new Error("Missing sequencer lane or controls");
+      }
+
+      await waitFor(() => play.disabled === false);
+
+      const laneRect = lane.getBoundingClientRect();
+      const toClientX = (beat: number): number => laneRect.left + 160 + (beat * 48) + 4;
+      const laneY = laneRect.top + (laneRect.height / 2);
+
+      // Jump to a far beat to force auto-scroll.
+      lane.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        clientX: toClientX(38),
+        clientY: laneY,
+      }));
+      await waitFor(() => scroll.scrollLeft > 0);
+      await waitFor(() => stop.disabled === false);
+      stop.click();
+      await waitFor(() => stop.disabled === true);
+
+      // Cover wheel guard false-path and true-path while a plan is active.
+      scroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 140 }));
+      scroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 140, shiftKey: true }));
+
+      const scrollRect = scroll.getBoundingClientRect();
+      let scrollbarHeight = scroll.offsetHeight - scroll.clientHeight;
+      if (scrollbarHeight <= 0) {
+        Object.defineProperty(scroll, "offsetHeight", {
+          configurable: true,
+          get: () => scroll.clientHeight + 12,
+        });
+        scrollbarHeight = scroll.offsetHeight - scroll.clientHeight;
+      }
+      scroll.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: scrollRect.left + 16,
+        clientY: scrollRect.top + 4,
+      }));
+      if (scrollbarHeight > 0) {
+        scroll.dispatchEvent(new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: scrollRect.left + 16,
+          clientY: scrollRect.bottom - 1,
+        }));
+      }
+
+      const lockedScrollLeft = scroll.scrollLeft;
+
+      // An explicit timeline seek should re-enable follow mode and move the
+      // viewport toward the new playhead position.
+      lane.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        clientX: toClientX(58),
+        clientY: laneY,
+      }));
+      for (let tick = 0; tick < 6; tick += 1) {
+        await flush();
+      }
+
+      const afterSeekScrollLeft = scroll.scrollLeft;
+
+      stop.click();
+      await waitFor(() => stop.disabled === true);
+
+      globalThis.fetch = originalFetch;
+
+      return {
+        switchedProductMode,
+        searchClearHidden: searchClear.classList.contains("is-hidden"),
+        lockedScrollLeft,
+        afterSeekScrollLeft,
+        scrollbarHeight,
+        transportStopped: stop.disabled,
+      };
+    }, "/src/library.ts");
+
+    expect(result.searchClearHidden).toBe(true);
+    expect(result.switchedProductMode).toBe(true);
+    expect(result.afterSeekScrollLeft).toBeGreaterThan(result.lockedScrollLeft);
+    expect(result.transportStopped).toBe(true);
+    // Synthetic layout environments can report overlay scrollbars with zero
+    // measured height, so only assert the value is non-negative.
+    expect(result.scrollbarHeight).toBeGreaterThanOrEqual(0);
+  });
+
   test("main covers shell splitter keyboard and pointer branches", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");

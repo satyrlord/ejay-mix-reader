@@ -8,6 +8,8 @@ import libCoverage from "istanbul-lib-coverage";
 import libReport from "istanbul-lib-report";
 import reports from "istanbul-reports";
 
+import { COVERAGE_SOURCE_FILES } from "./dev-server/warmup.js";
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const NYC_OUTPUT_DIR = join(ROOT, ".nyc_output");
 const COVERAGE_DIR = join(ROOT, "coverage");
@@ -26,6 +28,10 @@ interface CoverageSummaryEntry {
 }
 
 type CoverageSummary = Record<string, CoverageSummaryEntry>;
+
+function normalizePath(pathValue: string): string {
+  return pathValue.replace(/\\/g, "/").toLowerCase();
+}
 
 function cleanCoverageDirs(): void {
   rmSync(NYC_OUTPUT_DIR, { recursive: true, force: true });
@@ -72,6 +78,26 @@ function ensureCoverageThresholds(): void {
   const summary = JSON.parse(readFileSync(COVERAGE_SUMMARY_FILE, "utf-8")) as CoverageSummary;
   const failures: string[] = [];
   const metricKeys: Array<keyof CoverageSummaryEntry> = ["statements", "branches", "functions", "lines"];
+  const reportedFiles = new Set(
+    Object.keys(summary)
+      .filter((name) => name !== "total")
+      .map((name) => normalizePath(name)),
+  );
+  const missingCoverageFiles = COVERAGE_SOURCE_FILES
+    .map((relativePath) => ({
+      relativePath,
+      normalizedPath: normalizePath(join(ROOT, relativePath)),
+    }))
+    .filter(({ normalizedPath }) => !reportedFiles.has(normalizedPath));
+
+  if (missingCoverageFiles.length > 0) {
+    failures.push(
+      ...missingCoverageFiles.map(
+        ({ normalizedPath, relativePath }) =>
+          `missing coverage entry: ${normalizedPath} (source: ${relativePath})`,
+      ),
+    );
+  }
 
   Object.entries(summary).forEach(([name, metrics]) => {
     metricKeys.forEach(metricName => {

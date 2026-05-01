@@ -32,7 +32,7 @@ export function categoryTokenFromAudioUrl(audioUrl: string | null): string {
 
 export function categoryColorFromAudioUrl(audioUrl: string | null): string {
   const token = categoryTokenFromAudioUrl(audioUrl);
-  return `var(--channel-${token}, var(--channel-unsorted, #6b83aa))`;
+  return `var(--category-color-${token}, var(--category-color-unsorted, #6b83aa))`;
 }
 
 export function describeMixLane(channelId: string): string {
