@@ -39,6 +39,27 @@ export type SampleMoveRequest = {
 /** Characters that are unsafe in path segments (Windows shell-special + path-special). */
 const UNSAFE_SEGMENT_CHARS = /[:*?"<>|]/;
 
+const USERDATA_CANONICAL_ROOT = "_userdata";
+const USERDATA_PRODUCT_PREFIXES = ["_userdata/", "_user/"] as const;
+const USERDATA_SOURCE_DIRS = [USERDATA_CANONICAL_ROOT, "_user"] as const;
+
+function splitUserdataProductId(productId: string): string | null {
+  for (const prefix of USERDATA_PRODUCT_PREFIXES) {
+    if (productId.startsWith(prefix)) {
+      return productId.slice(prefix.length);
+    }
+  }
+  return null;
+}
+
+function resolveUserdataRoot(archiveRoot: string): string {
+  for (const subdir of USERDATA_SOURCE_DIRS) {
+    const candidate = resolve(archiveRoot, subdir);
+    if (existsSync(candidate)) return candidate;
+  }
+  return resolve(archiveRoot, USERDATA_CANONICAL_ROOT);
+}
+
 // ── resolveMixUrl ─────────────────────────────────────────────────────────
 
 /**
@@ -48,10 +69,11 @@ const UNSAFE_SEGMENT_CHARS = /[:*?"<>|]/;
  * does not exist on disk. The caller should respond 404 whenever `null` is
  * returned so the middleware remains safe against path-traversal attacks.
  *
- * User-created mixes stored under `archive/_userdata` use IDs of the form
- * `_userdata/<relPath>` (percent-encoded as a single URL segment by the
- * browser). The resolved path is verified to remain within
- * `archiveRoot/_userdata/` to prevent traversal attacks.
+ * User-created mixes stored under `archive/_userdata` (or legacy
+ * `archive/_user`) use IDs of the form `_userdata/<relPath>`
+ * (percent-encoded as a single URL segment by the browser). The resolved path
+ * is verified to remain within the selected user root to prevent traversal
+ * attacks.
  */
 export function resolveMixUrl(
   url: string,
@@ -71,13 +93,16 @@ export function resolveMixUrl(
   if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) return null;
   if (!/\.mix$/i.test(filename)) return null;
 
-  // Handle _userdata groups: productId = "_userdata/<relPath>"
-  if (productId.startsWith("_userdata/")) {
-    const relPath = productId.slice("_userdata/".length);
+  // Handle user groups: productId = "_userdata/<relPath>" (canonical)
+  // or the legacy "_user/<relPath>" alias.
+  const userdataRelPath = splitUserdataProductId(productId);
+  if (userdataRelPath !== null) {
+    const relPath = userdataRelPath;
     const parts = relPath.split("/");
     if (parts.length === 0 || parts.some((p) => p === ".." || p === "." || p === "")) return null;
-    const absolutePath = resolve(archiveRoot, "_userdata", ...parts, filename);
-    const expectedPrefix = resolve(archiveRoot, "_userdata") + sep;
+    const userdataRoot = resolveUserdataRoot(archiveRoot);
+    const absolutePath = resolve(userdataRoot, ...parts, filename);
+    const expectedPrefix = userdataRoot + sep;
     if (!absolutePath.startsWith(expectedPrefix)) return null;
     if (!existsSync(absolutePath)) return null;
     try {
@@ -85,7 +110,8 @@ export function resolveMixUrl(
     } catch {
       return null;
     }
-    return { absolutePath, productId, filename };
+    const canonicalProductId = `${USERDATA_CANONICAL_ROOT}/${relPath}`;
+    return { absolutePath, productId: canonicalProductId, filename };
   }
 
   if (!Object.hasOwn(ARCHIVE_MIX_DIRS, productId)) return null;

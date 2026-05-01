@@ -405,16 +405,26 @@ function collectMixLeafDirs(
 }
 
 const USERDATA_SUBDIR = "_userdata";
+const USERDATA_SUBDIR_ALIASES = [USERDATA_SUBDIR, "_user"] as const;
+
+function resolveUserdataDir(archiveDir: string): string | null {
+  for (const subdir of USERDATA_SUBDIR_ALIASES) {
+    const candidate = join(archiveDir, subdir);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 /**
- * Scan `archive/_userdata` for subdirectory groups that directly contain
- * `.mix` files and return a `MixLibraryEntry` for each. Group IDs use the
- * form `_userdata/<relPath>` so `resolveMixUrl` can reconstruct the
- * file-system path from the URL (the browser percent-encodes the `/`).
+ * Scan the user-mix tree (preferring `archive/_userdata`, falling back to
+ * `archive/_user`) for subdirectory groups that directly contain `.mix`
+ * files and return a `MixLibraryEntry` for each. Group IDs remain canonical
+ * `_userdata/<relPath>` so `resolveMixUrl` can reconstruct the file-system
+ * path from the URL (the browser percent-encodes the `/`).
  */
 export function buildUserdataMixLibrary(archiveDir: string): MixLibraryEntry[] {
-  const userdataDir = join(archiveDir, USERDATA_SUBDIR);
-  if (!existsSync(userdataDir)) return [];
+  const userdataDir = resolveUserdataDir(archiveDir);
+  if (!userdataDir) return [];
 
   const found: Array<{ relParts: string[]; absPath: string }> = [];
   collectMixLeafDirs(userdataDir, [], found);
@@ -710,6 +720,66 @@ const RAVE_PXD_PATH_CANDIDATES = [
   "GenerationPack1/Rave/RAVE/EJAY/PXD",
 ];
 
+const HIPHOP1_PXD_ID_OFFSET = 731;
+const HIPHOP1_PXD_PATH_CANDIDATES = [
+  "HipHop eJay 1/HIPHOP/EJAY/PXD",
+  "HipHop 1/HIPHOP/EJAY/PXD",
+  "GenerationPack1/HipHop/HIPHOP/EJAY/PXD",
+];
+
+const DANCE1_PXDDANCE_ID_OFFSET = 731;
+const DANCE1_PXDDANCE_PATH_CANDIDATES = [
+  "Dance eJay 1/eJay/eJay/Pxddance",
+  "Dance eJay 1/dance/EJAY/Pxddance",
+  "Dance_eJay1/eJay/eJay/Pxddance",
+  "Dance_eJay1/dance/EJAY/Pxddance",
+];
+
+function appendDance1PxddanceLookups(
+  index: Record<string, SampleLookupEntry>,
+  archiveDir: string,
+): void {
+  const dance1 = index.Dance_eJay1;
+  if (!dance1) return;
+
+  let pxdDancePath: string | null = null;
+  for (const relPath of DANCE1_PXDDANCE_PATH_CANDIDATES) {
+    const candidate = join(archiveDir, relPath);
+    if (existsSync(candidate)) {
+      pxdDancePath = candidate;
+      break;
+    }
+  }
+  if (!pxdDancePath) return;
+
+  let records: ReturnType<typeof parsePxddanceFile>;
+  try {
+    records = parsePxddanceFile(readFileSync(pxdDancePath, "utf8"));
+  } catch {
+    return;
+  }
+
+  const byGen1Id = dance1.byGen1Id ?? (dance1.byGen1Id = {});
+  for (let i = 0; i < records.length; i += 1) {
+    const rawId = DANCE1_PXDDANCE_ID_OFFSET + i;
+    const normalized = normalisePxdPath(records[i].path);
+    if (!normalized.path) continue;
+
+    const fromSource = dance1.bySource[normalized.path];
+    if (fromSource) {
+      byGen1Id[String(rawId)] = fromSource;
+      continue;
+    }
+
+    const fileStem = normalized.file?.toLowerCase() ?? null;
+    if (!fileStem) continue;
+    const fromStem = dance1.byStem[fileStem];
+    if (fromStem) {
+      byGen1Id[String(rawId)] = fromStem;
+    }
+  }
+}
+
 function appendRavePxdLookups(
   index: Record<string, SampleLookupEntry>,
   archiveDir: string,
@@ -755,6 +825,51 @@ function appendRavePxdLookups(
   }
 }
 
+function appendHipHop1PxdLookups(
+  index: Record<string, SampleLookupEntry>,
+  archiveDir: string,
+): void {
+  const hiphop1 = index.HipHop_eJay1;
+  if (!hiphop1) return;
+
+  let pxdCatalogPath: string | null = null;
+  for (const relPath of HIPHOP1_PXD_PATH_CANDIDATES) {
+    const candidate = join(archiveDir, relPath);
+    if (existsSync(candidate)) {
+      pxdCatalogPath = candidate;
+      break;
+    }
+  }
+  if (!pxdCatalogPath) return;
+
+  let records: ReturnType<typeof parsePxddanceFile>;
+  try {
+    records = parsePxddanceFile(readFileSync(pxdCatalogPath, "utf8"));
+  } catch {
+    return;
+  }
+
+  const byGen1Id = hiphop1.byGen1Id ?? (hiphop1.byGen1Id = {});
+  for (let i = 0; i < records.length; i += 1) {
+    const rawId = HIPHOP1_PXD_ID_OFFSET + i;
+    const normalized = normalisePxdPath(records[i].path);
+    if (!normalized.path) continue;
+
+    const fromSource = hiphop1.bySource[normalized.path];
+    if (fromSource) {
+      byGen1Id[String(rawId)] = fromSource;
+      continue;
+    }
+
+    const fileStem = normalized.file?.toLowerCase() ?? null;
+    if (!fileStem) continue;
+    const fromStem = hiphop1.byStem[fileStem];
+    if (fromStem) {
+      byGen1Id[String(rawId)] = fromStem;
+    }
+  }
+}
+
 function appendGen1Lookups(
   index: Record<string, SampleLookupEntry>,
   archiveDir: string,
@@ -766,6 +881,12 @@ function appendGen1Lookups(
   // Rave's runtime sample-id mapping is derived from the PXD row table
   // (rawId = rowIndex + 731), not directly from MAX line numbers.
   appendRavePxdLookups(index, archiveDir);
+  // Dance eJay 1 START-format mixes use a transformed Pxddance id window
+  // (rawId = rowIndex + 731) for the core 1352 records.
+  appendDance1PxddanceLookups(index, archiveDir);
+  // HipHop eJay 1 START-format mixes use the HIPHOP/EJAY/PXD row table
+  // (rawId = rowIndex + 731), not a direct MAX line-id mapping.
+  appendHipHop1PxdLookups(index, archiveDir);
 
   const gen1Catalogs = loadGen1Catalogs(archiveDir);
   for (const [alias, canonical] of Object.entries(GEN1_BROWSER_CATALOG_ALIASES)) {

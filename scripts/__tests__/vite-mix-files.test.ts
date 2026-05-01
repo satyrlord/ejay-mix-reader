@@ -107,5 +107,17 @@ describe("listMixFilesForCopy", () => {
       expect(ud!.src).toBe(resolve(archiveRoot, "_userdata", "mysets", "track.mix"));
       expect(ud!.dest).toBe(resolve(outDir, "_userdata", "mysets", "track.mix"));
     });
+
+    it("falls back to archive/_user and keeps canonical _userdata output paths", () => {
+      rmSync(join(archiveRoot, "_userdata"), { recursive: true, force: true });
+      mkdirSync(join(archiveRoot, "_user", "mysets"), { recursive: true });
+      writeFileSync(join(archiveRoot, "_user", "mysets", "track.mix"), "payload");
+
+      const entries = listMixFilesForCopy(archiveRoot, outDir);
+      const ud = entries.find((e) => e.productId === "_userdata/mysets");
+      expect(ud).toBeDefined();
+      expect(ud!.src).toBe(resolve(archiveRoot, "_user", "mysets", "track.mix"));
+      expect(ud!.dest).toBe(resolve(outDir, "_userdata", "mysets", "track.mix"));
+    });
   });
 });

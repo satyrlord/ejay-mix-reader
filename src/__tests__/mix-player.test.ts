@@ -704,6 +704,59 @@ describe("buildMixPlaybackPlan", () => {
     expect(lane0[1]?.lengthBeats).toBe(3);
   });
 
+  it("caps extreme Dance eJay 1 Format A loop extensions caused by outlier tail metadata", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Dance_eJay1: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {},
+        byGen1Id: {
+          "1": "Loop/a.wav",
+          "2": "Loop/b.wav",
+        },
+        byPathBeats: {
+          // 64 quarter-note beats = 16 Format-A timeline bars.
+          // Without the outlier clamp this would inflate the loop to 98.
+          "Loop/b.wav": 64,
+        },
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      format: "A",
+      product: "Dance_eJay1",
+      appId: 0x00000a06,
+      bpm: 140,
+      tracks: [
+        { beat: 0, channel: 0, sampleRef: { rawId: 1, internalName: null, displayName: "a", resolvedPath: null, dataLength: null } },
+        { beat: 82, channel: 0, sampleRef: { rawId: 2, internalName: null, displayName: "b", resolvedPath: null, dataLength: null } },
+      ],
+    }), sampleIndex);
+
+    expect(plan.loopBeats).toBe(91);
+    const lane0 = plan.events.filter((event) => event.channelId === "lane-0");
+    expect(lane0[1]?.lengthBeats).toBe(9);
+  });
+
+  it("keeps HipHop eJay 1 Format A timing derived from parser data", () => {
+    const mix = makeMix({
+      format: "A",
+      product: "HipHop_eJay1",
+      appId: 0x00000a08,
+      bpm: 96,
+      tracks: [
+        { beat: 0, channel: 0, sampleRef: { rawId: 1, internalName: null, displayName: "a", resolvedPath: null, dataLength: null } },
+        { beat: 78, channel: 0, sampleRef: { rawId: 2, internalName: null, displayName: "b", resolvedPath: null, dataLength: null } },
+      ],
+    });
+
+    const withoutContext = buildMixPlaybackPlan(mix);
+    expect(withoutContext.bpm).toBe(96);
+    expect(withoutContext.loopBeats).toBe(80);
+  });
+
   it("sets lengthBeats to 1 for each event when loopBeats is null (list-view mode)", () => {
     // Format C/D mixes produce loopBeats = null; last event on each lane must
     // fall back to 1 beat rather than an unbounded duration.

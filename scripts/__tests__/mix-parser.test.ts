@@ -193,7 +193,7 @@ describe("Format A synthetic parsing", () => {
     const mix = parseFormatA(buf, "Custom_Gen1");
     expect(mix.format).toBe("A");
     expect(mix.product).toBe("Custom_Gen1");
-    expect(mix.bpm).toBe(90);
+    expect(mix.bpm).toBe(96);
     expect(mix.tracks).toEqual([
       {
         beat: 0,

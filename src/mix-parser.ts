@@ -68,7 +68,8 @@ export const FA_ZERO_GAP     = 32;
 const IMPLICIT_BPM: Record<number, number> = {
   [APP_SIG_DANCE1]:  140,
   [APP_SIG_RAVE]:    180,
-  [APP_SIG_HIPHOP1]: 90,
+  // HipHop eJay 1 uses a 96 BPM default in the original app transport.
+  [APP_SIG_HIPHOP1]: 96,
 };
 
 const FORMAT_A_PRODUCTS: Record<number, string> = {

@@ -22,6 +22,15 @@ import { ARCHIVE_MIX_DIRS, resolveProductMixDir } from "../build-index.js";
 // ---------------------------------------------------------------------------
 
 const USERDATA_SUBDIR = "_userdata";
+const USERDATA_SUBDIR_ALIASES = [USERDATA_SUBDIR, "_user"] as const;
+
+function resolveUserdataSourceDir(archiveRoot: string): string | null {
+  for (const subdir of USERDATA_SUBDIR_ALIASES) {
+    const candidate = resolve(archiveRoot, subdir);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -95,7 +104,8 @@ export function listMixFilesForCopy(
 // ---------------------------------------------------------------------------
 
 /**
- * Recursively walk `archive/_userdata` and append one `MixFileCopyEntry`
+ * Recursively walk the user-mix tree (`archive/_userdata`, or legacy
+ * `archive/_user`) and append one `MixFileCopyEntry`
  * for every `.mix` file found at least one level deep.
  *
  * The copy destination mirrors the source sub-path so that
@@ -106,8 +116,8 @@ function collectUserdataMixPairs(
   outDir: string,
   entries: MixFileCopyEntry[],
 ): void {
-  const userdataDir = resolve(archiveRoot, USERDATA_SUBDIR);
-  if (!existsSync(userdataDir)) return;
+  const userdataDir = resolveUserdataSourceDir(archiveRoot);
+  if (!userdataDir) return;
 
   function walk(dir: string, relParts: string[]): void {
     let dirEntries: string[];

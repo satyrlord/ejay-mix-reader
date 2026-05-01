@@ -42,6 +42,15 @@ interface PlayheadSnapshot {
   beatAlignedToBarStart: boolean;
 }
 
+interface SequencerParitySnapshot {
+  markerPrefix: number[];
+  events: Array<{
+    laneLabel: string;
+    beat: number;
+    label: string;
+  }>;
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -182,6 +191,43 @@ async function readPlayheadSnapshot(page: Page): Promise<PlayheadSnapshot> {
   });
 }
 
+async function readSequencerParitySnapshot(page: Page, maxBeat: number): Promise<SequencerParitySnapshot> {
+  return page.evaluate((maxVisibleBeat) => {
+    const markerPrefix = [...document.querySelectorAll<HTMLElement>(".sequencer-beat-number")]
+      .map((node) => Number.parseInt((node.textContent ?? "").trim(), 10))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .slice(0, maxVisibleBeat);
+
+    const GRID_LABEL_COLUMNS = 2;
+    const events: SequencerParitySnapshot["events"] = [];
+    for (const row of document.querySelectorAll<HTMLElement>(".sequencer-lane")) {
+      const laneLabel = row.querySelector<HTMLElement>(".sequencer-lane-label")?.textContent?.trim() ?? "";
+      for (const block of row.querySelectorAll<HTMLElement>(".sequencer-event")) {
+        const label = block.textContent?.trim() ?? "";
+        const gridColumn = block.style.gridColumn;
+        const match = /^\s*(\d+)\s*\/\s*span\s*(\d+)/i.exec(gridColumn);
+        if (!label || !match) continue;
+
+        const gridStart = Number.parseInt(match[1], 10);
+        if (!Number.isFinite(gridStart)) continue;
+        const beat = Math.max(0, gridStart - GRID_LABEL_COLUMNS);
+        if (beat > maxVisibleBeat) continue;
+
+        events.push({ laneLabel, beat, label });
+      }
+    }
+
+    events.sort((left, right) => left.beat - right.beat
+      || left.laneLabel.localeCompare(right.laneLabel)
+      || left.label.localeCompare(right.label));
+
+    return {
+      markerPrefix,
+      events,
+    };
+  }, maxBeat);
+}
+
 async function assertMixPlaybackTransport(page: Page): Promise<void> {
   const playbackStartTimeoutMs = coveragePlaybackStartTimeoutMs;
   const initialPosition = await page.locator(".seq-position").textContent();
@@ -273,8 +319,17 @@ async function assertMixAutoScroll(page: Page): Promise<void> {
   expect(playingTimeline.scrollLeft).toBeGreaterThan(initialTimeline.scrollLeft);
   expect(playingTimeline.scrollWidth).toBeGreaterThan(playingTimeline.clientWidth);
 
-  await page.locator(".seq-stop-btn").click();
-  await expect(page.locator(".seq-stop-btn")).toBeDisabled();
+  const stopButton = page.locator(".seq-stop-btn");
+  const clickedStop = await stopButton.evaluate((button: HTMLButtonElement) => {
+    if (button.disabled) return false;
+    button.click();
+    return true;
+  });
+  if (clickedStop) {
+    await expect(stopButton).toBeDisabled();
+  } else {
+    await expect(stopButton).toBeDisabled();
+  }
 
   await page.waitForFunction(() => {
     const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
@@ -336,6 +391,8 @@ function loadStartMixCases(): MixPlaybackCase[] {
 }
 
 const START_MIX_CASES = loadStartMixCases();
+const DANCE1_START_CASE = START_MIX_CASES.find((mixCase) => mixCase.productId === "Dance_eJay1") ?? null;
+const HIPHOP1_START_CASE = START_MIX_CASES.find((mixCase) => mixCase.productId === "HipHop_eJay1") ?? null;
 const RAVE_START_CASE = START_MIX_CASES.find((mixCase) => mixCase.productId === "Rave") ?? null;
 
 /**
@@ -374,6 +431,111 @@ test.describe("start.mix per-product matrix", () => {
 
     expect(spans.length).toBeGreaterThan(0);
     expect(Math.max(...spans)).toBeGreaterThan(1);
+  });
+
+  test("Dance_eJay1 start.mix keeps label and bar-marker parity", async ({ page }) => {
+    if (!DANCE1_START_CASE) {
+      test.skip(true, "Dance_eJay1 start.mix not present in data/index.json");
+    }
+    const playbackStartTimeoutMs = coveragePlaybackStartTimeoutMs;
+
+    await openMixFromArchive(page, DANCE1_START_CASE!);
+    await expect.poll(async () => page.locator(".sequencer-event").count(), {
+      timeout: playbackStartTimeoutMs,
+    }).toBeGreaterThan(0);
+
+    const snapshot = await readSequencerParitySnapshot(page, 22);
+    expect(snapshot.markerPrefix).toEqual(Array.from({ length: 22 }, (_value, index) => index + 1));
+
+    const expectedAnchors: SequencerParitySnapshot["events"] = [
+      { laneLabel: "Lane 2", beat: 0, label: "SpaceKnock" },
+      { laneLabel: "Lane 3", beat: 0, label: "XPipe" },
+      { laneLabel: "Lane 4", beat: 2, label: "Robot" },
+      { laneLabel: "Lane 1", beat: 6, label: "Perc.L" },
+      { laneLabel: "Lane 2", beat: 10, label: "Perc." },
+      { laneLabel: "Lane 5", beat: 10, label: "WHAT" },
+      { laneLabel: "Lane 5", beat: 12, label: "IS" },
+      { laneLabel: "Lane 5", beat: 16, label: "LOVE" },
+      { laneLabel: "Lane 6", beat: 16, label: "Snare fill" },
+      { laneLabel: "Lane 7", beat: 10, label: "Myth * L" },
+      { laneLabel: "Lane 8", beat: 10, label: "Myth * R" },
+      { laneLabel: "Lane 1", beat: 17, label: "Crash" },
+    ];
+    for (const anchor of expectedAnchors) {
+      expect(snapshot.events).toContainEqual(anchor);
+    }
+
+    const playButton = page.locator(".seq-play-btn");
+    const stopButton = page.locator(".seq-stop-btn");
+    await expect(playButton).toBeEnabled({ timeout: playbackStartTimeoutMs });
+    await playButton.evaluate((button: HTMLButtonElement) => {
+      button.click();
+    });
+    await expect(page.locator(".seq-position")).toContainText("Bar 1 / 90", {
+      timeout: playbackStartTimeoutMs,
+    });
+
+    await stopButton.evaluate((button: HTMLButtonElement) => {
+      if (!button.disabled) button.click();
+    });
+    await expect(stopButton).toBeDisabled();
+  });
+
+  test("HipHop_eJay1 start.mix keeps 22-bar screenshot parity anchors", async ({ page }) => {
+    if (!HIPHOP1_START_CASE) {
+      test.skip(true, "HipHop_eJay1 start.mix not present in data/index.json");
+    }
+    const playbackStartTimeoutMs = coveragePlaybackStartTimeoutMs;
+
+    await openMixFromArchive(page, HIPHOP1_START_CASE!);
+    await expect.poll(async () => page.locator(".sequencer-event").count(), {
+      timeout: playbackStartTimeoutMs,
+    }).toBeGreaterThan(0);
+    await expect(page.locator(".context-bpm-display")).toHaveText("96 BPM", {
+      timeout: playbackStartTimeoutMs,
+    });
+
+    const snapshot = await readSequencerParitySnapshot(page, 66);
+    expect(snapshot.markerPrefix.slice(0, 22)).toEqual(Array.from({ length: 22 }, (_value, index) => index + 1));
+
+    const expectedAnchors: SequencerParitySnapshot["events"] = [
+      { laneLabel: "Lane 3", beat: 0, label: "help" },
+      { laneLabel: "Lane 4", beat: 0, label: "hard" },
+      { laneLabel: "Lane 7", beat: 0, label: "hiphp" },
+      { laneLabel: "Lane 1", beat: 22, label: "dirty store" },
+      { laneLabel: "Lane 6", beat: 22, label: "count in" },
+      { laneLabel: "Lane 8", beat: 22, label: "leave" },
+      { laneLabel: "Lane 1", beat: 44, label: "kickC" },
+      { laneLabel: "Lane 2", beat: 44, label: "snreI" },
+      { laneLabel: "Lane 3", beat: 44, label: "tin loop" },
+      { laneLabel: "Lane 1", beat: 66, label: "dirty store" },
+      { laneLabel: "Lane 2", beat: 66, label: "hat A" },
+      { laneLabel: "Lane 4", beat: 66, label: "do it" },
+      { laneLabel: "Lane 5", beat: 66, label: "wanna let it" },
+      { laneLabel: "Lane 6", beat: 66, label: "wahh!" },
+    ];
+
+    for (const anchor of expectedAnchors) {
+      expect(snapshot.events).toContainEqual(anchor);
+    }
+
+    const playButton = page.locator(".seq-play-btn");
+    const stopButton = page.locator(".seq-stop-btn");
+    await expect(playButton).toBeEnabled({ timeout: playbackStartTimeoutMs });
+    await playButton.evaluate((button: HTMLButtonElement) => {
+      button.click();
+    });
+    await expect(page.locator(".seq-position")).toContainText(/Bar\s+1\s*\/\s*\d+/, {
+      timeout: playbackStartTimeoutMs,
+    });
+    await expect(page.locator(".seq-position")).toContainText("Bar 1 / 80", {
+      timeout: playbackStartTimeoutMs,
+    });
+
+    await stopButton.evaluate((button: HTMLButtonElement) => {
+      if (!button.disabled) button.click();
+    });
+    await expect(stopButton).toBeDisabled();
   });
 
   test("play/pause button, Space, and Enter control transport playback", async ({ page }) => {

@@ -128,6 +128,28 @@ describe("resolveMixUrl", () => {
     it("returns null for a missing file in a _userdata group", () => {
       expect(resolveMixUrl("/mix/_userdata%2Fmysets/missing.mix", archiveRoot)).toBeNull();
     });
+
+    it("resolves canonical _userdata urls from legacy archive/_user", () => {
+      rmSync(join(archiveRoot, "_userdata"), { recursive: true, force: true });
+      mkdirSync(join(archiveRoot, "_user", "mysets"), { recursive: true });
+      writeFileSync(join(archiveRoot, "_user", "mysets", "track.mix"), "payload");
+
+      const resolved = resolveMixUrl("/mix/_userdata%2Fmysets/track.mix", archiveRoot);
+      expect(resolved).not.toBeNull();
+      expect(resolved?.productId).toBe("_userdata/mysets");
+      expect(resolved?.absolutePath).toBe(resolve(archiveRoot, "_user", "mysets", "track.mix"));
+    });
+
+    it("accepts legacy _user product ids and canonicalizes the result", () => {
+      rmSync(join(archiveRoot, "_userdata"), { recursive: true, force: true });
+      mkdirSync(join(archiveRoot, "_user", "genre", "sub1"), { recursive: true });
+      writeFileSync(join(archiveRoot, "_user", "genre", "sub1", "a.mix"), "payload");
+
+      const resolved = resolveMixUrl("/mix/_user%2Fgenre%2Fsub1/a.mix", archiveRoot);
+      expect(resolved).not.toBeNull();
+      expect(resolved?.productId).toBe("_userdata/genre/sub1");
+      expect(resolved?.absolutePath).toBe(resolve(archiveRoot, "_user", "genre", "sub1", "a.mix"));
+    });
   });
 });
 

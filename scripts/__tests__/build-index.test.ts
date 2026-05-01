@@ -458,6 +458,24 @@ describe("buildMixLibrary", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("includes _user groups after product entries using canonical _userdata ids", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-lib-user-"));
+    try {
+      mkdirSync(join(root, "Rave", "MIX"), { recursive: true });
+      writeFileSync(join(root, "Rave", "MIX", "a.mix"), Buffer.from([0x07, 0x0a, 0, 0]));
+      mkdirSync(join(root, "_user", "mysets"), { recursive: true });
+      writeFileSync(join(root, "_user", "mysets", "x.mix"), Buffer.from([0x06, 0x0a, 0, 0]));
+
+      const library = buildMixLibrary(root);
+      const ids = library.map(e => e.id);
+      expect(ids).toContain("Rave");
+      expect(ids).toContain("_userdata/mysets");
+      expect(ids.indexOf("Rave")).toBeLessThan(ids.indexOf("_userdata/mysets"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("userdataGroupLabel", () => {
@@ -520,6 +538,22 @@ describe("buildUserdataMixLibrary", () => {
       const library = buildUserdataMixLibrary(root);
       const ids = library.map(e => e.id).sort();
       expect(ids).toEqual(["_userdata/genre/sub1", "_userdata/genre/sub2"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to _user when _userdata is absent", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-ud-"));
+    try {
+      mkdirSync(join(root, "_user", "mysets"), { recursive: true });
+      writeFileSync(join(root, "_user", "mysets", "track.mix"), Buffer.from([0x06, 0x0a, 0, 0]));
+
+      const library = buildUserdataMixLibrary(root);
+      expect(library).toHaveLength(1);
+      expect(library[0]!.id).toBe("_userdata/mysets");
+      expect(library[0]!.name).toBe("User: mysets");
+      expect(library[0]!.mixes).toEqual([expect.objectContaining({ filename: "track.mix", format: "A" })]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -914,6 +948,116 @@ describe("buildSampleIndex", () => {
       expect(index.Rave.byGen1Id?.["801"]).toBe("Bass/right.wav");
       // MAX fallback still applies to low ids not covered by the PXD row offset.
       expect(index.Rave.byGen1Id?.["1"]).toBe("Loop/low.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers Dance eJay 1 transformed Pxddance row-id mapping over conflicting MAX ids", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-dance1-pxddance-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "right.wav",
+            category: "Extra",
+            product: "Dance_eJay1",
+            source: "BI\\ANLF.PXD",
+          },
+          {
+            filename: "wrong.wav",
+            category: "Extra",
+            product: "Dance_eJay1",
+            source: "AH\\BTQR.PXD",
+          },
+          {
+            filename: "low.wav",
+            category: "Loop",
+            product: "Dance_eJay1",
+            source: "AA\\LOW.PXD",
+          },
+        ],
+      }));
+
+      const archiveDir = join(root, "archive");
+      const danceDir = join(archiveDir, "Dance eJay 1", "eJay", "eJay");
+      mkdirSync(danceDir, { recursive: true });
+
+      const maxLines = Array.from({ length: 1187 }, () => '""');
+      maxLines[1] = '"AA\\LOW.PXD"';
+      // Intentionally conflicting MAX mapping: raw id 1186 points at AH/BTQR.
+      maxLines[1186] = '"AH\\BTQR.PXD"';
+      writeFileSync(join(danceDir, "MAX"), maxLines.join("\r\n"));
+
+      const pxdDanceLines: string[] = [];
+      for (let i = 0; i <= 455; i += 1) {
+        const path = i === 455
+          ? "BI\\ANLF.PXD"
+          : `ZZ\\DUMMY${String(i).padStart(3, "0")}.PXD`;
+        pxdDanceLines.push(`"${path}"`, '""', '"loop"', '"1"', '"Grp. 1"', '"Vers1"');
+      }
+      writeFileSync(join(danceDir, "Pxddance"), pxdDanceLines.join("\r\n"));
+
+      const index = buildSampleIndex(root, archiveDir);
+      // 1186 = 731 + 455; must resolve via transformed Pxddance row mapping.
+      expect(index.Dance_eJay1.byGen1Id?.["1186"]).toBe("Extra/right.wav");
+      // MAX fallback still applies to low ids outside the transformed window.
+      expect(index.Dance_eJay1.byGen1Id?.["1"]).toBe("Loop/low.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers HipHop eJay 1 transformed PXD row-id mapping over conflicting MAX ids", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-hiphop1-pxd-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "right.wav",
+            category: "Bass",
+            product: "HipHop_eJay1",
+            source: "BR\\H1BS006.PXD",
+          },
+          {
+            filename: "wrong.wav",
+            category: "Extra",
+            product: "HipHop_eJay1",
+            source: "AA\\WRONG.PXD",
+          },
+          {
+            filename: "low.wav",
+            category: "Loop",
+            product: "HipHop_eJay1",
+            source: "AA\\LOW.PXD",
+          },
+        ],
+      }));
+
+      const archiveDir = join(root, "archive");
+      const hiphopDir = join(archiveDir, "HipHop eJay 1", "HIPHOP", "EJAY");
+      mkdirSync(hiphopDir, { recursive: true });
+
+      const maxLines = Array.from({ length: 737 }, () => '""');
+      maxLines[1] = '"AA\\LOW.PXD"';
+      // Intentionally conflicting MAX mapping: raw id 736 points at WRONG.PXD.
+      maxLines[736] = '"AA\\WRONG.PXD"';
+      writeFileSync(join(hiphopDir, "MAX"), maxLines.join("\r\n"));
+
+      const pxdLines: string[] = [];
+      for (let i = 0; i <= 5; i += 1) {
+        const path = i === 5
+          ? "BR\\H1BS006.PXD"
+          : `ZZ\\DUMMY${String(i).padStart(3, "0")}.PXD`;
+        pxdLines.push(`"${path}"`, '""', '"bass"', '"2"', '"Grp. 1"', '"Vers1"');
+      }
+      writeFileSync(join(hiphopDir, "PXD"), pxdLines.join("\r\n"));
+
+      const index = buildSampleIndex(root, archiveDir);
+      // 736 = 731 + 5; must resolve via transformed PXD row mapping.
+      expect(index.HipHop_eJay1.byGen1Id?.["736"]).toBe("Bass/right.wav");
+      // MAX fallback still applies to low ids outside the transformed window.
+      expect(index.HipHop_eJay1.byGen1Id?.["1"]).toBe("Loop/low.wav");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

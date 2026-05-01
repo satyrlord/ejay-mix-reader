@@ -9,7 +9,7 @@ import {
 } from "./icons.js";
 import { renderTransportBar } from "./transport.js";
 
-export const BPM_VALUES = [90, 125, 140, 160, 180] as const;
+export const BPM_VALUES = [90, 96, 125, 140, 160, 180] as const;
 
 export interface SpaShellSlots {
   shell: HTMLElement;

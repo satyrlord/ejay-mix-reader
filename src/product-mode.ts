@@ -66,7 +66,7 @@ export const PRODUCT_MODE_ENTRIES: readonly ProductModeEntry[] = [
     label: "HipHop 1",
     productIds: ["HipHop_eJay1", "GenerationPack1_HipHop", "SampleKit_DMKIT1", "SampleKit_DMKIT2"],
     mixGroupIds: ["HipHop_eJay1"],
-    defaultBpm: 90,
+    defaultBpm: 96,
   },
   {
     id: "dance2",

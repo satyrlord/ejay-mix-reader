@@ -349,14 +349,25 @@ function chooseFolderIcon(): SVGSVGElement {
 /* Metadata helpers                                                          */
 /* -------------------------------------------------------------------------- */
 
+const HIPHOP1_GEN1_APP_ID = 0x00000a08;
+const HIPHOP1_GEN1_DEFAULT_BPM = 96;
+
+function effectiveMetaBpm(meta: MixFileMeta): number {
+  if (meta.appId === HIPHOP1_GEN1_APP_ID && (meta.format === "A" || meta.format === undefined)) {
+    return HIPHOP1_GEN1_DEFAULT_BPM;
+  }
+  return meta.bpm;
+}
+
 /**
  * Build a short tooltip string from `MixFileMeta` suitable for the
  * native `title` attribute.
  */
 export function formatMetaTooltip(meta: MixFileMeta | undefined): string {
   if (!meta) return "";
-  const parts: string[] = [`BPM: ${meta.bpm}`];
-  if (meta.bpmAdjusted && meta.bpmAdjusted !== meta.bpm) {
+  const bpm = effectiveMetaBpm(meta);
+  const parts: string[] = [`BPM: ${bpm}`];
+  if (meta.bpmAdjusted && meta.bpmAdjusted !== bpm) {
     parts.push(`(${meta.bpmAdjusted} adjusted)`);
   }
   parts.push(`${meta.trackCount} tracks`);
@@ -382,10 +393,11 @@ export function buildMetaRows(
       rows.push(["App ID", `0x${meta.appId.toString(16).padStart(8, "0")}`]);
     }
     rows.push(["Format", meta.format ? mixFormatLabel(meta.format) : "—"]);
+    const bpm = effectiveMetaBpm(meta);
     const bpmStr =
-      meta.bpmAdjusted && meta.bpmAdjusted !== meta.bpm
-        ? `${meta.bpm} (adjusted: ${meta.bpmAdjusted})`
-        : String(meta.bpm);
+      meta.bpmAdjusted && meta.bpmAdjusted !== bpm
+        ? `${bpm} (adjusted: ${meta.bpmAdjusted})`
+        : String(bpm);
     rows.push(["BPM", bpmStr]);
     rows.push(["Tracks", String(meta.trackCount)]);
     if (typeof meta.laneCount === "number") {
@@ -548,6 +560,8 @@ function renderTreeGroups(
     const labelSpan = document.createElement("span");
     labelSpan.className = "mix-tree-group-label";
     labelSpan.textContent = group.label;
+    // Native tooltip for truncated folder names.
+    labelSpan.title = group.label;
     headerBtn.appendChild(labelSpan);
 
     const countBadge = document.createElement("span");

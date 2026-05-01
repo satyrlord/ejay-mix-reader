@@ -231,6 +231,11 @@ const MIX_PLAYBACK_CATALOG_HINTS: Array<{ match: RegExp; product: string }> = [
   { match: /Xtreme\s*eJay/i, product: "Xtreme_eJay" },
 ];
 
+// Some Dance eJay 1 Format A mixes contain a single long-tail metadata outlier
+// that can inflate inferred loop length far beyond the visible arrangement.
+const DANCE1_FORMAT_A_OUTLIER_EXTENSION_BARS = 12;
+const DANCE1_FORMAT_A_TAIL_EXTENSION_CAP_BARS = 8;
+
 function canonicalPlaybackProduct(product: string): string {
   return MIX_PLAYBACK_PRODUCT_ALIASES[product] ?? product;
 }
@@ -387,6 +392,7 @@ export function buildMixPlaybackPlan(
   sampleIndex?: Record<string, SampleLookupEntry>,
 ): MixPlaybackPlan {
   const products = playbackLookupOrder(mix);
+  const primaryProduct = products[0] ?? canonicalPlaybackProduct(mix.product);
   const lanes = lanesForMix(mix);
   const timelineUnitBeats = mix.format === "A" ? 4 : 1;
   const authoritativeLoopBeats = typeof mix.loopBeats === "number" && Number.isFinite(mix.loopBeats) && mix.loopBeats > 0
@@ -474,6 +480,19 @@ export function buildMixPlaybackPlan(
     // Gen-2/3 stay quantized to 4-beat bars.
     const rawLength = recoveredMaxBeat + 1;
     loopBeats = Math.max(1, Math.ceil(rawLength / 4) * 4);
+  }
+
+  if (
+    mix.format === "A" &&
+    primaryProduct === "Dance_eJay1" &&
+    anyBeatKnown &&
+    loopBeats !== null
+  ) {
+    const recoveredLength = recoveredMaxBeat + 1;
+    const extension = loopBeats - recoveredLength;
+    if (extension > DANCE1_FORMAT_A_OUTLIER_EXTENSION_BARS) {
+      loopBeats = recoveredLength + DANCE1_FORMAT_A_TAIL_EXTENSION_CAP_BARS;
+    }
   }
 
   // Compute per-event lengthBeats from the gap to the next event on the

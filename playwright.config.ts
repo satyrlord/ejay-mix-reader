@@ -23,7 +23,7 @@ const workers = !isNaN(parsedWorkers) && parsedWorkers > 0 ? parsedWorkers : def
 
 export default defineConfig({
   testDir: "./tests",
-  fullyParallel: false,
+  fullyParallel: true,
   // Coverage runs are more resource-intensive and occasionally hit transient
   // startup/network flakes locally; allow one retry in that mode.
   retries: coverageEnabled || isCI ? 1 : 0,

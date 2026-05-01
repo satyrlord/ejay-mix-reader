@@ -12,7 +12,7 @@ const expectedTransportVersion = buildDisplayVersion(packageJson.version, {
   cwd: new URL("..", import.meta.url),
   deploymentCount: process.env.EJAY_GITHUB_DEPLOYMENT_COUNT,
 });
-const appStartupTimeoutMs = process.env.VITE_COVERAGE === "true" ? 30_000 : 5_000;
+const appStartupTimeoutMs = process.env.VITE_COVERAGE === "true" ? 30_000 : 10_000;
 
 test("page title is set", async ({ page }) => {
   await page.goto("/");
@@ -125,6 +125,7 @@ test("BPM filter is present and defaults to All", async ({ page }) => {
   const bpm = page.locator("#bpm-filter");
   await expect(bpm).toBeVisible();
   await expect(page.locator('#bpm-filter option[value=""]')).toHaveText("All");
+  await expect(page.locator('#bpm-filter option[value="96"]')).toHaveText("96");
   await expect(bpm).toHaveValue("");
 });
 

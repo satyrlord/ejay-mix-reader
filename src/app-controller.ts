@@ -114,6 +114,7 @@ const MIX_TIMELINE_BEAT_PX = 48;
 const MIX_PLAYHEAD_AUTO_SCROLL_RATIO = 0.4;
 const MIX_GRID_MAJOR_EVERY_BEATS = 8;
 const SEQUENCER_EVENT_CLICK_DELAY_MS = 220;
+const MIX_PLAYBACK_DRIFT_GRACE_MS = 350;
 const MIX_GRID_DEFAULT_EDITOR_RATIO = 0.58;
 const SHELL_EDITOR_HEIGHT_CSS_VAR = "--shell-editor-height";
 const SHELL_EDITOR_MIN_PX = 220;
@@ -242,6 +243,28 @@ export function createAppController(app: HTMLElement): () => void {
   function clearCategoryConfigWatcher(): void {
     stopCategoryConfigWatch();
     stopCategoryConfigWatch = noop;
+  }
+
+  function ensureBpmFilterOption(select: HTMLSelectElement, bpm: number): void {
+    const value = String(bpm);
+    if (Array.from(select.options).some((option) => option.value === value)) {
+      return;
+    }
+
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+
+    for (const existing of Array.from(select.options)) {
+      if (existing.value === "") continue;
+      const existingBpm = Number(existing.value);
+      if (Number.isFinite(existingBpm) && existingBpm > bpm) {
+        select.insertBefore(option, existing);
+        return;
+      }
+    }
+
+    select.appendChild(option);
   }
 
   function isSubcategoryOperationInFlight(operation: SubcategoryOperation): boolean {
@@ -903,14 +926,17 @@ export function createAppController(app: HTMLElement): () => void {
     updateMixPlaybackProgress(0);
   }
 
-  function scheduleMixPlaybackStop(plan: MixPlaybackPlan, startBeat: number): void {
+  function scheduleMixPlaybackStop(plan: MixPlaybackPlan, startBeat: number, extraGraceMs = 0): void {
     clearMixPlaybackStopTimeout();
     // List-view mixes (loopBeats === null) play every event one-shot from beat 0;
     // bound the watchdog by event count instead of timeline length.
     const beats = plan.loopBeats === null
       ? Math.max(4, plan.events.length)
       : Math.max(1, plan.loopBeats - clampMixStartBeat(startBeat));
-    const durationMs = Math.max(1000, Math.ceil((beats * 60_000) / timelineBpm(plan)) + 2000);
+    const durationMs = Math.max(
+      1000,
+      Math.ceil((beats * 60_000) / timelineBpm(plan)) + 2000 + Math.max(0, extraGraceMs),
+    );
     mixPlaybackStopTimeoutId = window.setTimeout(() => {
       stopMixPlayback();
     }, durationMs);
@@ -980,6 +1006,13 @@ export function createAppController(app: HTMLElement): () => void {
 
         const audioStartAt = ctx.currentTime + 0.05;
         started = mixPlaybackHost.play(timelineBpm(plan), audioStartAt);
+        if (started > 0) {
+          // Re-anchor transport UI to the real audio start time to reduce
+          // cumulative drift during long decode/schedule phases.
+          const startDelayMs = Math.max(0, (audioStartAt - ctx.currentTime) * 1000);
+          startMixPlaybackAnimation(performance.now() + startDelayMs, requestedStartBeat);
+          scheduleMixPlaybackStop(plan, requestedStartBeat, MIX_PLAYBACK_DRIFT_GRACE_MS);
+        }
       }
     }
 
@@ -994,7 +1027,10 @@ export function createAppController(app: HTMLElement): () => void {
 
     if (!isAllEntry(entry) && entry.defaultBpm !== null) {
       state.bpm = entry.defaultBpm;
-      if (slots) slots.bpm.value = String(entry.defaultBpm);
+      if (slots) {
+        ensureBpmFilterOption(slots.bpm, entry.defaultBpm);
+        slots.bpm.value = String(entry.defaultBpm);
+      }
     }
 
     if (state.activeCategory) {

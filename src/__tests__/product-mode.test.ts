@@ -46,7 +46,7 @@ describe("PRODUCT_MODE_ENTRIES", () => {
       "SampleKit_DMKIT1",
       "SampleKit_DMKIT2",
     ]);
-    expect(hh1!.defaultBpm).toBe(90);
+    expect(hh1!.defaultBpm).toBe(96);
   });
 
   it("includes Dance 3 SuperPack expansion id", () => {
@@ -69,7 +69,7 @@ describe("PRODUCT_MODE_ENTRIES", () => {
       dance4: 140,
       techno: 140,
       techno3: 140,
-      hiphop1: 90,
+      hiphop1: 96,
       hiphop2: 90,
       hiphop3: 90,
       hiphop4: 90,
