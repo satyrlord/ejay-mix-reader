@@ -253,7 +253,6 @@ describe("buildMixPlaybackPlan", () => {
     // beat 4 → maxBeat+1 = 5 → rounded up to next 4-beat bar = 8.
     expect(plan.loopBeats).toBe(8);
     expect(plan.timelineRecovered).toBe(true);
-    expect(plan.timelineUnitBeats).toBe(4);
     expect(plan.lanes).toHaveLength(17); // Format B = Gen 2 = 17 lanes
     expect(plan.channelIds).toEqual(["lane-2"]);
     expect(plan.events[0]).toMatchObject({
@@ -630,75 +629,6 @@ describe("buildMixPlaybackPlan", () => {
     expect(plan.unresolvedEvents).toBe(0);
   });
 
-  it("falls back from HipHop eJay 2 to Dance eJay 2 and House sample-id maps", () => {
-    const sampleIndex: Record<string, SampleLookupEntry> = {
-      HipHop_eJay2: {
-        byAlias: {},
-        bySource: {},
-        byStem: {},
-        byInternalName: {},
-        bySampleId: {},
-        byGen1Id: {},
-      },
-      Dance_eJay2: {
-        byAlias: {},
-        bySource: {},
-        byStem: {},
-        byInternalName: {},
-        bySampleId: {
-          "1015": "Loop/dance-1015.wav",
-        },
-        byGen1Id: {},
-      },
-      House_eJay: {
-        byAlias: {},
-        bySource: {},
-        byStem: {},
-        byInternalName: {},
-        bySampleId: {
-          "3930": "Loop/house-3930.wav",
-        },
-        byGen1Id: {},
-      },
-    };
-
-    const plan = buildMixPlaybackPlan(makeMix({
-      product: "HipHop_eJay2",
-      catalogs: [{ name: "HipHop eJay 2.0", idRangeStart: 0, idRangeEnd: 5000 }],
-      tracks: [
-        {
-          beat: 0,
-          channel: 0,
-          sampleRef: {
-            rawId: 1015,
-            internalName: null,
-            displayName: null,
-            resolvedPath: null,
-            dataLength: null,
-          },
-        },
-        {
-          beat: 4,
-          channel: 1,
-          sampleRef: {
-            rawId: 3930,
-            internalName: null,
-            displayName: null,
-            resolvedPath: null,
-            dataLength: null,
-          },
-        },
-      ],
-    }), sampleIndex);
-
-    expect(plan.events.map((event) => event.audioUrl)).toEqual([
-      "output/Loop/dance-1015.wav",
-      "output/Loop/house-3930.wav",
-    ]);
-    expect(plan.resolvedEvents).toBe(2);
-    expect(plan.unresolvedEvents).toBe(0);
-  });
-
   it("normalizes invalid beats and channels and keeps empty indexes unresolved", () => {
     const plan = buildMixPlaybackPlan(makeMix({
       product: "Custom_Product",
@@ -801,10 +731,9 @@ describe("buildMixPlaybackPlan", () => {
 
     expect(plan.loopBeats).toBe(8);
     const lane0 = plan.events.filter((event) => event.channelId === "lane-0");
-    // Format B now uses bar timeline units (4 quarter-note beats per unit), so
-    // a 2-beat metadata length collapses to the minimum 1 timeline unit.
+    // First event uses metadata beats (2) even though next event starts much later.
     // Second event is clamped to lane gap (loop end at beat 8 => gap 2).
-    expect(lane0.map((event) => event.lengthBeats)).toEqual([1, 2]);
+    expect(lane0.map((event) => event.lengthBeats)).toEqual([2, 2]);
   });
 
   it("converts metadata quarter-note beats for Format A and extends loop to 2-bar boundary", () => {

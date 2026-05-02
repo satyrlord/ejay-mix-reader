@@ -145,6 +145,17 @@ describe("detectProducts", () => {
       rmSync(archive, { recursive: true, force: true });
     }
   });
+
+  it("detects Techno_eJay through Techno eJay archive alias", () => {
+    const archive = mkdtempSync(join(tmpdir(), "build-library-techno-alias-"));
+    try {
+      mkdirSync(join(archive, "Techno eJay", "eJay", "PXD", "rave20"), { recursive: true });
+      const result = detectProducts(archive);
+      expect(result.map((p) => p.id)).toContain("Techno_eJay");
+    } finally {
+      rmSync(archive, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("parserSourceCandidates", () => {

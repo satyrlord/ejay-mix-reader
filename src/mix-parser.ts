@@ -113,11 +113,9 @@ const DEFAULT_GEN23_BPM = 120;
 const MAX_REASONABLE_MIX_BPM = 400;
 const MAX_RECOVERED_FORMAT_CD_BEAT = 16_384;
 const FORMAT_B_TIMELINE_SENTINEL = 0x018a7aa9;
-const FORMAT_B_CHANNEL_COUNT = 17;
-const FORMAT_B_MAX_EVENTS_PER_CHANNEL = 0x09c5;
-const FORMAT_B_POSITION_SCALE = 128;
-const FORMAT_B_LONG_RECORD_BYTES = 10;
-const FORMAT_B_PRIMARY_LANE_CLASSES = new Set([0, 3]);
+const FORMAT_B_TIMELINE_CHANNEL_COUNT = 17;
+const FORMAT_B_TIMELINE_POS_DIVISOR = 128;
+const FORMAT_B_TIMELINE_MIN_CHUNK_LEN = 4 + FORMAT_B_TIMELINE_CHANNEL_COUNT * 5;
 
 function isValidMixBpm(value: number): boolean {
   return Number.isFinite(value) && value > 0 && value <= MAX_REASONABLE_MIX_BPM;
@@ -556,8 +554,13 @@ export function parseFormatB(buf: MixBuffer, productHint?: string): MixIR {
 
   const catalogStart = findCatalogStart(buf, sectionEnd);
   const { catalogs, endOffset: afterCatalogs } = parseCatalogs(buf, catalogStart);
-  const tracks = parseFormatBTimelineTracks(buf, afterCatalogs)
-    ?? parseFormatBTracks(buf, afterCatalogs);
+  const legacyTracks = parseFormatBTracks(buf, afterCatalogs);
+  const timeline = parseFormatBTimeline(buf, afterCatalogs);
+  const useTimeline = timeline !== null && timeline.tracks.length > legacyTracks.length;
+  const tracks = useTimeline ? timeline.tracks : legacyTracks;
+  const loopBeats = useTimeline && timeline !== null
+    ? formatBLoopBeatsFromMaxBeat(timeline.maxBeat)
+    : null;
   const tickerText = extractTickerText(buf, afterCatalogs);
 
   const product = productHint ?? inferProduct(catalogs, header.appId) ?? "Unknown_Gen2";
@@ -571,95 +574,13 @@ export function parseFormatB(buf: MixBuffer, productHint?: string): MixIR {
     author: header.author,
     title,
     registration: header.registration,
+    ...(loopBeats !== null ? { loopBeats } : {}),
     tracks,
     mixer: emptyMixer(),
     drumMachine: null,
     tickerText,
     catalogs,
   };
-}
-
-function parseFormatBTimelineTracks(buf: MixBuffer, startOffset: number): TrackPlacement[] | null {
-  const start = Math.max(0, startOffset);
-
-  for (let chunkOffset = start; chunkOffset + 12 <= buf.length; chunkOffset++) {
-    const chunkLen = buf.readUInt32LE(chunkOffset);
-    if (chunkLen < 4) continue;
-
-    const chunkEnd = chunkOffset + chunkLen;
-    if (chunkEnd + 4 > buf.length) continue;
-    if (buf.readUInt32LE(chunkEnd) !== FORMAT_B_TIMELINE_SENTINEL) continue;
-
-    const tracks = parseFormatBTimelineChunk(buf, chunkOffset, chunkEnd);
-    if (tracks) return tracks;
-  }
-
-  return null;
-}
-
-function parseFormatBTimelineChunk(buf: MixBuffer, chunkOffset: number, chunkEnd: number): TrackPlacement[] | null {
-  let offset = chunkOffset + 4;
-  const tracks: TrackPlacement[] = [];
-
-  for (let expectedChannel = 1; expectedChannel <= FORMAT_B_CHANNEL_COUNT; expectedChannel++) {
-    if (offset + 5 > chunkEnd) return null;
-
-    const channelId = buf.at(offset);
-    offset += 1;
-    if (channelId !== expectedChannel) return null;
-
-    const eventCount = buf.readUInt32LE(offset);
-    offset += 4;
-    if (eventCount > FORMAT_B_MAX_EVENTS_PER_CHANNEL) return null;
-
-    for (let index = 0; index < eventCount; index++) {
-      if (offset + 7 > chunkEnd) return null;
-
-      const laneClass = buf.at(offset);
-      offset += 1;
-
-      // Gen 2 products are mostly laneClass=0 on channels 1..16, but archived
-      // Dance eJay 2 mixes also carry laneClass=3 records in core channels.
-      // Channel 17 can switch to an opaque extension dialect (often laneClass=2)
-      // whose record width is not yet fully mapped; keep the recovered timeline
-      // from channels 1..16 rather than discarding the entire chunk.
-      if (channelId < FORMAT_B_CHANNEL_COUNT && !FORMAT_B_PRIMARY_LANE_CLASSES.has(laneClass)) {
-        return null;
-      }
-      if (channelId === FORMAT_B_CHANNEL_COUNT && laneClass !== 0) {
-        return tracks.length > 0 ? tracks : null;
-      }
-
-      const posRaw = buf.readInt32LE(offset);
-      offset += 4;
-
-      const sampleKey = buf.readUInt16LE(offset);
-      offset += 2;
-
-      if (posRaw >= 0) {
-        if (offset + FORMAT_B_LONG_RECORD_BYTES > chunkEnd) return null;
-        offset += FORMAT_B_LONG_RECORD_BYTES;
-      }
-
-      const decodedPos = posRaw < 0 ? (-posRaw - 1) : posRaw;
-      if (!Number.isFinite(decodedPos) || decodedPos < 0) return null;
-
-      tracks.push({
-        beat: decodedPos / FORMAT_B_POSITION_SCALE,
-        channel: channelId - 1,
-        sampleRef: {
-          rawId: sampleKey,
-          internalName: null,
-          displayName: null,
-          resolvedPath: null,
-          dataLength: null,
-        },
-      });
-    }
-  }
-
-  if (offset !== chunkEnd) return null;
-  return tracks;
 }
 
 function findCatalogStart(buf: MixBuffer, searchFrom: number): number {
@@ -681,6 +602,110 @@ function findCatalogStart(buf: MixBuffer, searchFrom: number): number {
     return i;
   }
   return buf.length;
+}
+
+interface FormatBTimelineParse {
+  tracks: TrackPlacement[];
+  maxBeat: number | null;
+}
+
+function parseFormatBTimeline(buf: MixBuffer, startOffset: number): FormatBTimelineParse | null {
+  const markerOffset = findFormatBTimelineMarkerOffset(buf, startOffset);
+  if (markerOffset === null) return null;
+
+  const chunkStart = findFormatBTimelineChunkStart(buf, startOffset, markerOffset);
+  if (chunkStart === null) return null;
+
+  const chunkLength = buf.readUInt32LE(chunkStart);
+  const payloadEnd = chunkStart + chunkLength;
+  if (payloadEnd !== markerOffset) return null;
+
+  const tracks: TrackPlacement[] = [];
+  let maxBeat: number | null = null;
+  let offset = chunkStart + 4;
+
+  for (let expectedChannel = 1; expectedChannel <= FORMAT_B_TIMELINE_CHANNEL_COUNT; expectedChannel++) {
+    if (offset + 5 > payloadEnd) return null;
+
+    const channelId = buf.at(offset); offset += 1;
+    if (channelId !== expectedChannel) return null;
+
+    const eventCount = buf.readUInt32LE(offset); offset += 4;
+    if (eventCount > 100_000) return null;
+
+    const laneIndex = channelId - 1;
+
+    for (let eventIndex = 0; eventIndex < eventCount; eventIndex++) {
+      if (offset + 7 > payloadEnd) return null;
+
+      const laneClass = buf.at(offset); offset += 1;
+      const posRaw = buf.readInt32LE(offset); offset += 4;
+      const sampleKey = buf.readUInt16LE(offset); offset += 2;
+
+      if (laneIndex <= 15) {
+        if (laneClass !== 0 && laneClass !== 3) return null;
+      } else if (laneClass !== 0) {
+        return { tracks, maxBeat };
+      }
+
+      const decodedPos = posRaw < 0 ? (-posRaw - 1) : posRaw;
+      const beat = decodedPos / FORMAT_B_TIMELINE_POS_DIVISOR;
+      if (Number.isFinite(beat) && beat >= 0) {
+        maxBeat = maxBeat === null ? beat : Math.max(maxBeat, beat);
+      }
+
+      tracks.push({
+        beat,
+        channel: laneIndex,
+        sampleRef: {
+          rawId: sampleKey,
+          internalName: null,
+          displayName: null,
+          resolvedPath: null,
+          dataLength: null,
+        },
+      });
+
+      if (posRaw >= 0) {
+        if (offset + 10 > payloadEnd) return null;
+        offset += 10;
+      }
+    }
+  }
+
+  if (offset !== payloadEnd) return null;
+  return { tracks, maxBeat };
+}
+
+function findFormatBTimelineMarkerOffset(buf: MixBuffer, startOffset: number): number | null {
+  for (let offset = buf.length - 4; offset >= Math.max(0, startOffset); offset--) {
+    if (buf.readUInt32LE(offset) === FORMAT_B_TIMELINE_SENTINEL) {
+      return offset;
+    }
+  }
+  return null;
+}
+
+function findFormatBTimelineChunkStart(buf: MixBuffer, startOffset: number, markerOffset: number): number | null {
+  for (let offset = markerOffset - 4; offset >= Math.max(0, startOffset); offset--) {
+    const chunkLength = buf.readUInt32LE(offset);
+    if (chunkLength < FORMAT_B_TIMELINE_MIN_CHUNK_LEN) continue;
+    if (offset + chunkLength === markerOffset) {
+      return offset;
+    }
+  }
+  return null;
+}
+
+function formatBLoopBeatsFromMaxBeat(maxBeat: number | null): number | null {
+  if (maxBeat === null || !Number.isFinite(maxBeat) || maxBeat < 0) {
+    return null;
+  }
+  const hasFractionalTail = Math.abs(maxBeat - Math.round(maxBeat)) > 1e-6;
+  if (!hasFractionalTail) {
+    return null;
+  }
+  return Math.max(1, Math.ceil(maxBeat + 1));
 }
 
 function parseFormatBTracks(buf: MixBuffer, startOffset: number): TrackPlacement[] {

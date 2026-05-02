@@ -861,6 +861,27 @@ describe("extractIndividualPxds", () => {
     rmSync(tmpDir, { recursive: true });
   });
 
+  it("uses 96 BPM for HipHop eJay 1 and 90 BPM for reconverted ! files", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "ext-"));
+    const srcDir = join(tmpDir, "HipHop eJay 1");
+    const outDir = join(tmpDir, "out");
+    const bankDir = join(srcDir, "h", "PXD", "AA");
+    mkdirSync(bankDir, { recursive: true });
+
+    writeFileSync(join(bankDir, "h1bs001.pxd"), makePxd("A", 44100, new Array(44100).fill(0x80)));
+    writeFileSync(join(bankDir, "h1bs001!.pxd"), makePxd("A", 44100, new Array(44100).fill(0x80)));
+
+    const catalog = extractIndividualPxds(srcDir, outDir, false);
+    const original = catalog.find((entry) => entry.source === "AA/h1bs001.pxd");
+    const reconverted = catalog.find((entry) => entry.source === "AA/h1bs001!.pxd");
+
+    expect(original?.bpm).toBe(96);
+    expect(original?.beats).toBe(Math.round(96 / 60));
+    expect(reconverted?.bpm).toBe(90);
+    expect(reconverted?.beats).toBe(Math.round(90 / 60));
+    rmSync(tmpDir, { recursive: true });
+  });
+
   it("includes category and detail from metadata", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "ext-"));
     const srcDir = join(tmpDir, "src");

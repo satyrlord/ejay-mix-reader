@@ -68,8 +68,13 @@ export const ARCHIVE_MIX_DIRS: Record<string, { archiveDir: string; archiveDirAl
   Dance_eJay3:     { archiveDir: "Dance_eJay3",     archiveDirAliases: ["Dance eJay 3"], mixSubdir: "MIX" },
   Dance_eJay4:     { archiveDir: "Dance_eJay4",     archiveDirAliases: ["Dance eJay 4"], mixSubdir: "Mix" },
   Dance_SuperPack: { archiveDir: "Dance_SuperPack", archiveDirAliases: ["Dance SuperPack"], mixSubdir: "MIX" },
-  HipHop_eJay1:    { archiveDir: "HipHop 1",        archiveDirAliases: ["HipHop eJay 1"], mixSubdir: "MIX" },
-  HipHop_eJay2:    { archiveDir: "HipHop 2",        archiveDirAliases: ["HipHop eJay 2"], mixSubdir: "MIX" },
+  HipHop_eJay1:    {
+    archiveDir: "HipHop 1",
+    archiveDirAliases: ["HipHop eJay 1", "HipHop eJay 1/h"],
+    mixSubdir: "MIX",
+    mixSubdirAliases: ["h/MIX"],
+  },
+  HipHop_eJay2:    { archiveDir: "HipHop eJay 2",   archiveDirAliases: ["HipHop 2"], mixSubdir: "MIX" },
   HipHop_eJay3:    { archiveDir: "HipHop 3",        archiveDirAliases: ["HipHop eJay 3"], mixSubdir: "MIX" },
   HipHop_eJay4:    { archiveDir: "HipHop 4",        archiveDirAliases: ["HipHop eJay 4"], mixSubdir: "MIX" },
   House_eJay:      { archiveDir: "House_eJay",      archiveDirAliases: ["House eJay"], mixSubdir: "Mix" },
@@ -631,6 +636,10 @@ const GEN2_INF_PATHS: Record<string, string[]> = {
     "Dance eJay 4/eJay/PXD/DANCE40.inf",
   ],
   HipHop_eJay2: [
+    "HipHop eJay 2/PXD/HipHop20.inf",
+    "HipHop eJay 2/PXD/hiphop20.inf",
+    "HipHop 2/PXD/HipHop20.inf",
+    "HipHop 2/PXD/hiphop20.inf",
     "HipHop 2/eJay/pxd/HipHop20.inf",
     "HipHop eJay 2/eJay/pxd/HipHop20.inf",
   ],
@@ -722,6 +731,8 @@ const RAVE_PXD_PATH_CANDIDATES = [
 
 const HIPHOP1_PXD_ID_OFFSET = 731;
 const HIPHOP1_PXD_PATH_CANDIDATES = [
+  "HipHop eJay 1/h/eJay/eJay/PXD",
+  "HipHop 1/h/eJay/eJay/PXD",
   "HipHop eJay 1/HIPHOP/EJAY/PXD",
   "HipHop 1/HIPHOP/EJAY/PXD",
   "GenerationPack1/HipHop/HIPHOP/EJAY/PXD",

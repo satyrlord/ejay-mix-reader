@@ -439,7 +439,7 @@ export function resolveProductPaths(
   const productRootAliases: Record<string, string[]> = {
     Dance_eJay1: ["Dance eJay 1"],
     Dance_SuperPack: ["Dance SuperPack"],
-    HipHop_eJay1: ["HipHop 1", "HipHop eJay 1"],
+    HipHop_eJay1: ["HipHop 1", "HipHop eJay 1", "HipHop eJay 1/h"],
     Rave: ["Rave eJay"],
   };
 
@@ -503,6 +503,21 @@ export function resolveProductPaths(
         if (existsSync(modernKit)) return { ...kit, path: modernKit };
         return kit;
       });
+    }
+  }
+
+  // HipHop eJay 1 appears in both classic HIPHOP/EJAY and newer h/eJay/eJay
+  // archive trees. Prefer configured layout, then fallback to whichever exists.
+  if (product === "HipHop_eJay1" && !existsSync(maxPath)) {
+    const maxCandidates = [
+      resolve(archiveRoot, "HipHop eJay 1/h/eJay/eJay/MAX"),
+      resolve(archiveRoot, "HipHop 1/h/eJay/eJay/MAX"),
+      resolve(archiveRoot, "HipHop eJay 1/HIPHOP/EJAY/MAX"),
+      resolve(archiveRoot, "HipHop 1/HIPHOP/EJAY/MAX"),
+    ];
+    const firstExisting = maxCandidates.find((candidate) => existsSync(candidate));
+    if (firstExisting) {
+      maxPath = firstExisting;
     }
   }
 

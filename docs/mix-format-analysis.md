@@ -841,6 +841,74 @@ the same compact-record recovery strategy as Format C:
 
 Guarded fallback remains in place for malformed records.
 
+Status update (May 2026 recheck): current parser output needs a follow-up
+verification pass for archived Format D mixes. A direct rerun of
+`scripts/mix-format-cd-audit.ts` against `HipHop_eJay4` and `House_eJay`
+reported zero recovered `tracks[]` (trackCount 0 for both products), which
+does not match the older six-product audit snapshot in `logs/format-cd/`.
+Treat this as a parser-regression or stale-audit discrepancy until re-audited.
+
+---
+
+## Gen B/C/D Pan and Event-Edit Metadata Investigation (May 2026)
+
+Question investigated: do newer MIX generations store lane panning metadata
+and per-sample event-edit metadata (trim/cut and event-level volume)?
+
+### Executive Findings
+
+| Generation | Lane pan metadata | Volume metadata | Per-event trim/cut metadata |
+|------------|-------------------|-----------------|-----------------------------|
+| B | Not confirmed | Master/timeline volume-like data only; no confirmed per-event gain field | Not confirmed |
+| C | No explicit lane pan keys found | Channel mixer volume keys (`BOOU*`) are present | Not confirmed |
+| D | Confirmed (`MixPan*`, `DrumPan*`) | Confirmed at mixer/pad level (`MixVolume*`, `DrumVolume*`) | Not confirmed |
+
+### Binary String-Scan Evidence
+
+File-level token scans across archived MIX folders produced:
+
+- Gen B (`Dance eJay 2`, `Techno eJay`, `HipHop eJay 2`):
+  `MixPan=0`, `MixVolume=0`, `DrumPan=0`, `DrumVolume=0`, `BOOU=0`,
+  `DrumEQ=0`.
+- Gen C only (`Dance 3/4`, `HipHop 3`, `Techno 3`, `Xtreme`):
+  `MixPan=0`, `MixVolume=0`, `DrumPan=0`, `DrumVolume=0`, `BOOU=68`,
+  `DrumEQ=62`.
+- Gen D only (`HipHop 4`, `House`):
+  `MixPan=29`, `MixVolume=29`, `DrumPan=29`, `DrumVolume=29`, `BOOU=0`,
+  `DrumEQ=29`.
+
+Trim/cut-like key scan (`Trim|Cut|Crop|Fade|Attack|Release|StartPos|EndPos|
+SampleStart|SampleEnd|Offset|Length`) found 0 named key matches in both Gen C
+and Gen D mixer-key text blocks.
+
+### Parser and Record-Layout Evidence
+
+- Format B timeline parser consumes `laneClass`, `posRaw`, and `sampleKey`, then
+  skips an additional 10 opaque bytes for one record branch. Those 10 bytes are
+  not currently decoded into trim/pan/gain semantics.
+- Format B legacy-record histogram (`beat`-adjacent 16-bit "flags" field):
+  440 records, only two values observed (`0` and `65535`), which looks like a
+  coarse flag, not rich event-automation metadata.
+- Format C compact records (`gap=10`) were profiled across archive products:
+  1004 records, 14 unique values in the `pathStart-8` uint16 slot, dominated by
+  `128`, `127`, and `0`. This may be state/flags, but is not yet mapped to a
+  confirmed per-event volume or trim unit.
+- Format C big records (`gap=40`) expose deterministic fields
+  (`dataLen`, `zeitpos`, `Spur`) plus an 8-byte state block and one mystery
+  uint16; semantics beyond timeline placement remain unresolved.
+- Format D records still carry rich mixer/drum-machine key-value text blocks
+  (`MixPan*`, `MixVolume*`, `DrumPan*`, `DrumVolume*`), but current parser
+  output for archived House/HipHop4 files requires revalidation for
+  placement-level extraction as noted above.
+
+### Practical Interpretation
+
+- If the goal is lane-level pan support: available in Format D; not explicit in
+  Formats B/C (C relies on BOOU dual-volume/balance-style controls).
+- If the goal is per-event trim/cut and per-event event-volume editing:
+  currently unproven in B/C/D by named fields or stable decoded record slots.
+  Additional byte-level reverse-engineering is required for a definitive map.
+
 ---
 
 ## Sample Reference Resolution

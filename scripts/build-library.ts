@@ -146,17 +146,37 @@ export const PRODUCTS: readonly ProductSpec[] = [
     id: "HipHop_eJay1",
     label: "HipHop eJay 1",
     archivePath: join("HipHop 1"),
-    archivePathAliases: [join("HipHop eJay 1"), join("HipHop 1", "HIPHOP"), join("HipHop eJay 1", "HIPHOP")],
+    archivePathAliases: [
+      join("HipHop eJay 1"),
+      join("HipHop eJay 1", "h"),
+      join("HipHop eJay 1", "h", "PXD"),
+      join("HipHop eJay 1", "Special"),
+      join("HipHop 1", "HIPHOP"),
+      join("HipHop eJay 1", "HIPHOP"),
+    ],
     parserSource: join("archive", "HipHop 1"),
-    parserSourceAliases: [join("archive", "HipHop eJay 1"), join("archive", "HipHop 1", "HIPHOP"), join("archive", "HipHop eJay 1", "HIPHOP")],
+    parserSourceAliases: [
+      join("archive", "HipHop eJay 1"),
+      join("archive", "HipHop eJay 1", "h"),
+      join("archive", "HipHop 1", "HIPHOP"),
+      join("archive", "HipHop eJay 1", "HIPHOP"),
+    ],
   },
   {
     id: "HipHop_eJay2",
     label: "HipHop eJay 2",
-    archivePath: join("HipHop 2", "eJay", "pxd", "HipHop20"),
-    archivePathAliases: [join("HipHop eJay 2", "eJay", "pxd", "hiphop20")],
-    parserSource: join("archive", "HipHop 2", "eJay", "pxd", "HipHop20"),
-    parserSourceAliases: [join("archive", "HipHop eJay 2", "eJay", "pxd", "hiphop20")],
+    archivePath: join("HipHop eJay 2", "PXD", "HipHop20"),
+    archivePathAliases: [
+      join("HipHop eJay 2", "eJay", "pxd", "hiphop20"),
+      join("HipHop 2", "PXD", "HipHop20"),
+      join("HipHop 2", "eJay", "pxd", "HipHop20"),
+    ],
+    parserSource: join("archive", "HipHop eJay 2", "PXD", "HipHop20"),
+    parserSourceAliases: [
+      join("archive", "HipHop eJay 2", "eJay", "pxd", "hiphop20"),
+      join("archive", "HipHop 2", "PXD", "HipHop20"),
+      join("archive", "HipHop 2", "eJay", "pxd", "HipHop20"),
+    ],
   },
   {
     id: "HipHop_eJay3",
@@ -194,9 +214,9 @@ export const PRODUCTS: readonly ProductSpec[] = [
     id: "Techno_eJay",
     label: "Techno eJay",
     archivePath: join("TECHNO_EJAY", "EJAY", "PXD", "RAVE20"),
-    archivePathAliases: [join("Techno eJay 2", "eJay", "PXD", "rave20")],
+    archivePathAliases: [join("Techno eJay 2", "eJay", "PXD", "rave20"), join("Techno eJay", "eJay", "PXD", "rave20")],
     parserSource: join("archive", "TECHNO_EJAY", "EJAY", "PXD", "RAVE20"),
-    parserSourceAliases: [join("archive", "Techno eJay 2", "eJay", "PXD", "rave20")],
+    parserSourceAliases: [join("archive", "Techno eJay 2", "eJay", "PXD", "rave20"), join("archive", "Techno eJay", "eJay", "PXD", "rave20")],
   },
   {
     id: "Techno_eJay3",
@@ -263,6 +283,20 @@ function promoteNormalized(): void {
   if (!existsSync(NORMALIZED_DIR)) return;
   console.log("\n  > Promoting output/_normalized/ → output/");
   if (DRY_RUN) return;
+
+  // Replace category roots and metadata files in place so stale files do not survive rebuilds.
+  for (const entry of readdirSync(NORMALIZED_DIR, { withFileTypes: true })) {
+    const targetPath = join(OUTPUT_DIR, entry.name);
+    if (!existsSync(targetPath)) continue;
+
+    if (entry.isDirectory()) {
+      rmSync(targetPath, { recursive: true, force: true });
+      continue;
+    }
+
+    rmSync(targetPath, { force: true });
+  }
+
   cpSync(NORMALIZED_DIR, OUTPUT_DIR, { recursive: true, force: true });
   rmSync(NORMALIZED_DIR, { recursive: true, force: true });
 }

@@ -43,6 +43,10 @@ const PRODUCT_BPM: Record<string, number> = {
   generationpack1_dance: 140,
   generationpack1_rave: 180,
   generationpack1_hiphop: 90,
+  hiphop_ejay1: 96,
+  "hiphop ejay 1": 96,
+  hiphop_1: 96,
+  "hiphop 1": 96,
   hiphop_2: 90,
   hiphop_3: 90,
   hiphop_4: 90,
@@ -421,6 +425,22 @@ interface ArchivePart {
   data: Buffer;
 }
 
+const HIPHOP1_BASE_BPM = 96;
+const HIPHOP1_RECONVERTED_BPM = 90;
+
+function isHipHop1Source(pathHint: string): boolean {
+  const normalized = pathHint.replace(/\\/g, "/").toLowerCase();
+  return normalized.includes("hiphop ejay 1") || normalized.includes("hiphop 1");
+}
+
+function inferSampleBpm(pathHint: string, relPath: string, stem: string, fallbackBpm: number): number {
+  if (!isHipHop1Source(pathHint)) return fallbackBpm;
+  if (stem.endsWith("!") || /!\.pxd$/i.test(relPath)) {
+    return HIPHOP1_RECONVERTED_BPM;
+  }
+  return HIPHOP1_BASE_BPM;
+}
+
 function loadArchiveParts(archivePath: string): ArchivePart[] {
   const parts: ArchivePart[] = [{ path: archivePath, data: readFileSync(archivePath) }];
 
@@ -479,6 +499,7 @@ export interface CatalogEntry {
   detail?: string;
   duration_sec?: number;
   beats?: number;
+  bpm?: number;
   decoded_size?: number;
   sample_rate?: number;
   bit_depth?: number;
@@ -516,6 +537,7 @@ const SOURCE_WRAPPER_DIRS = new Set<string>([
   "hiphop",
   "pxd",
   "ejay",
+  "h",
 ]);
 
 function normalizeSourcePath(relPath: string): string {
@@ -579,7 +601,7 @@ export function extractIndividualPxds(
 ): CatalogEntry[] {
   const catalog: CatalogEntry[] = [];
   const source = resolve(sourceDir);
-  const bpm = inferProductBpm(source);
+  const defaultBpm = inferProductBpm(source);
 
   const pxdFiles = globFiles(source, ".pxd");
   // Deduplicate on case-insensitive systems
@@ -610,6 +632,7 @@ export function extractIndividualPxds(
     const relPath = normalizeSourcePath(relative(source, pxdPath));
     const bank = inferBank(relPath);
     const stem = basename(pxdPath, extname(pxdPath));
+    const sampleBpm = inferSampleBpm(source, relPath, stem, defaultBpm);
 
     // Check for plain WAV
     if (data.subarray(0, 4).equals(WAV_MAGIC)) {
@@ -634,7 +657,8 @@ export function extractIndividualPxds(
         entry.bit_depth = info.bitDepth;
         entry.decoded_size = info.dataSize;
         entry.duration_sec = Math.round(info.duration * 10000) / 10000;
-        entry.beats = beatsFromDuration(info.duration, bpm);
+        entry.beats = beatsFromDuration(info.duration, sampleBpm);
+        entry.bpm = sampleBpm;
       } catch {
         // WAV header unreadable — leave audio fields unpopulated
       }
@@ -666,7 +690,7 @@ export function extractIndividualPxds(
     decodedCount++;
 
     const durationSec = decodedSize / SAMPLE_RATE;
-    const beats = beatsFromDuration(durationSec, bpm);
+    const beats = beatsFromDuration(durationSec, sampleBpm);
     const bitDepth = use16bit ? 16 : 8;
 
     const entry: CatalogEntry = {
@@ -676,6 +700,7 @@ export function extractIndividualPxds(
       alias: meta.alias ?? stem,
       duration_sec: Math.round(durationSec * 10000) / 10000,
       beats,
+      bpm: sampleBpm,
       decoded_size: decodedSize,
       sample_rate: SAMPLE_RATE,
       bit_depth: bitDepth,
@@ -796,6 +821,7 @@ export function extractPackedArchive(
       category,
       duration_sec: Math.round(durationSec * 10000) / 10000,
       beats,
+      bpm,
       decoded_size: decodedSize,
       sample_rate: SAMPLE_RATE,
       bit_depth: bitDepth,
@@ -1115,6 +1141,7 @@ function main(): void {
         alias: meta.alias ?? basename(source, extname(source)),
         duration_sec: Math.round((result.decodedSize / SAMPLE_RATE) * 10000) / 10000,
         beats: beatsFromDuration(result.decodedSize / SAMPLE_RATE, sourceBpm),
+        bpm: sourceBpm,
         decoded_size: result.decodedSize,
         sample_rate: SAMPLE_RATE,
         bit_depth: bitDepth,
