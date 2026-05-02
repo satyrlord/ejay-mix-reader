@@ -152,6 +152,7 @@ export const PRODUCT_FALLBACKS: Record<string, string[]> = {
   GenerationPack1_Rave: ["Rave"],
   GenerationPack1_HipHop: ["HipHop_eJay2", "HipHop_eJay3"],
   HipHop_eJay1: ["GenerationPack1_HipHop", "HipHop_eJay2", "HipHop_eJay3"],
+  HipHop_eJay2: ["Dance_eJay2", "House_eJay"],
   HipHop_eJay3: ["Dance_eJay3"],
   Techno_eJay: ["Dance_eJay2", "House_eJay"],
   Techno_eJay3: ["Dance_eJay3"],

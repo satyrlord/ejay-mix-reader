@@ -1,4 +1,5 @@
 @import "tailwindcss";
+/* Import order is intentional: tokens -> structure -> overlays -> responsive -> themes. */
 @import "./styles/tokens/foundation.css";
 @import "./styles/tokens/browser.css";
 @import "./styles/tokens/category-map.css";

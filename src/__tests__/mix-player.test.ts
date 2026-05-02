@@ -630,6 +630,75 @@ describe("buildMixPlaybackPlan", () => {
     expect(plan.unresolvedEvents).toBe(0);
   });
 
+  it("falls back from HipHop eJay 2 to Dance eJay 2 and House sample-id maps", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      HipHop_eJay2: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {},
+        byGen1Id: {},
+      },
+      Dance_eJay2: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {
+          "1015": "Loop/dance-1015.wav",
+        },
+        byGen1Id: {},
+      },
+      House_eJay: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {
+          "3930": "Loop/house-3930.wav",
+        },
+        byGen1Id: {},
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      product: "HipHop_eJay2",
+      catalogs: [{ name: "HipHop eJay 2.0", idRangeStart: 0, idRangeEnd: 5000 }],
+      tracks: [
+        {
+          beat: 0,
+          channel: 0,
+          sampleRef: {
+            rawId: 1015,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+        {
+          beat: 4,
+          channel: 1,
+          sampleRef: {
+            rawId: 3930,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: null,
+          },
+        },
+      ],
+    }), sampleIndex);
+
+    expect(plan.events.map((event) => event.audioUrl)).toEqual([
+      "output/Loop/dance-1015.wav",
+      "output/Loop/house-3930.wav",
+    ]);
+    expect(plan.resolvedEvents).toBe(2);
+    expect(plan.unresolvedEvents).toBe(0);
+  });
+
   it("normalizes invalid beats and channels and keeps empty indexes unresolved", () => {
     const plan = buildMixPlaybackPlan(makeMix({
       product: "Custom_Product",

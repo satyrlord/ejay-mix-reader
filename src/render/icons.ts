@@ -210,3 +210,46 @@ export function createSequencerStopIcon(): SVGSVGElement {
     ],
   });
 }
+
+export function createLaneVisibilityIcon(showEmptyLanes: boolean): SVGSVGElement {
+  const elements: SvgIconElementSpec[] = [
+    {
+      tag: "path",
+      attrs: {
+        d: "M1.5 8s2.25-3.25 6.5-3.25S14.5 8 14.5 8s-2.25 3.25-6.5 3.25S1.5 8 1.5 8z",
+        stroke: "currentColor",
+        "stroke-width": "1.35",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+      },
+    },
+    {
+      tag: "circle",
+      attrs: {
+        cx: "8",
+        cy: "8",
+        r: "1.9",
+        stroke: "currentColor",
+        "stroke-width": "1.35",
+      },
+    },
+  ];
+
+  if (!showEmptyLanes) {
+    elements.push({
+      tag: "path",
+      attrs: {
+        d: "M3 13 13 3",
+        stroke: "currentColor",
+        "stroke-width": "1.5",
+        "stroke-linecap": "round",
+      },
+    });
+  }
+
+  return createSvgIcon({
+    className: "seq-lane-visibility-icon",
+    viewBox: "0 0 16 16",
+    elements,
+  });
+}

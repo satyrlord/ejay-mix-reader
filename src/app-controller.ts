@@ -46,6 +46,7 @@ import {
 } from "./mix-playback-controller.js";
 import { calcProgressInterval, Player } from "./player.js";
 import {
+  createLaneVisibilityIcon,
   createSequencerPauseIcon,
   createSequencerPlayIcon,
   renderCategorySidebar,
@@ -115,6 +116,9 @@ const MIX_PLAYHEAD_AUTO_SCROLL_TARGET_RATIO = 0.72;
 const MIX_PLAYHEAD_AUTO_SCROLL_TRIGGER_RATIO = 0.88;
 const MIX_GRID_MAJOR_EVERY_BEATS = 8;
 const SEQUENCER_EVENT_CLICK_DELAY_MS = 220;
+const MIX_DENSE_LANE_THRESHOLD = 16;
+const MIX_DENSE_LANE_MIN_HEIGHT_PX = 8;
+const MIX_DENSE_EVENT_MIN_HEIGHT_PX = 6;
 const MIX_PLAYBACK_DRIFT_GRACE_MS = 350;
 const MIX_GRID_DEFAULT_EDITOR_RATIO = 0.58;
 const SHELL_EDITOR_HEIGHT_CSS_VAR = "--shell-editor-height";
@@ -168,6 +172,7 @@ export function createAppController(app: HTMLElement): () => void {
   let mixPlaybackStartedAtMs: number | null = null;
   let mixTransportPlaying = false;
   let mixPlayheadBeat = 0;
+  let showEmptyMixLanes = false;
   let mixAutoScrollSuppressedByUser = false;
   // Monotonic token used to cancel stale async decode/play attempts.
   let mixPlaybackRequestId = 0;
@@ -391,6 +396,18 @@ export function createAppController(app: HTMLElement): () => void {
 
   function isSpaceShortcutKey(event: KeyboardEvent): boolean {
     return event.code === "Space" || event.key === " " || event.key === "Spacebar";
+  }
+
+  function isEmptyLaneShortcutKey(event: KeyboardEvent): boolean {
+    return event.code === "KeyE" || event.key === "e" || event.key === "E";
+  }
+
+  function canToggleEmptyLaneVisibility(plan: MixPlaybackPlan | null): plan is MixPlaybackPlan {
+    return plan !== null && plan.timelineRecovered && plan.loopBeats !== null && plan.events.length > 0;
+  }
+
+  function shouldRenderEmptyMixLanes(plan: MixPlaybackPlan): boolean {
+    return showEmptyMixLanes && canToggleEmptyLaneVisibility(plan);
   }
 
   function currentMixBarStartBeat(): number {
@@ -662,6 +679,15 @@ export function createAppController(app: HTMLElement): () => void {
     ui.canvas.appendChild(placeholder);
   }
 
+  function toggleEmptyLaneVisibility(): void {
+    if (!canToggleEmptyLaneVisibility(activeMixPlan)) return;
+    showEmptyMixLanes = !showEmptyMixLanes;
+    const preservedBeat = mixPlayheadBeat;
+    renderMixPlan(activeMixPlan, { initialBeat: preservedBeat });
+    renderedMixPlan = activeMixPlan;
+    updateMixPlaybackProgress(preservedBeat);
+  }
+
   /* v8 ignore next -- header DOM rendering is covered by higher-level browser tests */
   function syncSequencerHeader(beatCount: number): void {
     const ui = getMixUi();
@@ -674,6 +700,35 @@ export function createAppController(app: HTMLElement): () => void {
 
     const spacer = document.createElement("span");
     spacer.className = "sequencer-header-spacer";
+
+    const laneVisibilityToggle = document.createElement("button");
+    laneVisibilityToggle.type = "button";
+    laneVisibilityToggle.className = "sequencer-empty-lanes-toggle";
+    const activePlan = activeMixPlan;
+    const canToggleLaneVisibility = canToggleEmptyLaneVisibility(activePlan);
+    const showEmptyLanesForCurrentMix = canToggleLaneVisibility && showEmptyMixLanes;
+    laneVisibilityToggle.setAttribute("aria-pressed", String(showEmptyLanesForCurrentMix));
+    const laneVisibilityLabel = canToggleLaneVisibility
+      ? (showEmptyLanesForCurrentMix ? "Hide empty lanes" : "Show empty lanes")
+      : "Empty lanes unavailable for this mix";
+    laneVisibilityToggle.setAttribute("aria-label", laneVisibilityLabel);
+    laneVisibilityToggle.title = laneVisibilityLabel;
+    laneVisibilityToggle.appendChild(createLaneVisibilityIcon(showEmptyLanesForCurrentMix));
+
+    const laneVisibilityText = document.createElement("span");
+    laneVisibilityText.className = "sequencer-empty-lanes-toggle-text";
+    laneVisibilityText.textContent = "Empty lanes";
+    laneVisibilityToggle.appendChild(laneVisibilityText);
+
+    laneVisibilityToggle.disabled = !canToggleLaneVisibility;
+    laneVisibilityToggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!canToggleLaneVisibility) return;
+      toggleEmptyLaneVisibility();
+    });
+
+    spacer.appendChild(laneVisibilityToggle);
     ui.header.appendChild(spacer);
 
     for (let beat = 1; beat <= beatCount; beat++) {
@@ -692,8 +747,12 @@ export function createAppController(app: HTMLElement): () => void {
     }
   }
 
+  interface RenderMixPlanOptions {
+    initialBeat?: number;
+  }
+
   /* v8 ignore next -- timeline DOM rendering is covered by integration tests; remaining misses are defensive UI guards */
-  function renderMixPlan(plan: MixPlaybackPlan): void {
+  function renderMixPlan(plan: MixPlaybackPlan, options?: RenderMixPlanOptions): void {
     const ui = getMixUi();
     /* v8 ignore next -- renderMixPlan only runs after the sequencer shell has mounted */
     if (!ui) return;
@@ -701,9 +760,12 @@ export function createAppController(app: HTMLElement): () => void {
     mixAutoScrollSuppressedByUser = false;
 
     const beatCount = Math.max(1, plan.loopBeats ?? 0);
+    const initialBeat = options?.initialBeat ?? 0;
+    const showEmptyLanesForCurrentMix = shouldRenderEmptyMixLanes(plan);
     syncSequencerHeader(beatCount);
     ui.canvas.replaceChildren();
     ui.canvas.classList.toggle("has-mix", true);
+    ui.scroll.classList.remove("is-dense-lanes");
     ui.canvas.style.setProperty("--mix-grid-label-px", `${MIX_TIMELINE_LABEL_PX}px`);
     ui.canvas.style.setProperty("--mix-grid-beat-step-px", `${MIX_TIMELINE_BEAT_PX}px`);
     ui.canvas.style.setProperty(
@@ -801,7 +863,11 @@ export function createAppController(app: HTMLElement): () => void {
 
     const renderedLaneIds = new Set<string>();
     for (const lane of plan.lanes) {
-      appendLaneRow(lane.id, lane.label, lanes.get(lane.id) ?? []);
+      const laneEvents = lanes.get(lane.id) ?? [];
+      if (!showEmptyLanesForCurrentMix && laneEvents.length === 0) {
+        continue;
+      }
+      appendLaneRow(lane.id, lane.label, laneEvents);
       renderedLaneIds.add(lane.id);
     }
 
@@ -809,13 +875,41 @@ export function createAppController(app: HTMLElement): () => void {
       if (renderedLaneIds.has(channelId)) continue;
       appendLaneRow(channelId, describeMixLane(channelId), events);
     }
-    lanesEl.style.gridTemplateRows = `repeat(${Math.max(1, lanesEl.childElementCount)}, minmax(0, 1fr))`;
+
+    const laneCount = Math.max(1, lanesEl.childElementCount);
+    lanesEl.style.gridTemplateRows = `repeat(${laneCount}, minmax(0, 1fr))`;
+
+    if (laneCount >= MIX_DENSE_LANE_THRESHOLD) {
+      const availableLaneHeightPx = Math.max(
+        1,
+        Math.floor(ui.scroll.clientHeight - ui.header.clientHeight),
+      );
+      const laneHeightPx = Math.max(
+        MIX_DENSE_LANE_MIN_HEIGHT_PX,
+        Math.floor(availableLaneHeightPx / laneCount),
+      );
+      const eventHeightPx = Math.max(MIX_DENSE_EVENT_MIN_HEIGHT_PX, laneHeightPx - 2);
+
+      lanesEl.classList.add("sequencer-lanes--dense");
+      lanesEl.style.setProperty("--sequencer-lane-height-px", `${laneHeightPx}px`);
+      lanesEl.style.setProperty("--sequencer-event-height-px", `${eventHeightPx}px`);
+      // Give the grid a concrete height so 1fr rows compress evenly instead
+      // of expanding to content height and clipping lower lanes.
+      lanesEl.style.height = `${availableLaneHeightPx}px`;
+      ui.scroll.classList.add("is-dense-lanes");
+    } else {
+      lanesEl.classList.remove("sequencer-lanes--dense");
+      lanesEl.style.removeProperty("--sequencer-lane-height-px");
+      lanesEl.style.removeProperty("--sequencer-event-height-px");
+      lanesEl.style.removeProperty("height");
+      ui.scroll.classList.remove("is-dense-lanes");
+    }
 
     const playhead = document.createElement("div");
     playhead.className = "sequencer-playhead";
     timeline.append(lanesEl, playhead);
     ui.canvas.appendChild(timeline);
-    setMixPlayheadBeat(0, false);
+    setMixPlayheadBeat(initialBeat, false);
   }
 
   function syncMixUi(): void {
@@ -833,6 +927,7 @@ export function createAppController(app: HTMLElement): () => void {
       ui.stopButton.disabled = true;
       mixPlayheadBeat = 0;
       ui.canvas.classList.remove("has-mix");
+      ui.scroll.classList.remove("is-dense-lanes");
       syncSequencerHeader(32);
       setMixPlaceholder("Select a mix file to view its timeline");
       ui.scroll.scrollTo({ left: 0 });
@@ -1252,6 +1347,13 @@ export function createAppController(app: HTMLElement): () => void {
           return;
         }
         void playSelectedMix(0);
+        return;
+      }
+
+      if (isEmptyLaneShortcutKey(event)) {
+        if (!canToggleEmptyLaneVisibility(activeMixPlan)) return;
+        event.preventDefault();
+        toggleEmptyLaneVisibility();
       }
     };
 

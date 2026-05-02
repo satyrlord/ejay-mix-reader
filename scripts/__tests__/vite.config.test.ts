@@ -33,7 +33,10 @@ async function runCloseBundle(plugin: Plugin): Promise<void> {
   const hook = plugin.closeBundle;
   if (!hook) throw new Error("Plugin has no closeBundle hook");
   const fn = typeof hook === "function" ? hook : hook.handler;
-  await fn.call({} as never);
+  // These closeBundle hooks do not depend on plugin context, but keep the
+  // call typed against the hook's declared `this` parameter.
+  const closeBundleContext = {} as ThisParameterType<typeof fn>;
+  await fn.call(closeBundleContext);
 }
 
 afterEach(() => {

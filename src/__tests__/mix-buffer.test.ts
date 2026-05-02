@@ -21,3 +21,19 @@ describe("MixBuffer.toString", () => {
     expect(text[text.length - 1]).toBe("ä");
   });
 });
+
+describe("MixBuffer integer reads", () => {
+  it("reads signed 32-bit little-endian values, including boundaries", () => {
+    const buffer = new MixBuffer(Uint8Array.from([
+      0xff, 0xff, 0xff, 0xff, // -1
+      0x00, 0x00, 0x00, 0x80, // INT32_MIN
+      0xff, 0xff, 0xff, 0x7f, // INT32_MAX
+      0x00, 0x00, 0x00, 0x00, // 0
+    ]));
+
+    expect(buffer.readInt32LE(0)).toBe(-1);
+    expect(buffer.readInt32LE(4)).toBe(-2147483648);
+    expect(buffer.readInt32LE(8)).toBe(2147483647);
+    expect(buffer.readInt32LE(12)).toBe(0);
+  });
+});

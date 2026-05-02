@@ -243,6 +243,8 @@ export function buildSampleMoveMenu(
   menu.appendChild(header);
 
   for (const category of categories) {
+    // Keep empty categories visible so users can move a sample into a newly
+    // created bucket before it has any entries.
     const isCurrent = category.id === currentCategory;
 
     const item = document.createElement("div");

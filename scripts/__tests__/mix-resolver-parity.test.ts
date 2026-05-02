@@ -41,6 +41,11 @@ interface ResolverParityBaseline {
   unresolvedReferencesTop25: UnresolvedReferenceCount[];
 }
 
+function unresolvedTolerance(expectedUnresolved: number): number {
+  // Allow moderate shifts from parser improvements while still flagging large regressions.
+  return Math.max(1, Math.ceil(expectedUnresolved * 0.5));
+}
+
 function buildResolverParityBaseline(): ResolverParityBaseline {
   const metadata = JSON.parse(readFileSync(OUTPUT_METADATA, "utf-8")) as NormalizedMetadata;
   const index = buildResolverIndex({
@@ -117,6 +122,9 @@ describe.skipIf(!hasArchive || !hasOutputMetadata || !hasBaseline)("archive-wide
     expect(actual.totals.tracks).toBeGreaterThanOrEqual(expected.totals.tracks);
     expect(actual.totals.resolved).toBeGreaterThanOrEqual(expected.totals.resolved);
     expect(actual.totals.unresolved).toBeGreaterThanOrEqual(0);
+    expect(actual.totals.unresolved).toBeLessThanOrEqual(
+      expected.totals.unresolved + unresolvedTolerance(expected.totals.unresolved),
+    );
 
     for (const [productId, expectedSummary] of Object.entries(expected.perProduct)) {
       const actualSummary = actual.perProduct[productId];
@@ -126,6 +134,14 @@ describe.skipIf(!hasArchive || !hasOutputMetadata || !hasBaseline)("archive-wide
       expect(actualSummary?.resolved).toBeGreaterThanOrEqual(expectedSummary.resolved);
       expect(actualSummary?.unresolved).toBeGreaterThanOrEqual(0);
       expect(actualSummary?.unresolvedMixes).toBeGreaterThanOrEqual(0);
+      if (expectedSummary.unresolved > 0) {
+        expect(actualSummary?.unresolved).toBeLessThanOrEqual(
+          expectedSummary.unresolved + unresolvedTolerance(expectedSummary.unresolved),
+        );
+      }
+      if (expectedSummary.unresolvedMixes > 0) {
+        expect(actualSummary?.unresolvedMixes).toBeLessThanOrEqual(expectedSummary.unresolvedMixes + 1);
+      }
     }
 
     expect(actual.parseFailures).toEqual(expected.parseFailures);

@@ -328,20 +328,47 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
     expect(mix!.tracks.at(-1)).toMatchObject({ beat: 82, channel: 5, sampleRef: { rawId: 1922 } });
   });
 
-  it("parses Dance eJay 2 STEP.MIX as Format B", () => {
-    const mix = parseFile(resolveMixPath("Dance_eJay2", "STEP.MIX"));
+  it("recovers Dance eJay 2 START.MIX timeline placements from the Gen 2 chunk", () => {
+    const mix = parseFile(resolveMixPath("Dance_eJay2", "START.MIX"));
     expect(mix).not.toBeNull();
     expect(mix!.format).toBe("B");
-    expect(mix!.title).toBe("Duck Dance");
+    expect(mix!.title).toBe("Take me by the Hand");
     expect(mix!.author).toBe("MC Magic");
-    expect(mix!.tracks).toHaveLength(9);
+    expect(mix!.tracks.length).toBeGreaterThan(300);
     expect(mix!.catalogs).toHaveLength(8);
-    expect(mix!.tickerText).toHaveLength(25);
-    expect(mix!.tracks[0]).toMatchObject({
-      beat: -8,
-      channel: 8,
-      sampleRef: { rawId: 1930, internalName: "humn.9", dataLength: 26578 },
-    });
+    const recoveredBeats = mix!.tracks
+      .map((track) => track.beat)
+      .filter((beat): beat is number => typeof beat === "number" && Number.isFinite(beat));
+    expect(recoveredBeats.length).toBeGreaterThan(300);
+    const DANCE2_START_TIMELINE_END_BEAT_EXCLUSIVE = 126;
+    const maxRecoveredBeat = Math.max(...recoveredBeats);
+    expect(maxRecoveredBeat).toBeGreaterThan(DANCE2_START_TIMELINE_END_BEAT_EXCLUSIVE - 2);
+    expect(maxRecoveredBeat).toBeLessThan(DANCE2_START_TIMELINE_END_BEAT_EXCLUSIVE);
+    expect(mix!.tracks.some((track) => track.channel === 0)).toBe(true);
+    expect(mix!.tracks.some((track) => track.channel === 15)).toBe(true);
+    expect(mix!.tracks.every((track) => track.sampleRef.internalName === null)).toBe(true);
+  });
+
+  it("recovers HipHop eJay 2 Start.mix timeline despite channel-17 extension records", () => {
+    const mix = parseFile(resolveMixPath("HipHop_eJay2", "Start.mix"));
+    expect(mix).not.toBeNull();
+    expect(mix!.format).toBe("B");
+    expect(mix!.title).toBe("Hip Hop eJay 2 Demo Mix - BREAK IT DOWN!!!!");
+    expect(mix!.author).toBe("marc");
+    expect(mix!.tracks.length).toBeGreaterThan(250);
+    expect(mix!.catalogs).toHaveLength(4);
+
+    const recoveredBeats = mix!.tracks
+      .map((track) => track.beat)
+      .filter((beat): beat is number => typeof beat === "number" && Number.isFinite(beat));
+    expect(recoveredBeats.length).toBeGreaterThan(250);
+    const HIPHOP2_START_TIMELINE_END_BEAT_EXCLUSIVE = 61;
+    const maxRecoveredBeat = Math.max(...recoveredBeats);
+    expect(maxRecoveredBeat).toBeGreaterThan(HIPHOP2_START_TIMELINE_END_BEAT_EXCLUSIVE - 2);
+    expect(maxRecoveredBeat).toBeLessThan(HIPHOP2_START_TIMELINE_END_BEAT_EXCLUSIVE);
+    expect(mix!.tracks.some((track) => track.channel === 15)).toBe(true);
+    expect(mix!.tracks.some((track) => track.sampleRef.rawId > 1000)).toBe(true);
+    expect(mix!.tracks.every((track) => track.sampleRef.internalName === null)).toBe(true);
   });
 
   it("recovers Techno eJay start.mix timeline placements from the Gen 2 chunk", () => {
@@ -355,8 +382,12 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
       .map((track) => track.beat)
       .filter((beat): beat is number => typeof beat === "number" && Number.isFinite(beat));
     expect(recoveredBeats.length).toBeGreaterThan(400);
-    expect(Math.max(...recoveredBeats)).toBeGreaterThan(131);
-    expect(Math.max(...recoveredBeats)).toBeLessThan(132);
+    const TECHNO_START_TIMELINE_END_BEAT_EXCLUSIVE = 132;
+    const maxRecoveredBeat = Math.max(...recoveredBeats);
+    // Gen 2 timeline positions decode in 1/128-beat units; start.mix should
+    // reach the final bar, so the max recovered beat is expected in [131, 132).
+    expect(maxRecoveredBeat).toBeGreaterThan(TECHNO_START_TIMELINE_END_BEAT_EXCLUSIVE - 1);
+    expect(maxRecoveredBeat).toBeLessThan(TECHNO_START_TIMELINE_END_BEAT_EXCLUSIVE);
     expect(mix!.tracks.some((track) => track.sampleRef.rawId === 14765)).toBe(true);
   });
 

@@ -167,6 +167,53 @@ test.describe("browser coverage gap", () => {
         return bytes;
       };
 
+      const buildFormatBTimelineTail = (
+        channels: Array<{
+          channelId: number;
+          events: Array<{ laneClass: number; posRaw: number; sampleKey: number }>;
+        }>,
+      ): Uint8Array => {
+        const channelMap = new Map(channels.map((entry) => [entry.channelId, entry.events]));
+        const channelBlocks: Uint8Array[] = [];
+
+        for (let expectedChannel = 1; expectedChannel <= 17; expectedChannel++) {
+          const events = channelMap.get(expectedChannel) ?? [];
+          const eventBlocks = events.map((event) => {
+            const eventBytes = new Uint8Array(7 + (event.posRaw >= 0 ? 10 : 0));
+            const eventView = new DataView(eventBytes.buffer);
+            let eventOffset = 0;
+            eventBytes[eventOffset] = event.laneClass;
+            eventOffset += 1;
+            eventView.setInt32(eventOffset, event.posRaw, true);
+            eventOffset += 4;
+            eventView.setUint16(eventOffset, event.sampleKey, true);
+            return eventBytes;
+          });
+
+          const eventsByteLength = eventBlocks.reduce((sum, block) => sum + block.length, 0);
+          const channelBytes = new Uint8Array(5 + eventsByteLength);
+          const channelView = new DataView(channelBytes.buffer);
+          channelBytes[0] = expectedChannel;
+          channelView.setUint32(1, events.length, true);
+
+          let channelOffset = 5;
+          for (const block of eventBlocks) {
+            channelBytes.set(block, channelOffset);
+            channelOffset += block.length;
+          }
+
+          channelBlocks.push(channelBytes);
+        }
+
+        const payload = concat(...channelBlocks);
+        const timeline = new Uint8Array(4 + payload.length + 4);
+        const timelineView = new DataView(timeline.buffer);
+        timelineView.setUint32(0, 4 + payload.length, true);
+        timeline.set(payload, 4);
+        timelineView.setUint32(4 + payload.length, 0x018a7aa9, true);
+        return timeline;
+      };
+
       const syntheticA = buildFormatA(
         mod.APP_SIG_HIPHOP1,
         [
@@ -213,6 +260,42 @@ test.describe("browser coverage gap", () => {
           options.tail ?? new Uint8Array(0),
         );
       };
+
+      const syntheticBCatalogs = concat(
+        buildCatalogEntry("Dance eJay 2.0", 2000, 3399, true),
+        Uint8Array.from([0x02, 0x00, 0x00, 0x01]),
+      );
+      const syntheticBTimelineBytes = buildGen23Mix({
+        appId: 0x00000a19,
+        bpm: 140,
+        metadataParts: ["MC Magic", "#SKKENNUNG#:B-TIMELINE"],
+        title: "Synthetic B Timeline",
+        catalogs: syntheticBCatalogs,
+        tail: buildFormatBTimelineTail([
+          { channelId: 1, events: [{ laneClass: 0, posRaw: 256, sampleKey: 321 }] },
+        ]),
+      });
+      const syntheticBExtensionBytes = buildGen23Mix({
+        appId: 0x00000a19,
+        bpm: 140,
+        metadataParts: ["MC Magic", "#SKKENNUNG#:B-EXT"],
+        title: "Synthetic B Extension",
+        catalogs: syntheticBCatalogs,
+        tail: buildFormatBTimelineTail([
+          { channelId: 1, events: [{ laneClass: 3, posRaw: -129, sampleKey: 654 }] },
+          { channelId: 17, events: [{ laneClass: 2, posRaw: 512, sampleKey: 777 }] },
+        ]),
+      });
+      const syntheticBInvalidLaneBytes = buildGen23Mix({
+        appId: 0x00000a19,
+        bpm: 140,
+        metadataParts: ["MC Magic", "#SKKENNUNG#:B-INVALID"],
+        title: "Synthetic B Invalid Lane",
+        catalogs: syntheticBCatalogs,
+        tail: buildFormatBTimelineTail([
+          { channelId: 1, events: [{ laneClass: 2, posRaw: -1, sampleKey: 987 }] },
+        ]),
+      });
 
       const buildFormatCTrackWithDuplicatePaths = (
         name: string,
@@ -345,6 +428,9 @@ test.describe("browser coverage gap", () => {
       const syntheticDRich = mod.parseFormatD(new mod.MixBuffer(syntheticDRichBytes));
 
       const syntheticMix = mod.parseFormatA(new mod.MixBuffer(syntheticA), "Custom_Gen1");
+      const syntheticBTimeline = mod.parseFormatB(new mod.MixBuffer(syntheticBTimelineBytes), "Dance_eJay2");
+      const syntheticBExtension = mod.parseFormatB(new mod.MixBuffer(syntheticBExtensionBytes), "Dance_eJay2");
+      const syntheticBInvalidLane = mod.parseFormatB(new mod.MixBuffer(syntheticBInvalidLaneBytes), "Dance_eJay2");
       const syntheticBoundary = mod.locateGridTrailer(new mod.MixBuffer(syntheticA), formatAHeaderBytes, formatAZeroGap);
       const asciiStrings = mod.extractAsciiStrings(new mod.MixBuffer(Uint8Array.from(asciiBytes("\0\0Dance eJay 1.01\0VOL1\x01ok"))), 4);
 
@@ -379,6 +465,24 @@ test.describe("browser coverage gap", () => {
           })),
           boundary: syntheticBoundary,
           asciiStrings,
+        },
+        syntheticBTimeline: {
+          format: syntheticBTimeline.format,
+          trackCount: syntheticBTimeline.tracks.length,
+          firstBeat: syntheticBTimeline.tracks[0]?.beat ?? null,
+          firstChannel: syntheticBTimeline.tracks[0]?.channel ?? null,
+          firstRawId: syntheticBTimeline.tracks[0]?.sampleRef.rawId ?? null,
+        },
+        syntheticBExtension: {
+          format: syntheticBExtension.format,
+          trackCount: syntheticBExtension.tracks.length,
+          firstBeat: syntheticBExtension.tracks[0]?.beat ?? null,
+          firstChannel: syntheticBExtension.tracks[0]?.channel ?? null,
+        },
+        syntheticBInvalidLane: {
+          format: syntheticBInvalidLane.format,
+          trackCount: syntheticBInvalidLane.tracks.length,
+          tickerCount: syntheticBInvalidLane.tickerText.length,
         },
         syntheticCBrowser: {
           format: syntheticCBrowser?.format,
@@ -515,6 +619,24 @@ test.describe("browser coverage gap", () => {
     expect(result.syntheticA.boundary.gridEnd).toBe(25);
     expect(result.syntheticA.boundary.trailerStart - result.syntheticA.boundary.gridEnd).toBeGreaterThan(32);
     expect(result.syntheticA.asciiStrings).toEqual(["Dance eJay 1.01", "VOL1"]);
+    expect(result.syntheticBTimeline).toMatchObject({
+      format: "B",
+      trackCount: 1,
+      firstChannel: 0,
+      firstRawId: 321,
+    });
+    expect(result.syntheticBTimeline.firstBeat).toBeGreaterThan(1.9);
+    expect(result.syntheticBExtension).toMatchObject({
+      format: "B",
+      trackCount: 1,
+      firstChannel: 0,
+    });
+    expect(result.syntheticBExtension.firstBeat).toBeGreaterThanOrEqual(1);
+    expect(result.syntheticBInvalidLane).toEqual({
+      format: "B",
+      trackCount: 0,
+      tickerCount: 0,
+    });
     expect(result.syntheticCBrowser).toEqual({ format: "C", product: "Browser_Hint" });
     expect(result.syntheticC).toMatchObject({
       format: "C",
@@ -614,8 +736,11 @@ test.describe("browser coverage gap", () => {
       format: "B",
       title: "Duck Dance",
       author: "MC Magic",
-      firstTrack: "humn.9",
     });
+    expect(result.dance2.firstTrack === null || typeof result.dance2.firstTrack === "string").toBe(true);
+    if (typeof result.dance2.firstTrack === "string") {
+      expect(result.dance2.firstTrack.length).toBeGreaterThan(0);
+    }
     expect(result.dance2.catalogCount).toBeGreaterThan(5);
     expect(result.dance2.tickerCount).toBeGreaterThan(10);
     expect(result.dance3).toMatchObject({

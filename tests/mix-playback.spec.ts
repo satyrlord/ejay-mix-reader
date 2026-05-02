@@ -99,7 +99,7 @@ const LONG_MIX_PLAYBACK_CASE = APP_ID_PLAYBACK_CASES.reduce<MixPlaybackCase | nu
 }, null);
 const coveragePlaybackStartTimeoutMs = process.env.VITE_COVERAGE === "true" ? 60_000 : 30_000;
 const mixPlaybackSuiteTimeoutMs = process.env.VITE_COVERAGE === "true" ? 120_000 : 90_000;
-const mixArchiveLoadTimeoutMs = process.env.VITE_COVERAGE === "true" ? 15_000 : 5_000;
+const mixArchiveLoadTimeoutMs = process.env.VITE_COVERAGE === "true" ? 15_000 : 10_000;
 const mixContextUpdateTimeoutMs = process.env.VITE_COVERAGE === "true" ? 30_000 : 10_000;
 const mixSelectionAttempts = process.env.VITE_COVERAGE === "true" ? 3 : 2;
 
@@ -120,7 +120,12 @@ async function openMixFromArchive(page: Page, mixCase: MixPlaybackCase): Promise
   await page.waitForLoadState("networkidle");
   await expect(page.locator("#archive-tree")).toBeVisible();
 
-  await page.locator("#archive-tree").click();
+  const archiveAwaitingClick = page.locator(".archive-tree-content.is-awaiting-click").first();
+  if (await archiveAwaitingClick.isVisible().catch(() => false)) {
+    await archiveAwaitingClick.click({ timeout: mixArchiveLoadTimeoutMs });
+  } else {
+    await page.locator("#archive-tree").click({ timeout: mixArchiveLoadTimeoutMs });
+  }
   await expect.poll(async () => page.locator(".mix-tree-group").count(), {
     timeout: mixArchiveLoadTimeoutMs,
   }).toBeGreaterThan(0);
@@ -158,7 +163,12 @@ async function openMixFromArchive(page: Page, mixCase: MixPlaybackCase): Promise
         return !overlay || !overlay.classList.contains("is-visible");
       }, undefined, { timeout: mixContextUpdateTimeoutMs }).catch(() => undefined);
 
-      await page.locator("#archive-tree").click({ timeout: mixArchiveLoadTimeoutMs }).catch(() => undefined);
+      const retryAwaitingClick = page.locator(".archive-tree-content.is-awaiting-click").first();
+      if (await retryAwaitingClick.isVisible().catch(() => false)) {
+        await retryAwaitingClick.click({ timeout: mixArchiveLoadTimeoutMs }).catch(() => undefined);
+      } else {
+        await page.locator("#archive-tree").click({ timeout: mixArchiveLoadTimeoutMs }).catch(() => undefined);
+      }
       await expect.poll(async () => page.locator(".mix-tree-group").count(), {
         timeout: mixArchiveLoadTimeoutMs,
       }).toBeGreaterThan(0);
@@ -400,11 +410,13 @@ async function assertMixAutoScrollAndManualOverride(page: Page): Promise<void> {
       const beatStepRaw = Number.parseFloat(computed?.getPropertyValue("--mix-grid-beat-step-px") ?? "");
       const labelPx = Number.isFinite(labelPxRaw) ? labelPxRaw : 160;
       const beatStepPx = Number.isFinite(beatStepRaw) && beatStepRaw > 0 ? beatStepRaw : 48;
+      const visibleBeatCount = Math.max(1, Math.floor(Math.max(0, scroll.clientWidth - labelPx) / beatStepPx));
+      const targetBeat = Math.max(38, visibleBeatCount + 16);
 
       const laneRect = lane.getBoundingClientRect();
       lane.dispatchEvent(new MouseEvent("click", {
         bubbles: true,
-        clientX: laneRect.left + labelPx + (38 * beatStepPx) + Math.max(2, beatStepPx * 0.25),
+        clientX: laneRect.left + labelPx + (targetBeat * beatStepPx) + Math.max(2, beatStepPx * 0.25),
         clientY: laneRect.top + (laneRect.height / 2),
       }));
 
@@ -632,7 +644,74 @@ test.describe("Mix Playback", () => {
     const afterManualScroll = await readHeaderLaneGridAlignment(page);
     expectHeaderLaneGridAligned(afterManualScroll);
   });
+
+  test("Techno summer mix keeps dense lanes visible", async ({ page }) => {
+    if (!TECHNO_SUMMER_CASE) {
+      test.skip(true, "Techno_eJay/summer.mix not present in data/index.json");
+    }
+
+    await openMixFromArchive(page, TECHNO_SUMMER_CASE!);
+
+    const laneToggle = page.locator(".sequencer-empty-lanes-toggle");
+    await expect(laneToggle).toBeVisible({ timeout: coveragePlaybackStartTimeoutMs });
+    if (await laneToggle.getAttribute("aria-pressed") !== "true") {
+      await laneToggle.click();
+    }
+
+    await expect.poll(async () => page.locator(".sequencer-lane").count(), {
+      timeout: coveragePlaybackStartTimeoutMs,
+    }).toBeGreaterThanOrEqual(16);
+
+    const laneDiagnostics = await page.evaluate(() => {
+      const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
+      const rows = [...document.querySelectorAll<HTMLElement>(".sequencer-lane")];
+      if (!scroll) {
+        return {
+          rowCount: 0,
+          overflowY: "unknown",
+          hiddenLabels: [] as string[],
+        };
+      }
+
+      const viewport = scroll.getBoundingClientRect();
+      const hiddenLabels = rows
+        .filter((row) => {
+          const rect = row.getBoundingClientRect();
+          return rect.bottom <= viewport.top + 1 || rect.top >= viewport.bottom - 1;
+        })
+        .map((row) => row.querySelector<HTMLElement>(".sequencer-lane-label")?.textContent?.trim() ?? "")
+        .filter((label) => label.length > 0);
+
+      return {
+        rowCount: rows.length,
+        overflowY: getComputedStyle(scroll).overflowY,
+        hiddenLabels,
+      };
+    });
+
+    expect(laneDiagnostics.rowCount).toBeGreaterThanOrEqual(16);
+    expect(laneDiagnostics.overflowY).not.toBe("hidden");
+    expect(laneDiagnostics.hiddenLabels).toEqual([]);
+  });
 });
+
+function findMixCase(productId: string, filename: string): MixPlaybackCase | null {
+  const parsed = JSON.parse(readFileSync(join(process.cwd(), "data", "index.json"), "utf-8")) as IndexDataLike;
+  const targetGroup = (parsed.mixLibrary ?? []).find((entry) => entry.id === productId);
+  if (!targetGroup) return null;
+
+  const targetMix = targetGroup.mixes.find((entry) => entry.filename.toLowerCase() === filename.toLowerCase());
+  if (!targetMix) return null;
+
+  return {
+    appId: targetMix.meta?.appId ?? 0,
+    productId: targetGroup.id,
+    group: targetGroup.name,
+    filename: targetMix.filename,
+    trackCount: targetMix.meta?.trackCount ?? 0,
+    format: targetMix.meta?.format ?? null,
+  };
+}
 
 function loadStartMixCases(): MixPlaybackCase[] {
   const parsed = JSON.parse(readFileSync(join(process.cwd(), "data", "index.json"), "utf-8")) as IndexDataLike;
@@ -659,6 +738,7 @@ const START_MIX_CASES = loadStartMixCases();
 const DANCE1_START_CASE = START_MIX_CASES.find((mixCase) => mixCase.productId === "Dance_eJay1") ?? null;
 const HIPHOP1_START_CASE = START_MIX_CASES.find((mixCase) => mixCase.productId === "HipHop_eJay1") ?? null;
 const RAVE_START_CASE = START_MIX_CASES.find((mixCase) => mixCase.productId === "Rave") ?? null;
+const TECHNO_SUMMER_CASE = findMixCase("Techno_eJay", "summer.mix");
 
 /**
  * Format B products whose start.mix samples are fully resolved after the

@@ -221,6 +221,7 @@ test.describe("render edge cases", () => {
         __subcatHarness: { renderEditing: (value?: string) => void };
       }).__subcatHarness.renderEditing();
     });
+    await expect(page.locator("#harness-tabs #subcategory-add-input")).toBeFocused();
     await page.locator("#harness-tabs #subcategory-add-input").press("Escape");
     await expect(page.locator("#harness-tabs #subcategory-add-input")).toHaveCount(0);
 
@@ -230,7 +231,14 @@ test.describe("render edge cases", () => {
       }).__subcatHarness.renderEditing();
     });
     await expect(page.locator("#harness-tabs #subcategory-add-input")).toBeVisible();
-    await page.locator("#outside-target").click();
+    await page.locator("#harness-tabs #subcategory-add-input").focus();
+    await page.evaluate(() => {
+      const outside = document.getElementById("outside-target");
+      if (!outside) return;
+      outside.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      outside.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      outside.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
     await expect(page.locator("#harness-tabs #subcategory-add-input")).toHaveCount(0);
 
     const result = await page.evaluate(() => {

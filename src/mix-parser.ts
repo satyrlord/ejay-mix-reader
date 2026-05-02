@@ -117,6 +117,7 @@ const FORMAT_B_CHANNEL_COUNT = 17;
 const FORMAT_B_MAX_EVENTS_PER_CHANNEL = 0x09c5;
 const FORMAT_B_POSITION_SCALE = 128;
 const FORMAT_B_LONG_RECORD_BYTES = 10;
+const FORMAT_B_PRIMARY_LANE_CLASSES = new Set([0, 3]);
 
 function isValidMixBpm(value: number): boolean {
   return Number.isFinite(value) && value > 0 && value <= MAX_REASONABLE_MIX_BPM;
@@ -616,10 +617,17 @@ function parseFormatBTimelineChunk(buf: MixBuffer, chunkOffset: number, chunkEnd
 
       const laneClass = buf.at(offset);
       offset += 1;
-      if (laneClass !== 0) {
-        // Older Gen 2 files may carry extended record variants. Keep the
-        // parser conservative: bail out and let the legacy scanner recover.
+
+      // Gen 2 products are mostly laneClass=0 on channels 1..16, but archived
+      // Dance eJay 2 mixes also carry laneClass=3 records in core channels.
+      // Channel 17 can switch to an opaque extension dialect (often laneClass=2)
+      // whose record width is not yet fully mapped; keep the recovered timeline
+      // from channels 1..16 rather than discarding the entire chunk.
+      if (channelId < FORMAT_B_CHANNEL_COUNT && !FORMAT_B_PRIMARY_LANE_CLASSES.has(laneClass)) {
         return null;
+      }
+      if (channelId === FORMAT_B_CHANNEL_COUNT && laneClass !== 0) {
+        return tracks.length > 0 ? tracks : null;
       }
 
       const posRaw = buf.readInt32LE(offset);

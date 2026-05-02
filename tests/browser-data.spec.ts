@@ -408,32 +408,45 @@ test.describe("data module edge cases", () => {
       const play = mod.createSequencerPlayIcon();
       const pause = mod.createSequencerPauseIcon();
       const stop = mod.createSequencerStopIcon();
+      const laneShown = mod.createLaneVisibilityIcon(true);
+      const laneHidden = mod.createLaneVisibilityIcon(false);
 
       return {
-        tags: [home.tagName, play.tagName, pause.tagName, stop.tagName],
+        tags: [home.tagName, play.tagName, pause.tagName, stop.tagName, laneShown.tagName, laneHidden.tagName],
         classes: [
           home.getAttribute("class"),
           play.getAttribute("class"),
           pause.getAttribute("class"),
           stop.getAttribute("class"),
+          laneShown.getAttribute("class"),
+          laneHidden.getAttribute("class"),
         ],
         viewBoxes: [
           home.getAttribute("viewBox"),
           play.getAttribute("viewBox"),
           pause.getAttribute("viewBox"),
           stop.getAttribute("viewBox"),
+          laneShown.getAttribute("viewBox"),
+          laneHidden.getAttribute("viewBox"),
         ],
+        lanePathCounts: {
+          shown: laneShown.querySelectorAll("path").length,
+          hidden: laneHidden.querySelectorAll("path").length,
+        },
       };
     }, "/src/render/icons.ts");
 
-    expect(result.tags).toEqual(["svg", "svg", "svg", "svg"]);
+    expect(result.tags).toEqual(["svg", "svg", "svg", "svg", "svg", "svg"]);
     expect(result.classes).toEqual([
       "seq-home-icon",
       "seq-play-icon",
       "seq-pause-icon",
       "seq-stop-icon",
+      "seq-lane-visibility-icon",
+      "seq-lane-visibility-icon",
     ]);
-    expect(result.viewBoxes).toEqual(["0 0 16 16", "0 0 16 16", "0 0 16 16", "0 0 16 16"]);
+    expect(result.viewBoxes).toEqual(["0 0 16 16", "0 0 16 16", "0 0 16 16", "0 0 16 16", "0 0 16 16", "0 0 16 16"]);
+    expect(result.lanePathCounts).toEqual({ shown: 1, hidden: 2 });
   });
 
   test("special tabs catch samples from removed user subcategories when the browser supplies the visible tab list", async ({ page }) => {

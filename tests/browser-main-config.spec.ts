@@ -6,7 +6,7 @@ test.describe("main edge cases", () => {
 
   test("beforeunload handler runs without crashing", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator(".category-btn").first()).toBeVisible({ timeout: browserAppStartupTimeoutMs });
+    await expect(page.locator("#transport")).toBeVisible({ timeout: browserAppStartupTimeoutMs });
 
     const result = await page.evaluate(() => {
       try {
@@ -19,6 +19,28 @@ test.describe("main edge cases", () => {
 
     expect(result).toBe("ok");
     await expect(page.locator("#transport")).toBeVisible();
+  });
+
+  test("empty-lane toggle stays inert while no compatible mix is loaded", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("#transport")).toBeVisible({ timeout: browserAppStartupTimeoutMs });
+
+    const toggle = page.locator(".sequencer-empty-lanes-toggle");
+    await expect(toggle).toBeDisabled();
+    await expect(toggle).toHaveAttribute("title", "Empty lanes unavailable for this mix");
+
+    const beforePressed = await toggle.getAttribute("aria-pressed");
+
+    const dispatched = await page.evaluate(() => {
+      const button = document.querySelector<HTMLButtonElement>(".sequencer-empty-lanes-toggle");
+      if (!button) return false;
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return true;
+    });
+
+    expect(dispatched).toBe(true);
+    await page.keyboard.press("e");
+    await expect(toggle).toHaveAttribute("aria-pressed", beforePressed ?? "false");
   });
 
   test("main falls back to default categories when config loading is unavailable and disables subcategory writes", async ({ page }) => {
