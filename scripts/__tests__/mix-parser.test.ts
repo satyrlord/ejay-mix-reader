@@ -361,6 +361,26 @@ describe.skipIf(!hasArchive)("archive spot checks", () => {
     expect(mix!.loopBeats).toBe(133);
   });
 
+  it("parses HipHop eJay 2 Start.mix user-percussion lane extension records", () => {
+    const mix = parseFile(resolveMixPath("HipHop_eJay2", "Start.mix"), "HipHop_eJay2");
+    expect(mix).not.toBeNull();
+    expect(mix!.format).toBe("B");
+    expect(mix!.bpm).toBe(90);
+    expect(mix!.tracks).toHaveLength(302);
+
+    const userPercEvents = mix!.tracks.filter((track) => track.channel === 16);
+    expect(userPercEvents).toHaveLength(30);
+
+    const userPercBeats = userPercEvents
+      .map((track) => track.beat)
+      .filter((beat): beat is number => typeof beat === "number" && Number.isFinite(beat));
+    expect(Math.min(...userPercBeats)).toBe(13);
+    expect(Math.max(...userPercBeats)).toBe(52);
+
+    const sampleIds = new Set(userPercEvents.map((track) => track.sampleRef.rawId));
+    expect(sampleIds).toEqual(new Set([7200, 7201, 7202, 7203, 7204, 7205]));
+  });
+
   it("parses Dance eJay 3 START.MIX as early Gen 3 with alias tracks", () => {
     const mix = parseFile(resolveMixPath("Dance_eJay3", "start.mix"));
     expect(mix).not.toBeNull();

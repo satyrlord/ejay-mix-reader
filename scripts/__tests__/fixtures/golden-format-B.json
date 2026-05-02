@@ -3978,6 +3978,17 @@
         "resolvedPath": null,
         "dataLength": null
       }
+    },
+    {
+      "beat": 16,
+      "channel": 16,
+      "sampleRef": {
+        "rawId": 7239,
+        "internalName": null,
+        "displayName": null,
+        "resolvedPath": null,
+        "dataLength": null
+      }
     }
   ],
   "mixer": {

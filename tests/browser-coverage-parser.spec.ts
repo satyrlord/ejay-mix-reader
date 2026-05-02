@@ -179,7 +179,16 @@ test.describe("browser coverage gap", () => {
         for (let expectedChannel = 1; expectedChannel <= 17; expectedChannel++) {
           const events = channelMap.get(expectedChannel) ?? [];
           const eventBlocks = events.map((event) => {
-            const eventBytes = new Uint8Array(7 + (event.posRaw >= 0 ? 10 : 0));
+            const laneIndex = expectedChannel - 1;
+            let trailingBytes = 0;
+            if (laneIndex <= 15) {
+              trailingBytes = event.posRaw >= 0 ? 10 : 0;
+            } else if (event.laneClass === 2) {
+              trailingBytes = 34;
+            } else {
+              trailingBytes = event.posRaw >= 0 ? 10 : 0;
+            }
+            const eventBytes = new Uint8Array(7 + trailingBytes);
             const eventView = new DataView(eventBytes.buffer);
             let eventOffset = 0;
             eventBytes[eventOffset] = event.laneClass;
@@ -628,7 +637,7 @@ test.describe("browser coverage gap", () => {
     expect(result.syntheticBTimeline.firstBeat).toBeGreaterThan(1.9);
     expect(result.syntheticBExtension).toMatchObject({
       format: "B",
-      trackCount: 1,
+      trackCount: 2,
       firstChannel: 0,
     });
     expect(result.syntheticBExtension.firstBeat).toBeGreaterThanOrEqual(1);

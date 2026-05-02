@@ -743,6 +743,130 @@ describe("buildSampleIndex", () => {
     }
   });
 
+  it("augments sample-id lookups from product-local metadata when root metadata is incomplete", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-product-local-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "DF089.wav",
+            category: "Drum",
+            product: "House_eJay",
+            internal_name: "HS1DF089",
+            sample_id: 1015,
+          },
+        ],
+      }));
+
+      const hh2OutDir = join(root, "HipHop_eJay2");
+      mkdirSync(hh2OutDir, { recursive: true });
+      writeFileSync(join(hh2OutDir, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "DF089.wav",
+            category: "Drum",
+            internal_name: "DF089",
+            sample_id: 1015,
+          },
+          {
+            filename: "EX165.wav",
+            category: "Xtra",
+            internal_name: "EX165",
+            sample_id: 1253,
+          },
+        ],
+      }));
+
+      const index = buildSampleIndex(root);
+      expect(index.House_eJay.bySampleId["1015"]).toBe("Drum/DF089.wav");
+      expect(index.HipHop_eJay2.bySampleId["1015"]).toBe("Drum/DF089.wav");
+      expect(index.HipHop_eJay2.bySampleId["1253"]).toBe("Xtra/EX165.wav");
+      expect(index.HipHop_eJay2.byInternalName["df089"]).toBe("Drum/DF089.wav");
+      expect(index.HipHop_eJay2.byInternalName["ex165"]).toBe("Xtra/EX165.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers normalized root sample paths over product-local fallbacks", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-product-root-preferred-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({ samples: [] }));
+
+      mkdirSync(join(root, "Drum"), { recursive: true });
+      mkdirSync(join(root, "Xtra"), { recursive: true });
+      writeFileSync(join(root, "Drum", "DF089.wav"), "x");
+      writeFileSync(join(root, "Xtra", "EX165.wav"), "x");
+
+      const hh2OutDir = join(root, "HipHop_eJay2");
+      mkdirSync(join(hh2OutDir, "Drum"), { recursive: true });
+      mkdirSync(join(hh2OutDir, "Xtra"), { recursive: true });
+      writeFileSync(join(hh2OutDir, "Drum", "DF089.wav"), "x");
+      writeFileSync(join(hh2OutDir, "Xtra", "EX165.wav"), "x");
+      writeFileSync(join(hh2OutDir, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "DF089.wav",
+            category: "Drum",
+            internal_name: "DF089",
+            sample_id: 1015,
+          },
+          {
+            filename: "EX165.wav",
+            category: "Xtra",
+            internal_name: "EX165",
+            sample_id: 1253,
+          },
+        ],
+      }));
+
+      const index = buildSampleIndex(root);
+      expect(index.HipHop_eJay2.bySampleId["1015"]).toBe("Drum/DF089.wav");
+      expect(index.HipHop_eJay2.bySampleId["1253"]).toBe("Xtra/EX165.wav");
+      expect(index.HipHop_eJay2.byInternalName["df089"]).toBe("Drum/DF089.wav");
+      expect(index.HipHop_eJay2.byInternalName["ex165"]).toBe("Xtra/EX165.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to product-local sample paths when normalized files are missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "build-index-sample-product-fallback-"));
+    try {
+      writeFileSync(join(root, "metadata.json"), JSON.stringify({ samples: [] }));
+
+      const hh2OutDir = join(root, "HipHop_eJay2");
+      mkdirSync(join(hh2OutDir, "Drum"), { recursive: true });
+      mkdirSync(join(hh2OutDir, "Xtra"), { recursive: true });
+      writeFileSync(join(hh2OutDir, "Drum", "DF089.wav"), "x");
+      writeFileSync(join(hh2OutDir, "Xtra", "EX165.wav"), "x");
+      writeFileSync(join(hh2OutDir, "metadata.json"), JSON.stringify({
+        samples: [
+          {
+            filename: "DF089.wav",
+            category: "Drum",
+            internal_name: "DF089",
+            sample_id: 1015,
+          },
+          {
+            filename: "EX165.wav",
+            category: "Xtra",
+            internal_name: "EX165",
+            sample_id: 1253,
+          },
+        ],
+      }));
+
+      const index = buildSampleIndex(root);
+      expect(index.HipHop_eJay2.bySampleId["1015"]).toBe("HipHop_eJay2/Drum/DF089.wav");
+      expect(index.HipHop_eJay2.bySampleId["1253"]).toBe("HipHop_eJay2/Xtra/EX165.wav");
+      expect(index.HipHop_eJay2.byInternalName["df089"]).toBe("HipHop_eJay2/Drum/DF089.wav");
+      expect(index.HipHop_eJay2.byInternalName["ex165"]).toBe("HipHop_eJay2/Xtra/EX165.wav");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("loads Dance_eJay2 compound aliases from the D_EJAY2 INF path variant", () => {
     const outputRoot = mkdtempSync(join(tmpdir(), "build-index-sample-dance2-inf-alias-output-"));
     const archiveRoot = mkdtempSync(join(tmpdir(), "build-index-sample-dance2-inf-alias-archive-"));

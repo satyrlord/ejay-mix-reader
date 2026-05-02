@@ -331,7 +331,7 @@ describe("reorganize", () => {
     }
   });
 
-  it("resolves filename collisions", () => {
+  it("overwrites filename collisions by default", () => {
     const tmp = createTempDir();
     try {
       mkdirSync(join(tmp, "Bass"), { recursive: true });
@@ -343,10 +343,10 @@ describe("reorganize", () => {
 
       reorganize(tmp);
 
-      // The collision logic should rename the file
       const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8"));
       expect(meta.samples[0].channel).toBe("Bass");
-      expect(meta.samples[0].filename).toBe("PACK1 sample.wav");
+      expect(meta.samples[0].filename).toBe("sample.wav");
+      expect(readFileSync(join(tmp, "Bass", "sample.wav"), "utf-8")).toBe("new-data");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -389,7 +389,7 @@ describe("reorganize", () => {
     }
   });
 
-  it("sanitizes source_archive before choosing collision-safe names", () => {
+  it("keeps original filename when source_archive is set and collision is overwritten", () => {
     const tmp = createTempDir();
     try {
       mkdirSync(join(tmp, "Bass"), { recursive: true });
@@ -402,13 +402,14 @@ describe("reorganize", () => {
       reorganize(tmp);
 
       const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8"));
-      expect(meta.samples[0].filename).toBe(".._PACK_1 sample.wav");
+      expect(meta.samples[0].filename).toBe("sample.wav");
+      expect(readFileSync(join(tmp, "Bass", "sample.wav"), "utf-8")).toBe("new-data");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
 
-  it("resolves secondary collision names", () => {
+  it("overwrites destination while leaving archive-prefixed files untouched", () => {
     const tmp = createTempDir();
     try {
       mkdirSync(join(tmp, "Bass"), { recursive: true });
@@ -421,9 +422,10 @@ describe("reorganize", () => {
 
       reorganize(tmp);
 
-      expect(existsSync(join(tmp, "Bass", "PACK1 sample (2).wav"))).toBe(true);
+      expect(readFileSync(join(tmp, "Bass", "sample.wav"), "utf-8")).toBe("new-data");
+      expect(readFileSync(join(tmp, "Bass", "PACK1 sample.wav"), "utf-8")).toBe("existing2");
       const meta = JSON.parse(readFileSync(join(tmp, "metadata.json"), "utf-8"));
-      expect(meta.samples[0].filename).toBe("PACK1 sample (2).wav");
+      expect(meta.samples[0].filename).toBe("sample.wav");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

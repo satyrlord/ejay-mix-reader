@@ -534,6 +534,35 @@ of bytes 0–4 in the histogram — not a gap in the format.
 zero-based lane index, consistent with the 17-lane Gen 2 layout
 (`LANE_COUNT_BY_FORMAT.B = 17`).
 
+#### HipHop eJay 2 Lane 17 (Groove Generator) — Current Findings (May 2026)
+
+Targeted browser parity for `HipHop eJay 2/Start.mix` plus byte-level timeline
+inspection indicates that the Gen 2 lane-17 stream is not a plain sample-ID
+event lane.
+
+- Channel 17 uses `laneClass=2` records with a fixed extension payload
+  (`7-byte core tuple + 34-byte tail` per event).
+- The recovered lane-17 `sampleKey` values are `7200..7205` with placements at
+  bars 13..52 and labels that map to the `start 1..6` sequence shown in
+  reference captures.
+- Mix metadata ticker text contains Groove Generator voice labels
+  (`kick3`, `snare19`, `hihat38`, `hihat48`, `perc78`, `fx60`, `fx68`,
+  `perc18`, `perc16`, `fx67`) followed by the `start` step pattern.
+
+Working interpretation:
+
+- Lane 17 in HipHop eJay 2 encodes a programmatic Groove Generator pattern
+  (step-sequencer state + trigger program), not direct WAV references.
+- Unresolved lane-17 IDs in `output/metadata.json` should be treated as
+  expected, non-fatal placeholders until the utility data model is fully
+  decoded.
+
+Roadmap note:
+
+- Add **Milestone 6** for reverse-engineering in-app sound utilities (Groove
+  Generator and related bonus modules), including MIX-side storage and runtime
+  reproduction.
+
 ---
 
 ### Format C — Gen 3 Early (Mixer State + Text Tracks)
@@ -950,6 +979,25 @@ section enumerates which products are needed:
 **Resolution strategy**: Search across all `output/*/metadata.json` files,
 keyed by the product name listed in the catalog, then by display name or
 internal filename within that product's metadata.
+
+### Empirical Reuse Rules (Original App Behavior)
+
+The following cross-product reuse constraints are based on behavior observed in
+the original eJay applications and should be treated as higher-priority
+compatibility rules when building resolver fallback chains.
+
+| Product | Allowed cross-product reuse | Constraints |
+|---------|-----------------------------|-------------|
+| Techno eJay (Gen 2) | none from Rave eJay | Techno 1 cannot reuse Rave eJay samples. |
+| HipHop eJay 2 | HipHop eJay 1 | Only HH1 samples re-converted to 90 BPM. |
+| HipHop eJay 3 | HipHop eJay 2 | No additional legacy source required. |
+| HipHop eJay 4 | HipHop eJay 2, HipHop eJay 3 | Both HH2 and HH3 reuse are supported. |
+| Dance eJay 2 | Techno eJay (Gen 2) | Dance 2 can reuse Techno 1 samples. |
+| Dance eJay 3 | Techno eJay (Gen 2), Dance eJay 2 | Both Techno 1 and Dance 2 reuse are supported. |
+| Dance eJay 4 | Techno eJay (Gen 2), Dance eJay 2, Dance eJay 3 | Techno 1, Dance 2, and Dance 3 reuse are supported. |
+
+Implementation note: these constraints supersede generic broad fallback logic
+and should be encoded as explicit product-to-product compatibility edges.
 
 ### Gen 1 Sample ID Mapping (Unresolved)
 

@@ -873,7 +873,7 @@ test.describe("start.mix per-product matrix", () => {
     await expect(page.locator(".seq-position")).toContainText(/Bar\s+1\s*\/\s*\d+/, {
       timeout: playbackStartTimeoutMs,
     });
-    await expect(page.locator(".seq-position")).toContainText("Bar 1 / 80", {
+    await expect(page.locator(".seq-position")).toContainText("Bar 1 / 78", {
       timeout: playbackStartTimeoutMs,
     });
 

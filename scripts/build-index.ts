@@ -90,6 +90,11 @@ interface RawMetadata {
   samples: RawSample[];
 }
 
+interface ProductCatalogSample {
+  outputPrefix: string;
+  sample: RawSample;
+}
+
 export function deriveDisplayName(folderId: string): string {
   return humanizeIdentifier(folderId, { compactDmkit: true });
 }
@@ -115,7 +120,10 @@ export function countWavFiles(dirPath: string): number {
 }
 
 function readRootCatalogSamples(outputDir: string): RawSample[] {
-  const metaPath = join(outputDir, "metadata.json");
+  return readCatalogSamplesFile(join(outputDir, "metadata.json"));
+}
+
+function readCatalogSamplesFile(metaPath: string): RawSample[] {
   if (!existsSync(metaPath)) return [];
 
   try {
@@ -132,6 +140,60 @@ function readRootCatalogSamples(outputDir: string): RawSample[] {
   }
 
   return [];
+}
+
+function readProductCatalogSamples(outputDir: string): ProductCatalogSample[] {
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(outputDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const samples: ProductCatalogSample[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith("_")) continue;
+
+    const productMetaSamples = readCatalogSamplesFile(join(outputDir, entry.name, "metadata.json"));
+    if (productMetaSamples.length === 0) continue;
+
+    for (const sample of productMetaSamples) {
+      const product = typeof sample.product === "string" && sample.product.length > 0
+        ? sample.product
+        : entry.name;
+      samples.push({
+        outputPrefix: entry.name,
+        sample: { ...sample, product },
+      });
+    }
+  }
+
+  return samples;
+}
+
+function resolveSampleRelPath(
+  outputDir: string,
+  baseRelPath: string,
+  outputPrefix?: string,
+): string {
+  if (!outputPrefix) return baseRelPath;
+
+  const relSegments = baseRelPath.split("/").filter((segment) => segment.length > 0);
+  if (relSegments.length === 0) return baseRelPath;
+
+  // Prefer normalized output paths. Only fall back to product-prefixed output
+  // when normalization is incomplete and files still live under product dirs.
+  if (existsSync(join(outputDir, ...relSegments))) {
+    return baseRelPath;
+  }
+
+  const prefixedRelPath = `${outputPrefix}/${baseRelPath}`;
+  if (existsSync(join(outputDir, outputPrefix, ...relSegments))) {
+    return prefixedRelPath;
+  }
+
+  return baseRelPath;
 }
 
 function readEmbeddedMixManifestSamples(outputDir: string): RawSample[] {
@@ -498,8 +560,10 @@ export function buildIndex(
 }
 
 /**
- * Build per-product sample lookup maps from the shared `output/metadata.json`.
- * Returns an empty object when the metadata file is missing or unparseable.
+ * Build per-product sample lookup maps from root metadata and product-local
+ * metadata files (`output/<product>/metadata.json`). Product-local metadata is
+ * included to preserve sample-id coverage when the merged root metadata omits
+ * product-specific records.
  */
 export function buildSampleIndex(
   outputDir: string,
@@ -519,14 +583,33 @@ export function buildSampleIndex(
     beats?: number;
   }
 
-  const baseSamples = readRootCatalogSamples(outputDir);
-  const scannedSamples = baseSamples.length > 0 ? baseSamples : scanNormalizedSamples(outputDir);
-  const samples = mergeSamplesByAudioPath(scannedSamples, readEmbeddedMixManifestSamples(outputDir)) as MetaSample[];
+  const rootSamples = readRootCatalogSamples(outputDir);
+  const productSamples = readProductCatalogSamples(outputDir);
+  const embeddedSamples = readEmbeddedMixManifestSamples(outputDir);
+
+  interface SampleInput {
+    sample: MetaSample;
+    outputPrefix?: string;
+  }
+
+  // Do not use path-based cross-product dedupe for sampleIndex input: multiple
+  // products can legitimately reuse the same category/filename path while
+  // carrying different product-scoped sample ids.
+  const samples = (rootSamples.length > 0 || productSamples.length > 0)
+    ? [
+      ...rootSamples.map((sample) => ({ sample })),
+      ...productSamples,
+      ...embeddedSamples.map((sample) => ({ sample })),
+    ] as SampleInput[]
+    : [
+      ...scanNormalizedSamples(outputDir).map((sample) => ({ sample })),
+      ...embeddedSamples.map((sample) => ({ sample })),
+    ] as SampleInput[];
   if (samples.length === 0) return {};
 
   const index: Record<string, SampleLookupEntry> = {};
 
-  for (const sample of samples) {
+  for (const { sample, outputPrefix } of samples) {
     const product = sample.product;
     if (!product) continue;
 
@@ -549,9 +632,10 @@ export function buildSampleIndex(
     const filename = sample.filename;
     if (!filename || !category) continue;
 
-    const relPath = subcategory
+    const baseRelPath = subcategory
       ? `${category}/${subcategory}/${filename}`
       : `${category}/${filename}`;
+    const relPath = resolveSampleRelPath(outputDir, baseRelPath, outputPrefix);
 
     if (sample.alias) {
       entry.byAlias[sample.alias.toLowerCase()] = relPath;

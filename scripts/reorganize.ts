@@ -15,8 +15,6 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { basename, extname, join, normalize, relative } from "path";
 import { parseArgs } from "util";
 
-const MAX_DESTINATION_CANDIDATES = 200;
-
 // Maps the type code embedded in internal filenames to eJay channel tabs.
 export const CHANNEL_MAP: Record<string, string> = {
   // Drum machine hits
@@ -222,14 +220,6 @@ function resolveWithinBase(baseDir: string, pathParts: string[]): string | null 
   return candidate;
 }
 
-function sanitizePathToken(value: string): string {
-  const cleaned = value
-    .replace(/[\\/]+/g, "_")
-    .replace(/[^A-Za-z0-9._ -]+/g, "_")
-    .trim();
-  return cleaned || "archive";
-}
-
 function scoreSample(sample: SampleRecord): number {
   return Object.values(sample).reduce<number>((score, value) => {
     if (value === undefined || value === null || value === "") return score;
@@ -351,43 +341,17 @@ function chooseDestination(
   productDir: string,
   channel: string,
   originalFilename: string,
-  sourceArchive: string,
   srcPath: string,
 ): DestinationChoice {
   const destDir = join(productDir, channel);
   const sourceBase = basename(originalFilename);
-  const ext = extname(sourceBase);
-  const stem = basename(sourceBase, ext);
-  const safeArchive = sanitizePathToken(sourceArchive);
-
-  const candidates: string[] = [sourceBase, `${safeArchive} ${stem}${ext}`];
-  let fallback = 2;
-  while (candidates.length < MAX_DESTINATION_CANDIDATES) {
-    candidates.push(`${safeArchive} ${stem} (${fallback})${ext}`);
-    fallback++;
-  }
-
-  let chosen: string | undefined;
-  let hadConflict = false;
-
-  for (const candidate of candidates) {
-    const targetPath = join(destDir, candidate);
-    if (!existsSync(targetPath) || normalizeComparePath(targetPath) === normalizeComparePath(srcPath)) {
-      chosen = candidate;
-      break;
-    }
-    hadConflict = true;
-  }
-
-  if (chosen === undefined) {
-    throw new Error(
-      `chooseDestination: all ${candidates.length} candidate names for "${sourceBase}" in ${destDir} are taken`,
-    );
-  }
+  const fullPath = join(destDir, sourceBase);
+  const samePath = normalizeComparePath(fullPath) === normalizeComparePath(srcPath);
+  const hadConflict = !samePath && existsSync(fullPath);
 
   return {
-    filename: chosen,
-    fullPath: join(destDir, chosen),
+    filename: sourceBase,
+    fullPath,
     hadConflict,
   };
 }
@@ -456,10 +420,9 @@ export function reorganize(productDir: string, dryRun = false): void {
   let conflicts = 0;
   const mergedSamples: SampleRecord[] = [];
 
-  for (const { sourceDir, sample, srcPath, channel } of resolved) {
+  for (const { sample, srcPath, channel } of resolved) {
     const filename = sample.filename ?? "";
-    const archive = sample.source_archive ?? basename(sourceDir);
-    const choice = chooseDestination(productDir, channel, filename, archive, srcPath);
+    const choice = chooseDestination(productDir, channel, filename, srcPath);
     const destFilename = choice.filename;
     const destPath = choice.fullPath;
     const samePath = normalizeComparePath(srcPath) === normalizeComparePath(destPath);
@@ -482,6 +445,9 @@ export function reorganize(productDir: string, dryRun = false): void {
 
     mkdirSync(join(productDir, channel), { recursive: true });
     if (!samePath) {
+      if (existsSync(destPath)) {
+        unlinkSync(destPath);
+      }
       renameSync(srcPath, destPath);
       moved++;
     } else {
@@ -491,7 +457,7 @@ export function reorganize(productDir: string, dryRun = false): void {
 
   console.log(
     `${dryRun ? "[DRY RUN] " : ""}${moved} samples ${dryRun ? "would be " : ""}moved, ` +
-    `${unchanged} already in place, ${conflicts} collision(s) renamed, ${skipped} skipped (missing files)`,
+    `${unchanged} already in place, ${conflicts} collision(s) overwritten, ${skipped} skipped (missing files)`,
   );
 
   if (!dryRun) {

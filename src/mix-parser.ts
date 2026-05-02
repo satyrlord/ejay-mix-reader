@@ -116,6 +116,9 @@ const FORMAT_B_TIMELINE_SENTINEL = 0x018a7aa9;
 const FORMAT_B_TIMELINE_CHANNEL_COUNT = 17;
 const FORMAT_B_TIMELINE_POS_DIVISOR = 128;
 const FORMAT_B_TIMELINE_MIN_CHUNK_LEN = 4 + FORMAT_B_TIMELINE_CHANNEL_COUNT * 5;
+const FORMAT_B_USER_PERC_LANE_CLASS = 2;
+const FORMAT_B_USER_PERC_EXTENSION_BYTES = 34;
+const FORMAT_B_CORE_EVENT_TAIL_BYTES = 10;
 
 function isValidMixBpm(value: number): boolean {
   return Number.isFinite(value) && value > 0 && value <= MAX_REASONABLE_MIX_BPM;
@@ -642,10 +645,21 @@ function parseFormatBTimeline(buf: MixBuffer, startOffset: number): FormatBTimel
       const posRaw = buf.readInt32LE(offset); offset += 4;
       const sampleKey = buf.readUInt16LE(offset); offset += 2;
 
+      let trailingBytes = 0;
+
       if (laneIndex <= 15) {
         if (laneClass !== 0 && laneClass !== 3) return null;
+        if (posRaw >= 0) {
+          trailingBytes = FORMAT_B_CORE_EVENT_TAIL_BYTES;
+        }
+      } else if (laneClass === FORMAT_B_USER_PERC_LANE_CLASS) {
+        // HipHop eJay 2 channel 17 records embed a fixed extension payload
+        // (sample label/variant metadata) after the core tuple.
+        trailingBytes = FORMAT_B_USER_PERC_EXTENSION_BYTES;
       } else if (laneClass !== 0) {
         return { tracks, maxBeat };
+      } else if (posRaw >= 0) {
+        trailingBytes = FORMAT_B_CORE_EVENT_TAIL_BYTES;
       }
 
       const decodedPos = posRaw < 0 ? (-posRaw - 1) : posRaw;
@@ -666,9 +680,9 @@ function parseFormatBTimeline(buf: MixBuffer, startOffset: number): FormatBTimel
         },
       });
 
-      if (posRaw >= 0) {
-        if (offset + 10 > payloadEnd) return null;
-        offset += 10;
+      if (trailingBytes > 0) {
+        if (offset + trailingBytes > payloadEnd) return null;
+        offset += trailingBytes;
       }
     }
   }
