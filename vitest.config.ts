@@ -14,7 +14,7 @@ export default defineConfig({
         "scripts/__tests__/**",
         "scripts/test-coverage.ts",
         // Reverse-engineering investigation utility (record dumper),
-        // intentionally outside the production runtime pipeline.
+        // intentionally outside the browser runtime pipeline.
         "scripts/mix-format-cd-records.ts",
         // Types-only file — no executable code to cover.
         "scripts/mix-types.ts",

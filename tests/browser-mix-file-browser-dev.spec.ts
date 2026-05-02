@@ -40,7 +40,6 @@ test.describe("mix-file-browser module", () => {
 
       const sidebar = host.querySelector<HTMLElement>("#archive-tree-test")!;
       initMixFileBrowser(sidebar, {
-        isDev: true,
         mixLibrary: [],
         onSelectFile: () => {},
       });
@@ -77,7 +76,6 @@ test.describe("mix-file-browser module", () => {
 
       const sidebar = host.querySelector<HTMLElement>("#archive-tree-dev")!;
       initMixFileBrowser(sidebar, {
-        isDev: true,
         mixLibrary: library,
         onSelectFile: () => {},
       });
@@ -123,7 +121,6 @@ test.describe("mix-file-browser module", () => {
 
       const sidebar = host.querySelector<HTMLElement>("#at-expand")!;
       initMixFileBrowser(sidebar, {
-        isDev: true,
         mixLibrary: library,
         onSelectFile: () => {},
       });
@@ -159,7 +156,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-toggle")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: library, onSelectFile: () => {} });
       sidebar.click();
 
       const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
@@ -203,7 +200,6 @@ test.describe("mix-file-browser module", () => {
 
       const sidebar = host.querySelector<HTMLElement>("#at-select")!;
       initMixFileBrowser(sidebar, {
-        isDev: true,
         mixLibrary: libraryWithMeta,
         onSelectFile: (ref: { label: string; group: string; source: unknown }) => { selectedRefs.push(ref); },
       });
@@ -255,7 +251,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-noop")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: library, onSelectFile: () => {} });
       sidebar.click();
       const groupsAfterFirst = sidebar.querySelectorAll(".mix-tree-group").length;
       sidebar.click();
@@ -285,7 +281,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-kbd")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: library, onSelectFile: () => {} });
 
       const ph = sidebar.querySelector<HTMLElement>(".archive-placeholder")!;
       ph.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -315,7 +311,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-kbd-space")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: library, onSelectFile: () => {} });
 
       const ph = sidebar.querySelector<HTMLElement>(".archive-placeholder")!;
       ph.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
@@ -345,7 +341,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-kbd-other")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: library, onSelectFile: () => {} });
 
       const ph = sidebar.querySelector<HTMLElement>(".archive-placeholder")!;
       ph.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
@@ -377,7 +373,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-empty")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: [], onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: [], onSelectFile: () => {} });
       sidebar.click();
 
       const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
@@ -408,7 +404,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-badge")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: library, onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: library, onSelectFile: () => {} });
       sidebar.click();
 
       const content = sidebar.querySelector<HTMLElement>(".archive-tree-content")!;
@@ -442,7 +438,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-folder-tooltip")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: lib, onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: lib, onSelectFile: () => {} });
       sidebar.click();
 
       const folderLabel = sidebar.querySelector<HTMLElement>(".mix-tree-group-label")!;
@@ -465,7 +461,7 @@ test.describe("mix-file-browser module", () => {
       // Note: no .archive-tree-content child
       document.body.appendChild(sidebar);
 
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: [], onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: [], onSelectFile: () => {} });
       sidebar.click();
       return { groups: sidebar.querySelectorAll(".mix-tree-group").length };
     }, MFB_MOD);
@@ -498,7 +494,6 @@ test.describe("mix-file-browser module", () => {
       const refs: Array<{ source: { type: string; url?: string } }> = [];
       const sidebar = host.querySelector<HTMLElement>("#at-encode")!;
       initMixFileBrowser(sidebar, {
-        isDev: true,
         mixLibrary: lib,
         onSelectFile: (ref: unknown) => { refs.push(ref as typeof refs[0]); },
       });
@@ -533,7 +528,6 @@ test.describe("mix-file-browser module", () => {
       const refs: Array<{ label: string; productId: string }> = [];
       const sidebar = host.querySelector<HTMLElement>("#at-controller-mode")!;
       const controller = initMixFileBrowser(sidebar, {
-        isDev: true,
         mixLibrary: library,
         onSelectFile: (ref: { label: string; productId: string }) => refs.push(ref),
       });
@@ -598,7 +592,6 @@ test.describe("mix-file-browser module", () => {
       const changedModeIds: string[] = [];
       const sidebar = host.querySelector<HTMLElement>("#at-mode-change")!;
       initMixFileBrowser(sidebar, {
-        isDev: true,
         mixLibrary: library,
         onSelectFile: () => {},
         onProductModeChange: (entry: { id: string }) => changedModeIds.push(entry.id),
@@ -641,7 +634,6 @@ test.describe("mix-file-browser module", () => {
       const refs: Array<{ label: string; group: string; productId: string }> = [];
       const sidebar = host.querySelector<HTMLElement>("#at-dance3-mode")!;
       const controller = initMixFileBrowser(sidebar, {
-        isDev: true,
         mixLibrary: [
           {
             id: "Dance_eJay3",

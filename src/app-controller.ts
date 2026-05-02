@@ -33,7 +33,7 @@ import {
 import { createCategoryConfigController } from "./category-config-controller.js";
 import type { GridSortDir, GridSortKey } from "./data.js";
 import type { Library } from "./library.js";
-import { FetchLibrary, pickLibraryFolder } from "./library.js";
+import { FetchLibrary } from "./library.js";
 import type { SubcategoryOperation } from "./main-controller-types.js";
 import {
   categoryColorFromAudioUrl,
@@ -50,7 +50,6 @@ import {
   createSequencerPauseIcon,
   createSequencerPlayIcon,
   renderCategorySidebar,
-  renderHomePage,
   renderSampleGrid,
   renderSpaShell,
   setMixSampleLoadingOverlay,
@@ -127,8 +126,6 @@ const SHELL_BROWSER_MIN_PX = 220;
 const SHELL_SPLITTER_KEY_STEP_PX = 24;
 
 const SUBCATEGORY_CONTEXT_MENU_ID = "subcategory-context-menu";
-
-const isDev = import.meta.env.DEV;
 
 const noop = (): void => {};
 
@@ -962,21 +959,11 @@ export function createAppController(app: HTMLElement): () => void {
   }
 
   async function readMixRefBuffer(ref: MixFileRef): Promise<ArrayBuffer> {
-    switch (ref.source.type) {
-      case "url": {
-        const response = await fetch(ref.source.url);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch ${ref.source.url}: HTTP ${response.status}`);
-        }
-        return response.arrayBuffer();
-      }
-      case "handle": {
-        const file = await ref.source.handle.getFile();
-        return file.arrayBuffer();
-      }
-      case "file":
-        return ref.source.file.arrayBuffer();
+    const response = await fetch(ref.source.url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${ref.source.url}: HTTP ${response.status}`);
     }
+    return response.arrayBuffer();
   }
 
   async function ensureMixAudioContext(): Promise<AudioContext | null> {
@@ -1249,36 +1236,6 @@ export function createAppController(app: HTMLElement): () => void {
     }
   }
 
-  /* istanbul ignore next -- production-only home flow is not exercised by the dev-server coverage harness */
-  function showHome(): void {
-    cleanupTransportShortcuts();
-    cleanupTransportShortcuts = noop;
-    cleanupSequencerScrollIntent();
-    cleanupSequencerScrollIntent = noop;
-    cleanupShellSplitter();
-    cleanupShellSplitter = noop;
-    app.replaceChildren();
-    slots = null;
-
-    renderHomePage(
-      app,
-      () => void handlePickFolder(),
-      isDev ? () => void startWithFetchLibrary() : null,
-    );
-  }
-  /* istanbul ignore next -- the OS folder picker path is not exercised by the dev-server coverage harness */
-  async function handlePickFolder(): Promise<void> {
-    /* v8 ignore start -- production-only folder picking is not exercised by the dev-server coverage harness */
-    try {
-      const lib = await pickLibraryFolder();
-      await startBrowser(lib);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      throw error;
-    }
-    /* v8 ignore stop */
-  }
-
   async function startWithFetchLibrary(): Promise<void> {
     await startBrowser(new FetchLibrary());
   }
@@ -1420,8 +1377,7 @@ export function createAppController(app: HTMLElement): () => void {
     ]);
 
     initMixFileBrowser(currentSlots.archiveTree, {
-      isDev,
-      mixLibrary: isDev ? index.mixLibrary : undefined,
+      mixLibrary: index.mixLibrary,
       onSelectFile: (ref) => {
         void handleMixSelection(ref);
       },
@@ -1665,7 +1621,7 @@ export function createAppController(app: HTMLElement): () => void {
       if (state.library?.moveSample) {
         await state.library.moveSample(sample, newCategory, newSubcategory);
       }
-      // In-memory patch (always — PROD changes are transient, DEV changes are persisted above)
+      // In-memory patch mirrors the persisted server-side change.
       sample.category = newCategory;
       sample.subcategory = newSubcategory ?? undefined;
       applyCategoryConfig(state.categoryConfig);
@@ -1781,7 +1737,7 @@ export function createAppController(app: HTMLElement): () => void {
       resetSubcategoryAddState();
       return {
         addDisabled: true,
-        addTitle: "Subcategory editing is disabled in the production build.",
+        addTitle: "Subcategory editing is unavailable for this library.",
       };
     }
 
@@ -1892,12 +1848,7 @@ export function createAppController(app: HTMLElement): () => void {
   }
   /* v8 ignore stop */
 
-  /* istanbul ignore next -- browser coverage runs against the dev server, so DEV is always true here */
-  if (isDev) {
-    void startWithFetchLibrary();
-  } else {
-    showHome();
-  }
+  void startWithFetchLibrary();
 
   return cleanup;
 }

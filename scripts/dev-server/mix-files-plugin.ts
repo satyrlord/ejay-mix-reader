@@ -1,26 +1,20 @@
 /**
- * dev-server/mix-files-plugin.ts — Vite plugins for serving and copying
+ * dev-server/mix-files-plugin.ts — Vite plugin for serving
  * archive `.mix` files.
  *
- * Wraps the pure path-discovery helpers from `mix-files.ts` in Vite plugin
- * shells:
- *   - `serveMixFiles`      — dev middleware: streams `.mix` bytes at
- *                             `/mix/<productId>/<filename>`.
- *   - `copyMixFilesPlugin` — build-time plugin: copies `.mix` files from
- *                             the archive into `dist/mix/` so they are
- *                             statically served in production.
+ * Wraps pure path-discovery helpers from `index.ts` in a Vite plugin shell:
+ *   - `serveMixFiles` — dev middleware: streams `.mix` bytes at
+ *     `/mix/<productId>/<filename>`.
  *
  * Consumers:
  *   - vite.config.ts
  *   - scripts/__tests__/vite-mix-files-plugin.test.ts
  */
 
-import { copyFileSync, createReadStream, mkdirSync } from "fs";
-import { dirname, resolve } from "path";
+import { createReadStream } from "fs";
 import type { Plugin } from "vite";
 
 import { resolveMixUrl } from "./index.js";
-import { listMixFilesForCopy } from "./mix-files.js";
 
 // Re-usable narrow type for the res object used in respondWithReadError.
 type MinimalResponse = NodeJS.WritableStream & {
@@ -75,25 +69,6 @@ export function serveMixFiles(archiveRoot: string): Plugin {
           respondWithReadError(resolved.absolutePath, err, res);
         }
       });
-    },
-  };
-}
-
-/**
- * Vite build plugin: copy `.mix` files from the archive into `dist/mix/`
- * so the production bundle can serve them statically. Only runs during
- * `vite build`, not dev-server mode.
- */
-export function copyMixFilesPlugin(archiveRoot: string): Plugin {
-  return {
-    name: "copy-mix-files",
-    apply: "build",
-    closeBundle() {
-      const outDir = resolve(process.cwd(), "dist", "mix");
-      for (const entry of listMixFilesForCopy(archiveRoot, outDir)) {
-        mkdirSync(dirname(entry.dest), { recursive: true });
-        copyFileSync(entry.src, entry.dest);
-      }
     },
   };
 }

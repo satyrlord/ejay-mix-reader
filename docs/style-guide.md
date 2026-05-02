@@ -242,8 +242,7 @@ rectangular blocks, closely matching the original eJay UI.
 
 A dropdown control for filtering samples by tempo.
 
-- Positioned at the bottom-right of the home area and persists into the
-  main app view, where it lives inside the context strip.
+- Positioned in the context strip beside search and zoom controls.
 - Uses the default sans/small-caps styling from `app.css`, not `font-mono`.
 
 ### Search and Zoom Controls
@@ -264,9 +263,7 @@ Inspired by the original eJay metallic transport strip.
 - Background: `#191a22` with a subtle top border.
 - Three-column grid layout (`grid-template-columns: auto 1fr auto`):
   - **Left** (`.transport-left`): stop button, current sample name, playback progress bar.
-  - **Center** (`.transport-center`): dynamic build label —
-    `"eJay mix reader — full version"` in DEV builds;
-    `"eJay mix reader demo — clone this repo for full functionality"` in production builds.
+  - **Center** (`.transport-center`): persistent app label `"eJay mix reader"`.
   - **Right** (`.transport-right`): version label (e.g. `v1.14`), GitHub repository link.
 - Progress uses a custom thin `<progress>` element (`.transport-progress`).
 - All text in the transport bar uses the default `font-sans` stack. Do not apply `font-mono` to any transport element.
@@ -282,9 +279,7 @@ Inspired by the 16-channel mixer visible in the original eJay UI.
 ## Layout
 
 - The app is a single-page application with a single HTML entry point.
-- **Home page**: centered hero with folder picker, BPM filter control at
-  bottom-right.
-- **Main app view** (after loading a library): four persistent layers —
+- **Main app view**: four persistent layers —
   - **Top editor area**: archive sidebar plus sequencer shell.
   - **Context strip**: mix status, subcategory tabs, search, zoom, BPM.
   - **Bottom browser area**: category sidebar plus sample-block grid.

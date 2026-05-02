@@ -270,7 +270,7 @@ The default external roots are `F:\_samples\eJay` and
 # Refresh data/mix-metadata.json from every .mix under archive/
 npm run mix:meta
 
-# Refresh data/index.json (and produce a production dist/)
+# Refresh data/index.json (and regenerate dist/)
 npm run build
 ```
 

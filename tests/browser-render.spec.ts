@@ -454,33 +454,14 @@ test.describe("render edge cases", () => {
     expect(result.afterCooldown).toEqual({ hidden: false, state: "idle" });
   });
 
-  test("renderHomePage and renderSpaShell wire buttons and shell slots", async ({ page }) => {
+  test("renderSpaShell wires shell slots", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(async (modPath) => {
       const render = await import(/* @vite-ignore */ modPath);
-      const homeHost = document.createElement("div");
-      const homeNoDevHost = document.createElement("div");
       const shellHost = document.createElement("div");
-      let pickClicks = 0;
-      let devClicks = 0;
-
-      render.renderHomePage(homeHost, () => {
-        pickClicks++;
-      }, () => {
-        devClicks++;
-      });
-
-      (homeHost.querySelector("#pick-folder-btn") as HTMLButtonElement).click();
-      (homeHost.querySelector("#dev-library-btn") as HTMLButtonElement).click();
-
-      render.renderHomePage(homeNoDevHost, () => {}, null);
       const shell = render.renderSpaShell(shellHost);
 
       return {
-        pickClicks,
-        devClicks,
-        hasDevButtonWhenEnabled: Boolean(homeHost.querySelector("#dev-library-btn")),
-        hasDevButtonWhenDisabled: Boolean(homeNoDevHost.querySelector("#dev-library-btn")),
         shellId: shell.shell.id,
         sidebarId: shell.sidebar.id,
         tabsId: shell.tabs.id,
@@ -499,10 +480,6 @@ test.describe("render edge cases", () => {
       };
     }, RENDER_MOD);
 
-    expect(result.pickClicks).toBe(1);
-    expect(result.devClicks).toBe(1);
-    expect(result.hasDevButtonWhenEnabled).toBe(true);
-    expect(result.hasDevButtonWhenDisabled).toBe(false);
     expect(result.shellId).toBe("spa-shell");
     expect(result.sidebarId).toBe("category-sidebar");
     expect(result.tabsId).toBe("subcategory-tabs");
@@ -515,36 +492,6 @@ test.describe("render edge cases", () => {
     expect(result.bpmValue).toBe("");
     expect(result.bpmOptions).toContainEqual({ value: "", label: "All" });
     expect(result.transportId).toBe("transport");
-  });
-
-  test("renderHomePage tolerates a missing actions container", async ({ page }) => {
-    await page.goto("/");
-    const result = await page.evaluate(async (modPath) => {
-      const render = await import(/* @vite-ignore */ modPath);
-      const container = document.createElement("div");
-      const originalQuerySelector = Element.prototype.querySelector;
-
-      Element.prototype.querySelector = function (selectors: string): Element | null {
-        if (this instanceof HTMLDivElement && this.id === "home-page" && selectors === ".home-actions") {
-          return null;
-        }
-
-        return originalQuerySelector.call(this, selectors);
-      };
-
-      try {
-        render.renderHomePage(container, () => {}, null);
-        return {
-          childCount: container.children.length,
-          hasHomePage: Boolean(container.querySelector("#home-page")),
-        };
-      } finally {
-        Element.prototype.querySelector = originalQuerySelector;
-      }
-    }, RENDER_MOD);
-
-    expect(result.childCount).toBe(1);
-    expect(result.hasHomePage).toBe(true);
   });
 
   test("renderSampleGrid lays out lanes, resolves audio, and updates active transport state", async ({ page }) => {

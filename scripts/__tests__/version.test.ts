@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildDisplayVersion,
-  readDeploymentCount,
   readDisplayVersionSeries,
   readGitCommitCount,
   readGitHubCommitCount,
@@ -125,22 +124,6 @@ describe("readGitHubCommitCount", () => {
   });
 });
 
-describe("readDeploymentCount", () => {
-  it("parses string deployment counts", () => {
-    expect(readDeploymentCount("19\n")).toBe(19);
-  });
-
-  it("parses numeric deployment counts", () => {
-    expect(readDeploymentCount(12)).toBe(12);
-  });
-
-  it("returns null for missing or invalid values", () => {
-    expect(readDeploymentCount(undefined)).toBeNull();
-    expect(readDeploymentCount("0")).toBeNull();
-    expect(readDeploymentCount("abc")).toBeNull();
-  });
-});
-
 describe("buildDisplayVersion", () => {
   it("uses the GitHub-backed commit count as the dynamic minor version", () => {
     const execFn = makeMappedExecFn({
@@ -150,12 +133,7 @@ describe("buildDisplayVersion", () => {
     expect(buildDisplayVersion("1.15", { execFn })).toBe("v1.27");
   });
 
-  it("falls back to the deployment count when git metadata is unavailable", () => {
-    const execFn = makeThrowingExecFn(new Error("git unavailable"));
-    expect(buildDisplayVersion("1.15", { execFn, deploymentCount: "19" })).toBe("v1.19");
-  });
-
-  it("falls back to .0 when neither git nor deployment metadata is available", () => {
+  it("falls back to .0 when git metadata is unavailable", () => {
     const execFn = makeThrowingExecFn(new Error("git unavailable"));
     expect(buildDisplayVersion("1.15", { execFn })).toBe("v1.0");
   });

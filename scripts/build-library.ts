@@ -14,8 +14,7 @@
  *   7. extract-mix-metadata   — build data/mix-metadata.json
  *   8. build-index.ts         — build data/index.json
  *
- * After the script finishes, run `npm run serve`, then click
- * "Choose output folder" and point it at the output/ directory.
+ * After the script finishes, run `npm run serve`.
  *
  * Usage:
  *   npx tsx scripts/build-library.ts
@@ -48,7 +47,6 @@ const { values: opts } = parseArgs({
 const DRY_RUN = opts["dry-run"] as boolean;
 const FORCE = opts.force as boolean;
 const TSX_CLI = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
-const VITE_CLI = join(ROOT, "node_modules", "vite", "bin", "vite.js");
 
 // ── Product registry ──────────────────────────────────────────────────────────
 
@@ -255,25 +253,6 @@ function run(script: string, args: string[]): void {
   }
   if (result.status !== 0) {
     console.error(`\nScript exited with code ${String(result.status)}: ${display}`);
-    process.exit(result.status ?? 1);
-  }
-}
-
-function runViteBuild(): void {
-  console.log("\n  > npx vite build");
-  if (DRY_RUN) return;
-
-  const result = spawnSync(process.execPath, [VITE_CLI, "build"], {
-    stdio: "inherit",
-    cwd: ROOT,
-  });
-
-  if (result.error) {
-    console.error(`\nFailed to start: npx vite build\n${result.error.message}`);
-    process.exit(1);
-  }
-  if (result.status !== 0) {
-    console.error(`\nnpx vite build exited with code ${String(result.status)}`);
     process.exit(result.status ?? 1);
   }
 }
@@ -581,14 +560,13 @@ function main(): void {
   console.log("\n── Step 6: Extract mix metadata ──");
   run("scripts/extract-mix-metadata.ts", []);
 
-  // Step 7: Build browser data + production bundle
+  // Step 7: Build browser bootstrap data
   console.log("\n── Step 7: Build browser data ──");
   run("scripts/build-index.ts", []);
-  runViteBuild();
 
   console.log(
     "\n✓ Done!\n\n" +
-    "Run `npm run serve` then click 'Choose output folder' and point it at output/\n",
+    "Run `npm run serve` to open the app.\n",
   );
 }
 

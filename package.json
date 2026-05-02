@@ -8,7 +8,6 @@
     "serve": "vite",
     "setup": "tsx scripts/build-library.ts",
     "build": "tsx scripts/build-index.ts && vite build",
-    "preview": "vite preview",
     "mix:extract-embedded": "tsx scripts/extract-embedded-mix-audio.ts",
     "mix:meta": "tsx scripts/extract-mix-metadata.ts",
     "mix:dump-cd": "tsx scripts/mix-format-cd-records.ts",

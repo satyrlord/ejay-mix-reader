@@ -80,17 +80,6 @@ export function readGitHubCommitCount(
 }
 
 /**
- * Parse a deployment-count fallback passed from the deployment workflow.
- */
-export function readDeploymentCount(rawValue: number | string | undefined): number | null {
-  if (typeof rawValue === "number") {
-    return Number.isFinite(rawValue) && rawValue > 0 ? Math.trunc(rawValue) : null;
-  }
-  if (typeof rawValue !== "string") return null;
-  return parsePositiveCount(rawValue);
-}
-
-/**
  * Extract the major version series (first numeric segment) from a semver-like
  * package version string.  Returns `"0"` for any unrecognised input.
  *
@@ -104,15 +93,13 @@ export function readDisplayVersionSeries(packageVersion: string | undefined): st
 
 /**
  * Format the UI version as `v<major>.<dynamicMinor>`, where the minor part is
- * the GitHub default-branch commit count when available, or the GitHub Pages
- * deployment count when git metadata is unavailable.
+ * the GitHub default-branch commit count when available.
  */
 export function buildDisplayVersion(
   packageVersion: string | undefined,
   options: {
     cwd?: string | URL;
     execFn?: typeof execFileSync;
-    deploymentCount?: number | string | undefined;
   } = {},
 ): string {
   const versionSeries = readDisplayVersionSeries(packageVersion);
@@ -122,11 +109,6 @@ export function buildDisplayVersion(
   const commitCount = readGitHubCommitCount(cwd, execFn);
   if (commitCount !== null) {
     return `v${versionSeries}.${commitCount}`;
-  }
-
-  const deploymentCount = readDeploymentCount(options.deploymentCount);
-  if (deploymentCount !== null) {
-    return `v${versionSeries}.${deploymentCount}`;
   }
 
   return `v${versionSeries}.0`;

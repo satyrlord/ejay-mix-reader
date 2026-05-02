@@ -4,7 +4,7 @@
 
 ```text
 index.html                 ← SPA entry point; Vite serves and bundles from here
-package.json               ← npm scripts: serve, build, preview, test,
+package.json               ← npm scripts: serve, build, test,
                               test:unit, test:unit:coverage, test:coverage,
                               typecheck, lint:md, validate
 vite.config.ts             ← Vite config: Tailwind/DaisyUI integration,
@@ -32,11 +32,10 @@ src/sample-grid-context-menu.ts ← sample-grid right-click controller for
                               move/sort menus and dismiss lifecycle
 src/env.d.ts               ← ambient type declarations (CSS modules)
 src/mix-file-browser.ts    ← in-app .mix file browser for the archive-tree
-                              panel; DEV mode reads from data/index.json
-                              mixLibrary; PROD mode uses File System Access API
-                              with a webkitdirectory fallback; hovering a
-                              .mix file shows a metadata tooltip; clicking
-                              opens a floating `.mix-meta-popup` panel.
+                              panel; reads `mixLibrary` from `data/index.json`;
+                              hovering a `.mix` file shows a metadata tooltip;
+                              clicking opens a floating `.mix-meta-popup`
+                              panel.
                               Public API: `initMixFileBrowser`,
                               `showMixMetaPopup`, `dismissMixMetaPopup`,
                               `isMixMetaPopupVisible`, `formatMetaTooltip`,
@@ -48,9 +47,7 @@ scripts/dev-server/        ← Vite dev-server plugin and helper modules
   csp-plugin.ts            ← `injectContentSecurityPolicy` Vite plugin shell
   warmup.ts                ← warmup file lists and Istanbul include constants
   warmup-plugin.ts         ← `blockingWarmup` Vite plugin shell
-  mix-files.ts             ← pure archive-path resolver and file-copy helpers
-  mix-files-plugin.ts      ← `serveMixFiles` + `copyMixFilesPlugin` Vite plugin
-                              shells
+  mix-files-plugin.ts      ← `serveMixFiles` Vite plugin shell
   category-config-plugin.ts ← `manageCategoryConfig` Vite plugin shell; watches
                               `output/categories.json` and exposes
                               `PUT /__category-config`
@@ -116,7 +113,7 @@ archive/                   ← read-only source data (14 product folders +
                               browser groups)
 codec/                     ← proprietary DLLs and verification scripts (optional)
 
-dist/                      ← generated Vite production build
+dist/                      ← generated Vite build output
 coverage/                  ← generated Istanbul HTML/LCOV report
 playwright-report/         ← generated Playwright HTML report
 test-results/              ← generated Playwright artifacts
@@ -125,7 +122,7 @@ test-results/              ← generated Playwright artifacts
 
 Browser runtime code lives in `src/`, TypeScript extraction tools live in
 `scripts/`, and build/coverage scripts live in `scripts/`. Vite bundles `src/`
-into `dist/assets/` for production.
+into `dist/assets/` when `npm run build` is executed.
 
 `vite.config.ts` is a composition root only — it wires together constants and
 the five plugin shells from `scripts/dev-server/` without containing any plugin
@@ -137,8 +134,7 @@ logic itself. The dev-server module layout is:
 | `csp-plugin.ts` | `injectContentSecurityPolicy` Vite plugin shell |
 | `warmup.ts` | Warmup file lists and Istanbul include constants |
 | `warmup-plugin.ts` | `blockingWarmup` Vite plugin shell |
-| `mix-files.ts` | Pure archive-path resolver and file-copy helpers |
-| `mix-files-plugin.ts` | `serveMixFiles` + `copyMixFilesPlugin` plugin shells |
+| `mix-files-plugin.ts` | `serveMixFiles` plugin shell |
 | `category-config-plugin.ts` | `manageCategoryConfig` plugin shell |
 | `sample-metadata-plugin.ts` | `manageSampleMetadata` plugin shell |
 | `index.ts` | Shared pure helpers reused across plugin shells |
@@ -162,7 +158,8 @@ logic itself. The dev-server module layout is:
 
 `npm run serve` starts the Vite dev server on `http://127.0.0.1:3000/`.
 
-`npm run build` runs the Vite production build to `dist/`.
+`npm run build` regenerates `data/index.json` and writes a local Vite bundle
+to `dist/`.
 
 Before Vite bundles the app, `scripts/build-index.ts` regenerates
 `data/index.json`. That step merges recovered embedded-MIX samples into the
@@ -178,14 +175,14 @@ Timeline diagnostics strategy (Phase C decision):
   so `data/index.json` and `data/mix-metadata.json` expose the same
   diagnostics fields.
 - `src/mix-file-browser.ts::mixMetaFromIr` remains the runtime fallback for
-  local/FSA-selected files that do not come from prebuilt index metadata.
+  selected `.mix` entries that do not include prebuilt index metadata.
 
 During local development, the Vite server also exposes three project-specific
 endpoints:
 
 1. `/mix/<product>/<filename>` — allow-listed access to archived `.mix` files.
-2. `PUT /__category-config` — dev-only persistence for `output/categories.json`.
-3. `PUT /__sample-move` — dev-only sample moves between category/subcategory
+2. `PUT /__category-config` — persistence for `output/categories.json`.
+3. `PUT /__sample-move` — sample moves between category/subcategory
   folders; patches `output/metadata.json` and emits a hot-update event so the
   grid reloads in place.
 
@@ -211,26 +208,17 @@ markdownlint.
 
 ## Browser UI Contract
 
-The app is a single-page application with two states:
+The app is a single-page application that boots directly into the main shell.
 
-### Home Page
-
-- Centered hero with app logo, title (`eJay Sound Browser`), description,
-  folder-picker button, and optional dev-library shortcut.
-- A **BPM filter** dropdown sits at the bottom-right of the home area
-  (persists into the main view once a library is loaded).
-
-### Main App View (after loading a library)
+### Main App View
 
 The browser shell is split into three stacked regions above the fixed transport
 bar:
 
 - **Top editor area** — A live `Mix Archive` browser on the left and a real
-  sequencer timeline on the right. In dev mode, the archive tree loads from
-  `data/index.json`; in production-style folder picks it prompts for an
-  `archive/` root via the File System Access API or a `webkitdirectory`
-  fallback. Clicking a `.mix` item opens a metadata popup, parses the file,
-  and renders a fixed-width beat timeline with a moving playhead and
+  sequencer timeline on the right. The archive tree loads from
+  `data/index.json`. Clicking a `.mix` item opens a metadata popup, parses the
+  file, and renders a fixed-width beat timeline with a moving playhead and
   horizontal auto-scroll.
 - **Middle context strip** — Current mix status text plus subcategory tabs,
   sample search input, sample-bubble zoom controls, and the BPM filter.
@@ -243,9 +231,7 @@ matches search terms against the display name plus the rendered metadata line.
 The default sort is descending beat length and then display name, but
 right-clicking empty grid space opens a sort menu for name, BPM, sample
 length, product, detail, subcategory, and source. Right-clicking a sample
-block opens a `Move to` menu; in the dev-server library flow the move is
-persisted through `PUT /__sample-move`, while production-style folder picks
-apply the change in-memory only.
+block opens a `Move to` menu, persisted through `PUT /__sample-move`.
 
 ### Terminology
 
@@ -260,7 +246,7 @@ apply the change in-memory only.
 The browser runtime treats `.mix` playback as a three-stage flow:
 
 1. `src/mix-file-browser.ts` emits a `MixFileRef` with a canonical `productId`
-   plus a byte source (`/mix/` URL, File System Access handle, or picked file).
+  plus a `/mix/` URL byte source.
 2. `src/main.ts` reads the bytes, calls `parseMixBrowser(...)`, and converts the
    resulting `MixIR` into a `MixPlaybackPlan` via `buildMixPlaybackPlan(...)`.
 3. The sequencer renders that plan as a horizontally scrollable DAW-style

@@ -32,7 +32,7 @@ export function resolveDevWebSocketPort(
  *
  * @param allowDevWebSocket When `true`, adds a `ws://127.0.0.1:<port>`
  *   origin to `connect-src` so Vite HMR can communicate with the browser.
- *   Set to `false` for production builds.
+ *   Set to `false` for non-serve build contexts.
  * @param devWebSocketPort The local port the Vite dev server listens on.
  *   Ignored when `allowDevWebSocket` is `false`.
  */

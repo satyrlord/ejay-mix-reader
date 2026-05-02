@@ -1,15 +1,12 @@
 /**
  * mix-file-browser.ts — In-app .mix file browser for the archive-tree panel.
  *
- * DEV mode:  immediately shows a product tree from the pre-built mixLibrary
- *            index; no OS dialog needed.
- * PROD mode: opens a "Select folder" OS dialog via the File System Access API
- *            (`showDirectoryPicker`), with a `<input webkitdirectory>` fallback
- *            for browsers that do not support FSA.
+ * The tree is built from the pre-generated `mixLibrary` entries in
+ * `data/index.json`.
  */
 
 import type { MixFileEntry, MixFileMeta, MixLibraryEntry } from "./data.js";
-import { humanizeIdentifier, mixFormatLabel } from "./data.js";
+import { mixFormatLabel } from "./data.js";
 import { parseMixBrowser } from "./mix-parser.js";
 import { LANE_COUNT_BY_FORMAT, maxRecoveredBeat } from "./mix-player.js";
 import {
@@ -38,18 +35,10 @@ export interface MixFileRef {
   source: MixFileSource;
 }
 
-export type MixFileSource =
-  | { type: "url"; url: string }
-  | { type: "handle"; handle: FileSystemFileHandle }
-  | { type: "file"; file: File };
+export type MixFileSource = { type: "url"; url: string };
 
 export interface MixFileBrowserOptions {
-  /** `true` when running under the Vite dev server. */
-  isDev: boolean;
-  /**
-   * Pre-built mix library from `data/index.json`.
-   * Required (and only used) when `isDev` is `true`.
-   */
+  /** Pre-built mix library from `data/index.json`. */
   mixLibrary?: MixLibraryEntry[];
   /** Called when the user double-clicks a .mix file in the tree. */
   onSelectFile: (ref: MixFileRef) => void;
@@ -86,82 +75,16 @@ interface FlatTreeFile extends TreeFile {
   groupLabel: string;
 }
 
-interface RelativeMixFile {
-  relativeParts: string[];
-  label: string;
-  source: MixFileSource;
-}
-
-interface GroupDescriptor {
-  id: string;
-  label: string;
-  productHint?: string;
-  sortBucket: number;
-}
-
 interface BrowserState {
   activeKey: string | null;
   expandedIds: Set<string>;
 }
-
-const MIX_SCAN_MAX_FILES = 1024;
-const MIX_META_READ_CONCURRENCY = 8;
 
 /* -------------------------------------------------------------------------- */
 /* SVG helpers                                                                */
 /* -------------------------------------------------------------------------- */
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-
-const USERDATA_GROUP_ID = "_userdata";
-
-const PRODUCT_LABELS: Record<string, string> = {
-  Dance_eJay1: "Dance eJay 1",
-  Dance_eJay2: "Dance eJay 2",
-  Dance_eJay3: "Dance eJay 3",
-  Dance_eJay4: "Dance eJay 4",
-  Dance_SuperPack: "Dance SuperPack",
-  "HipHop 1": "HipHop eJay 1",
-  "HipHop eJay 1": "HipHop eJay 1",
-  "HipHop 2": "HipHop eJay 2",
-  "HipHop eJay 2": "HipHop eJay 2",
-  "HipHop 3": "HipHop eJay 3",
-  "HipHop eJay 3": "HipHop eJay 3",
-  "HipHop 4": "HipHop eJay 4",
-  "HipHop eJay 4": "HipHop eJay 4",
-  House_eJay: "House eJay",
-  Rave: "Rave",
-  "Techno 3": "Techno eJay 3",
-  TECHNO_EJAY: "Techno eJay",
-  Xtreme_eJay: "Xtreme eJay",
-};
-
-const PRODUCT_HINTS: Record<string, string> = {
-  Dance_eJay1: "Dance_eJay1",
-  Dance_eJay2: "Dance_eJay2",
-  Dance_eJay3: "Dance_eJay3",
-  Dance_eJay4: "Dance_eJay4",
-  Dance_SuperPack: "Dance_SuperPack",
-  "HipHop 1": "HipHop_eJay1",
-  "HipHop eJay 1": "HipHop_eJay1",
-  "HipHop 2": "HipHop_eJay2",
-  "HipHop eJay 2": "HipHop_eJay2",
-  "HipHop 3": "HipHop_eJay3",
-  "HipHop eJay 3": "HipHop_eJay3",
-  "HipHop 4": "HipHop_eJay4",
-  "HipHop eJay 4": "HipHop_eJay4",
-  House_eJay: "House_eJay",
-  Rave: "Rave",
-  "Techno 3": "Techno_eJay3",
-  TECHNO_EJAY: "Techno_eJay",
-  Xtreme_eJay: "Xtreme_eJay",
-};
-
-const GENERATION_PACK_HINTS: Record<string, string> = {
-  Dance: "GenerationPack1_Dance",
-  HipHop: "GenerationPack1_HipHop",
-  Rave: "GenerationPack1_Rave",
-};
 
 function makePath(d: string, extra?: Record<string, string>): SVGPathElement {
   const path = document.createElementNS(SVG_NS, "path");
@@ -203,69 +126,6 @@ function fileIcon(): SVGSVGElement {
   );
 }
 
-function humanizeUserdataSegment(value: string): string {
-  const normalized = value.startsWith("_") ? value.slice(1) : value;
-  return humanizeIdentifier(normalized, { compactDmkit: true });
-}
-
-function userdataGroupLabel(relParts: string[]): string {
-  return `User: ${relParts.map(humanizeUserdataSegment).join(" \u2013 ")}`;
-}
-
-function productLabelForDir(dirName: string): string {
-  return PRODUCT_LABELS[dirName] ?? humanizeIdentifier(dirName, { compactDmkit: true });
-}
-
-function generationPackLabel(segment: string): string {
-  return `GenerationPack1 ${humanizeIdentifier(segment, { compactDmkit: true })}`;
-}
-
-function rootNeedsPrefix(rootName: string): boolean {
-  return rootName === USERDATA_GROUP_ID || rootName === "GenerationPack1" || rootName in PRODUCT_HINTS;
-}
-
-function normaliseRelativeParts(rootName: string, relativeParts: string[]): string[] {
-  return rootNeedsPrefix(rootName) ? [rootName, ...relativeParts] : relativeParts;
-}
-
-function describeGroup(relativeParts: string[]): GroupDescriptor {
-  const parts = relativeParts.filter(Boolean);
-  if (parts.length === 0) {
-    return {
-      id: "Selected files",
-      label: "Selected files",
-      sortBucket: 0,
-    };
-  }
-
-  const [head, second] = parts;
-  if (head === USERDATA_GROUP_ID) {
-    const relParts = parts.slice(1, -1);
-    const groupParts = relParts.length > 0 ? relParts : [USERDATA_GROUP_ID];
-    return {
-      id: `${USERDATA_GROUP_ID}/${groupParts.join("/")}`,
-      label: relParts.length > 0 ? userdataGroupLabel(relParts) : "User files",
-      sortBucket: 1,
-    };
-  }
-
-  if (head === "GenerationPack1" && second) {
-    return {
-      id: `GenerationPack1/${second}`,
-      label: generationPackLabel(second),
-      productHint: GENERATION_PACK_HINTS[second],
-      sortBucket: 0,
-    };
-  }
-
-  return {
-    id: head,
-    label: productLabelForDir(head),
-    productHint: PRODUCT_HINTS[head],
-    sortBucket: 0,
-  };
-}
-
 export function mixMetaFromIr(ir: ReturnType<typeof parseMixBrowser>): MixFileMeta | undefined {
   if (!ir) return undefined;
 
@@ -293,111 +153,6 @@ export function mixMetaFromIr(ir: ReturnType<typeof parseMixBrowser>): MixFileMe
   if (maxBeat !== null) meta.maxBeat = maxBeat;
 
   return meta;
-}
-
-
-
-async function readMixFileMeta(source: MixFileSource, productHint?: string): Promise<MixFileMeta | undefined> {
-  try {
-    const file = source.type === "handle"
-      ? await source.handle.getFile()
-      : source.type === "file"
-        ? source.file
-        : null;
-    if (!file) return undefined;
-    const buffer = await file.arrayBuffer();
-    return mixMetaFromIr(parseMixBrowser(buffer, productHint));
-  } catch {
-    return undefined;
-  }
-}
-
-async function mapWithConcurrency<T, R>(
-  values: readonly T[],
-  limit: number,
-  mapper: (value: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  if (values.length === 0) return [];
-
-  const results = new Array<R>(values.length);
-  const concurrency = Math.max(1, Math.min(limit, values.length));
-  let cursor = 0;
-
-  const workers = Array.from({ length: concurrency }, async () => {
-    while (true) {
-      const currentIndex = cursor;
-      cursor += 1;
-      if (currentIndex >= values.length) {
-        return;
-      }
-      results[currentIndex] = await mapper(values[currentIndex]!, currentIndex);
-    }
-  });
-
-  await Promise.all(workers);
-  return results;
-}
-
-function limitScannedMixFiles(files: RelativeMixFile[]): RelativeMixFile[] {
-  if (files.length <= MIX_SCAN_MAX_FILES) return files;
-  console.warn(`Mix browser scan truncated to ${MIX_SCAN_MAX_FILES} files.`);
-  return files.slice(0, MIX_SCAN_MAX_FILES);
-}
-
-async function buildGroupsFromRelativeFiles(
-  rootName: string,
-  files: RelativeMixFile[],
-): Promise<TreeGroup[]> {
-  const grouped = new Map<string, { descriptor: GroupDescriptor; files: RelativeMixFile[] }>();
-
-  for (const file of files) {
-    const normalizedParts = normaliseRelativeParts(rootName, file.relativeParts);
-    const descriptor = describeGroup(normalizedParts);
-    const existing = grouped.get(descriptor.id);
-    if (existing) {
-      existing.files.push(file);
-    } else {
-      grouped.set(descriptor.id, { descriptor, files: [file] });
-    }
-  }
-
-  const groups = await Promise.all([...grouped.values()].map(async ({ descriptor, files: groupFiles }) => {
-    const sortedFiles = groupFiles
-      .slice()
-      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
-
-    const filesWithMeta = await mapWithConcurrency(
-      sortedFiles,
-      MIX_META_READ_CONCURRENCY,
-      async (file) => ({
-        key: `${descriptor.id}/${file.relativeParts.join("/")}`,
-        label: file.label,
-        source: file.source,
-        meta: await readMixFileMeta(file.source, descriptor.productHint),
-      }),
-    );
-
-    return {
-      id: descriptor.id,
-      label: descriptor.label,
-      sortBucket: descriptor.sortBucket,
-      files: filesWithMeta,
-    };
-  }));
-
-  return groups
-    .sort((left, right) => {
-      if (left.sortBucket !== right.sortBucket) {
-        return left.sortBucket - right.sortBucket;
-      }
-      return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
-    })
-    .map(({ sortBucket: _sortBucket, ...group }) => group);
-}
-
-/* istanbul ignore next -- only rendered from the PROD-mode choose-folder button */
-function chooseFolderIcon(): SVGSVGElement {
-  return makeSvg(makePath("M2 4.5h5L8.5 6H14v7H2V4.5z"));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -638,19 +393,6 @@ function renderTreeGroups(
       renderTreeGroups(content, groups, state, onSelect);
     });
 
-
-  function activateTreeFile(
-    content: HTMLElement,
-    state: BrowserState,
-    key: string,
-    button: HTMLButtonElement,
-  ): void {
-    state.activeKey = key;
-    for (const active of content.querySelectorAll<HTMLButtonElement>(".mix-tree-item.is-active")) {
-      active.classList.remove("is-active");
-    }
-    button.classList.add("is-active");
-  }
     for (const file of group.files) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -690,11 +432,24 @@ function renderTreeGroups(
   content.appendChild(root);
 }
 
+function activateTreeFile(
+  content: HTMLElement,
+  state: BrowserState,
+  key: string,
+  button: HTMLButtonElement,
+): void {
+  state.activeKey = key;
+  for (const active of content.querySelectorAll<HTMLButtonElement>(".mix-tree-item.is-active")) {
+    active.classList.remove("is-active");
+  }
+  button.classList.add("is-active");
+}
+
 /* -------------------------------------------------------------------------- */
-/* DEV mode — build tree groups from the pre-built index                     */
+/* Build tree groups from the pre-built index                                 */
 /* -------------------------------------------------------------------------- */
 
-function buildDevGroups(mixLibrary: MixLibraryEntry[]): TreeGroup[] {
+function buildGroupsFromLibrary(mixLibrary: MixLibraryEntry[]): TreeGroup[] {
   return mixLibrary.map((entry) => ({
     id: entry.id,
     label: entry.name,
@@ -708,67 +463,6 @@ function buildDevGroups(mixLibrary: MixLibraryEntry[]): TreeGroup[] {
       },
     })),
   }));
-}
-
-/* -------------------------------------------------------------------------- */
-/* PROD mode — File System Access API directory scan                         */
-/* -------------------------------------------------------------------------- */
-
-/* istanbul ignore next -- OS-dialog path is not exercised by the coverage harness */
-async function scanDirectory(
-  dir: FileSystemDirectoryHandle,
-  depth: number,
-  relativeParts: string[],
-  files: RelativeMixFile[],
-): Promise<void> {
-  if (depth > 4) return;
-
-  for await (const [name, handle] of dir.entries()) {
-    if (handle.kind === "directory") {
-      await scanDirectory(
-        handle as FileSystemDirectoryHandle,
-        depth + 1,
-        [...relativeParts, name],
-        files,
-      );
-    } else if (handle.kind === "file" && /\.mix$/i.test(name)) {
-      files.push({
-        relativeParts: [...relativeParts, name],
-        label: name,
-        source: { type: "handle", handle: handle as FileSystemFileHandle },
-      });
-    }
-  }
-}
-
-/* istanbul ignore next -- OS-dialog path is not exercised by the coverage harness */
-async function buildFsaGroups(
-  root: FileSystemDirectoryHandle,
-): Promise<TreeGroup[]> {
-  const files: RelativeMixFile[] = [];
-  await scanDirectory(root, 0, [], files);
-  return buildGroupsFromRelativeFiles(root.name, limitScannedMixFiles(files));
-}
-
-/* -------------------------------------------------------------------------- */
-/* PROD mode — <input webkitdirectory> fallback                              */
-/* -------------------------------------------------------------------------- */
-
-/* istanbul ignore next -- file-input path is not exercised by the coverage harness */
-async function buildFileInputGroups(rootName: string, files: File[]): Promise<TreeGroup[]> {
-  const relativeFiles: RelativeMixFile[] = files
-    .filter((file) => /\.mix$/i.test(file.name))
-    .map((file) => {
-      const parts = file.webkitRelativePath.split("/").filter(Boolean);
-      const relativeParts = parts.length > 1 ? parts.slice(1) : [file.name];
-      return {
-        relativeParts,
-        label: file.name,
-        source: { type: "file" as const, file },
-      };
-    });
-
-  return buildGroupsFromRelativeFiles(rootName, limitScannedMixFiles(relativeFiles));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -808,7 +502,7 @@ export function initMixFileBrowser(
     }
   }
 
-  function setHeaderRoot(_rootName: string, onChoose?: () => void): void {
+  function setHeader(): void {
     if (!headerEl) return;
     headerEl.replaceChildren();
 
@@ -820,30 +514,6 @@ export function initMixFileBrowser(
       options.onProductModeChange?.(next);
     });
     headerEl.appendChild(productSelect);
-
-    /* istanbul ignore next -- "choose different folder" button only rendered in PROD mode */
-    if (onChoose) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "archive-choose-btn";
-      btn.title = "Choose different folder";
-      btn.setAttribute("aria-label", "Choose different folder");
-      btn.appendChild(chooseFolderIcon());
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        onChoose();
-      });
-      headerEl.appendChild(btn);
-    }
-  }
-
-  /* istanbul ignore next -- only called from PROD-mode triggerFsa, not exercised by the coverage harness */
-  function showLoadingState(): void {
-    content.replaceChildren();
-    const p = document.createElement("p");
-    p.className = "archive-placeholder";
-    p.textContent = "Scanning for .mix files\u2026";
-    content.appendChild(p);
   }
 
   function applyTree(groups: TreeGroup[]): void {
@@ -868,89 +538,16 @@ export function initMixFileBrowser(
     renderFlatProductList(content, flatFiles, state, productMode, options.onSelectFile);
   }
 
-  // ── DEV flow ───────────────────────────────────────────────────────────────
-
-  function triggerDev(): void {
-    const groups = buildDevGroups(options.mixLibrary ?? []);
+  function loadTree(): void {
+    const groups = buildGroupsFromLibrary(options.mixLibrary ?? []);
     defaultExpand(groups);
-    setHeaderRoot("archive");
+    setHeader();
     applyTree(groups);
   }
-
-  // ── PROD flow ──────────────────────────────────────────────────────────────
-
-  /* istanbul ignore next -- OS-dialog paths are not exercised by the coverage harness */
-  async function triggerFsa(): Promise<void> {
-    let root: FileSystemDirectoryHandle;
-    try {
-      root = await window.showDirectoryPicker({ mode: "read" });
-    } catch (err) {
-      // User cancelled — leave the placeholder in place
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      throw err;
-    }
-
-    showLoadingState();
-    const groups = await buildFsaGroups(root);
-    defaultExpand(groups);
-    setHeaderRoot(root.name, () => void triggerFsa());
-    applyTree(groups);
-  }
-
-  /* istanbul ignore next -- file input path is not exercised by the coverage harness */
-  function triggerFileInput(onChoose: () => void): void {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".mix";
-    input.multiple = true;
-    // Request directory mode so the OS shows a folder picker where supported.
-    input.setAttribute("webkitdirectory", "");
-    input.style.display = "none";
-    document.body.appendChild(input);
-
-    input.addEventListener(
-      "change",
-      () => {
-        const files = Array.from(input.files ?? []);
-        input.remove();
-        if (files.length === 0) return;
-
-        const folderName =
-          files[0]?.webkitRelativePath.split("/")[0] ?? "Selected files";
-
-        void (async () => {
-          showLoadingState();
-          const groups = await buildFileInputGroups(folderName, files);
-          defaultExpand(groups);
-          setHeaderRoot(folderName, onChoose);
-          applyTree(groups);
-        })();
-      },
-      { once: true },
-    );
-
-    input.click();
-  }
-
-  /* istanbul ignore next -- OS-dialog path is not exercised by the coverage harness */
-  function triggerProd(): void {
-    if (typeof window.showDirectoryPicker === "function") {
-      void triggerFsa();
-    } else {
-      triggerFileInput(() => triggerProd());
-    }
-  }
-
-  // ── Main trigger ───────────────────────────────────────────────────────────
 
   function handleTrigger(): void {
     if (treeLoaded) return;
-    if (options.isDev) {
-      triggerDev();
-    } else {
-      /* istanbul ignore next -- production-only path */
-      triggerProd();
-    }
+    loadTree();
   }
 
   // ── Attach click listener to the archive sidebar ───────────────────────────

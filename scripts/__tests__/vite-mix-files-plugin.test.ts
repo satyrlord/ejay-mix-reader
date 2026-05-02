@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { createReadStream, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 
 // vi.mock is hoisted before imports by Vitest — only createReadStream is replaced
 vi.mock("fs", async (importOriginal) => {
@@ -7,7 +7,7 @@ vi.mock("fs", async (importOriginal) => {
   return { ...actual, createReadStream: vi.fn() };
 });
 import { tmpdir } from "os";
-import { join, resolve } from "path";
+import { join } from "path";
 import {
   afterEach,
   beforeEach,
@@ -18,7 +18,7 @@ import {
   type Mock,
 } from "vitest";
 
-import { copyMixFilesPlugin, serveMixFiles } from "../dev-server/mix-files-plugin.js";
+import { serveMixFiles } from "../dev-server/mix-files-plugin.js";
 
 // ---------------------------------------------------------------------------
 // Shared mock helpers
@@ -245,52 +245,4 @@ describe("serveMixFiles", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// copyMixFilesPlugin
-// ---------------------------------------------------------------------------
-
-describe("copyMixFilesPlugin", () => {
-  let archiveRoot: string;
-  let destDir: string;
-
-  beforeEach(() => {
-    archiveRoot = mkdtempSync(join(tmpdir(), "copy-mix-src-"));
-    destDir = mkdtempSync(join(tmpdir(), "copy-mix-dst-"));
-    // Provide at least one valid .mix file for Dance_eJay1
-    mkdirSync(join(archiveRoot, "Dance_eJay1", "MIX"), { recursive: true });
-    writeFileSync(join(archiveRoot, "Dance_eJay1", "MIX", "START.MIX"), "payload");
-  });
-
-  afterEach(() => {
-    rmSync(archiveRoot, { recursive: true, force: true });
-    rmSync(destDir, { recursive: true, force: true });
-    vi.restoreAllMocks();
-  });
-
-  it("returns a plugin named 'copy-mix-files' with apply = 'build'", () => {
-    const plugin = copyMixFilesPlugin(archiveRoot);
-    expect(plugin.name).toBe("copy-mix-files");
-    expect(plugin.apply).toBe("build");
-  });
-
-  it("copies files returned by listMixFilesForCopy into the output dir", () => {
-    // Redirect outDir to our temp destDir by mocking process.cwd()
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(destDir);
-    const plugin = copyMixFilesPlugin(archiveRoot);
-    (plugin as { closeBundle(): void }).closeBundle();
-    cwdSpy.mockRestore();
-
-    const dest = resolve(destDir, "dist", "mix", "Dance_eJay1", "START.MIX");
-    expect(existsSync(dest)).toBe(true);
-  });
-
-  it("creates the product directory when it does not exist", () => {
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(destDir);
-    const plugin = copyMixFilesPlugin(archiveRoot);
-    (plugin as { closeBundle(): void }).closeBundle();
-    cwdSpy.mockRestore();
-
-    expect(existsSync(resolve(destDir, "dist", "mix", "Dance_eJay1"))).toBe(true);
-  });
-});
 

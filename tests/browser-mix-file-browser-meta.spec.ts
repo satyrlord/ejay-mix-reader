@@ -202,7 +202,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-popup-open")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: lib, onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: lib, onSelectFile: () => {} });
       sidebar.click();
 
       const item = sidebar.querySelector<HTMLButtonElement>(".mix-tree-item")!;
@@ -241,7 +241,7 @@ test.describe("mix-file-browser module", () => {
       document.body.appendChild(host);
 
       const sidebar = host.querySelector<HTMLElement>("#at-popup-replace")!;
-      initMixFileBrowser(sidebar, { isDev: true, mixLibrary: lib, onSelectFile: () => {} });
+      initMixFileBrowser(sidebar, { mixLibrary: lib, onSelectFile: () => {} });
       sidebar.click();
 
       const [btnA, btnB] = Array.from(sidebar.querySelectorAll<HTMLButtonElement>(".mix-tree-item"));

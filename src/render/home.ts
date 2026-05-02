@@ -1,4 +1,4 @@
-// Home page and SPA shell rendering.
+// SPA shell rendering.
 
 import {
   SVG_NS,
@@ -46,80 +46,6 @@ export function createBpmSelect(selectId: string, ariaLabel: string): HTMLSelect
   }
 
   return select;
-}
-
-export function renderHomePage(
-  container: HTMLElement,
-  onPickFolder: () => void,
-  onUseDev: (() => void) | null,
-): void {
-  container.replaceChildren();
-
-  const wrapper = document.createElement("div");
-  wrapper.id = "home-page";
-  wrapper.className = "home-page";
-
-  const card = document.createElement("div");
-  card.className = "home-card";
-
-  const logo = document.createElement("div");
-  logo.className = "home-logo";
-  logo.setAttribute("aria-hidden", "true");
-  for (let index = 0; index < 6; index++) {
-    logo.appendChild(document.createElement("span"));
-  }
-
-  const title = document.createElement("h1");
-  title.className = "home-title";
-  const titleBrand = document.createElement("span");
-  titleBrand.textContent = "eJay";
-  title.append(titleBrand, document.createTextNode(" Sound Browser"));
-
-  const copy = document.createElement("p");
-  copy.className = "home-copy";
-  copy.textContent = "Browse, search, and preview extracted audio samples from your eJay library.";
-
-  const actions = document.createElement("div");
-  actions.className = "home-actions";
-
-  const footer = document.createElement("footer");
-  footer.className = "home-footer";
-  const repoLink = document.createElement("a");
-  repoLink.href = "https://github.com/satyrlord/ejay-mix-reader";
-  repoLink.target = "_blank";
-  repoLink.rel = "noopener noreferrer";
-  repoLink.textContent = "satyrlord/ejay-mix-reader";
-  footer.appendChild(repoLink);
-
-  card.append(logo, title, copy, actions, footer);
-
-  const bpmCorner = document.createElement("div");
-  bpmCorner.className = "home-bpm-corner";
-  const bpmLabel = document.createElement("span");
-  bpmLabel.textContent = "BPM filter";
-  bpmCorner.append(bpmLabel, createBpmSelect("home-bpm", "BPM filter"));
-
-  wrapper.append(card, bpmCorner);
-
-  const pickBtn = document.createElement("button");
-  pickBtn.id = "pick-folder-btn";
-  pickBtn.className = "home-primary-btn";
-  pickBtn.type = "button";
-  pickBtn.textContent = "Choose output folder";
-  pickBtn.addEventListener("click", onPickFolder);
-  actions.appendChild(pickBtn);
-
-  if (onUseDev) {
-    const devBtn = document.createElement("button");
-    devBtn.id = "dev-library-btn";
-    devBtn.className = "home-dev-btn";
-    devBtn.type = "button";
-    devBtn.textContent = "Use development library";
-    devBtn.addEventListener("click", onUseDev);
-    actions.appendChild(devBtn);
-  }
-
-  container.appendChild(wrapper);
 }
 
 function renderArchivePlaceholder(container: HTMLElement): void {

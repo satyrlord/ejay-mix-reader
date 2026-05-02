@@ -68,9 +68,8 @@ are skipped. Run it again after adding more products.
 npm run serve   # opens http://127.0.0.1:3000
 ```
 
-Click **Choose output folder** and point it at the `output/` folder.
-The app loads your samples, and the Mix Archive panel lists any `.mix`
-project files found in the products you copied.
+The app loads samples from `output/` automatically, and the Mix Archive panel
+lists `.mix` project files from the generated index data.
 
 ## Requirements
 
@@ -87,7 +86,7 @@ project files found in the products you copied.
 npm run serve              # start the browser app
 npm run setup              # (re)build output/ after adding products
 npm run setup -- --force   # re-extract even products already done
-npm run build              # regenerate data/index.json only
+npm run build              # regenerate data/index.json and dist/
 npm run mix:meta           # rescan archive/ for .mix file metadata
 npm run mix:dump-cd -- --product Dance_eJay3  # dump Format C/D track records for one product
 npm test                   # run Playwright tests

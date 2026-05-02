@@ -10,7 +10,6 @@ const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.me
 
 const expectedTransportVersion = buildDisplayVersion(packageJson.version, {
   cwd: new URL("..", import.meta.url),
-  deploymentCount: process.env.EJAY_GITHUB_DEPLOYMENT_COUNT,
 });
 const appStartupTimeoutMs = process.env.VITE_COVERAGE === "true" ? 30_000 : 10_000;
 

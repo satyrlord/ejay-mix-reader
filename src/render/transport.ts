@@ -9,9 +9,7 @@ import type { GridSortDir, GridSortKey } from "../data.js";
 import type { Player } from "../player.js";
 
 const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "v0.0.0";
-const BUILD_LABEL = import.meta.env.DEV
-  ? "eJay mix reader \u2014 full version"
-  : "eJay mix reader demo \u2014 clone this repo for full functionality";
+const BUILD_LABEL = "eJay mix reader";
 
 const GLOBAL_UI_1000MS_EFFECT_CSS_VAR = "--ui-deliberate-1000ms-effect-duration";
 
