@@ -19,12 +19,12 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
 import { basename, dirname, join, parse, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 import { EMBEDDED_MIX_MANIFEST_FILENAME, EMBEDDED_MIX_SUBCATEGORY_ID } from "../src/data.js";
-import { hashPcm } from "./find-duplicates.js";
 import { detectFormat } from "./mix-parser.js";
 import { readWavInfo, type WavInfo } from "./wav-decode.js";
 
@@ -39,6 +39,46 @@ const RIFF = 0x46464952; // "RIFF" little-endian
 const WAVE = 0x45564157; // "WAVE"
 const MIN_PATH_BYTES = 8;
 const MAX_PATH_BYTES = 260;
+const RIFF_MAGIC = Buffer.from("RIFF", "ascii");
+const WAVE_MAGIC = Buffer.from("WAVE", "ascii");
+const DATA_ID = Buffer.from("data", "ascii");
+
+function wavPcmSlice(data: Buffer): Buffer | null {
+  if (data.length < 12 || !data.subarray(0, 4).equals(RIFF_MAGIC) || !data.subarray(8, 12).equals(WAVE_MAGIC)) {
+    return null;
+  }
+
+  let offset = 12;
+  while (offset + 8 <= data.length) {
+    const chunkId = data.subarray(offset, offset + 4);
+    const chunkSize = data.readUInt32LE(offset + 4);
+    const chunkDataStart = offset + 8;
+    const chunkDataEnd = chunkDataStart + chunkSize;
+    if (chunkDataEnd > data.length) return null;
+
+    if (chunkId.equals(DATA_ID)) {
+      return data.subarray(chunkDataStart, chunkDataEnd);
+    }
+
+    offset = chunkDataEnd + (chunkSize & 1);
+  }
+
+  return null;
+}
+
+function hashWavPcm(filePath: string): string | null {
+  let data: Buffer;
+  try {
+    data = readFileSync(filePath);
+  } catch {
+    return null;
+  }
+
+  const pcm = wavPcmSlice(data);
+  if (!pcm || pcm.length === 0) return null;
+  return createHash("sha256").update(pcm).digest("hex");
+}
+
 
 export interface EmbeddedMixWavRecord extends WavInfo {
   mixPath: string;
@@ -168,7 +208,7 @@ function reserveCanonicalOutputPath(
       return candidatePath;
     }
 
-    const existingDigest = hashPcm(candidatePath);
+    const existingDigest = hashWavPcm(candidatePath);
     if (existingDigest === digest) {
       reserved.set(key, digest);
       return candidatePath;
@@ -428,7 +468,7 @@ export function canonicalizeExtractedOutputLayout(
 
   const groups = new Map<string, ExtractedEmbeddedMixWav[]>();
   for (const record of records) {
-    const digest = hashPcm(record.outputPath) ?? `path:${normalizedPathKey(record.outputPath)}`;
+    const digest = hashWavPcm(record.outputPath) ?? `path:${normalizedPathKey(record.outputPath)}`;
     const existing = groups.get(digest) ?? [];
     existing.push(record);
     groups.set(digest, existing);
@@ -448,7 +488,7 @@ export function canonicalizeExtractedOutputLayout(
 
     if (canonicalKey !== targetKey) {
       if (existsSync(targetPath)) {
-        const existingDigest = hashPcm(targetPath);
+        const existingDigest = hashWavPcm(targetPath);
         if (existingDigest === digest) {
           if (existsSync(canonicalRecord.outputPath)) {
             rmSync(canonicalRecord.outputPath, { force: true });

@@ -466,101 +466,6 @@ function sliceArchiveEntry(part: ArchivePart, entry: InfEntry): Buffer | null {
   return entryData.length >= 10 ? entryData : null;
 }
 
-type StereoChannel = "L" | "R";
-
-function parseStereoFilename(name: string): { base: string; channel: StereoChannel } | null {
-  const match = name.match(/^(.*?)([LR])$/i);
-  if (!match || !match[1]) return null;
-  return {
-    base: match[1],
-    channel: match[2].toUpperCase() as StereoChannel,
-  };
-}
-
-function parseStereoAlias(alias: string): { base: string; channel: StereoChannel } | null {
-  const match = alias.trim().match(/^(.*)\s+\(([LR])\)$/i);
-  if (!match || !match[1]) return null;
-  return {
-    base: match[1].trim(),
-    channel: match[2].toUpperCase() as StereoChannel,
-  };
-}
-
-function isStereoPair(left: InfEntry, right: InfEntry): boolean {
-  const leftName = parseStereoFilename(left.filename);
-  const rightName = parseStereoFilename(right.filename);
-  if (
-    leftName &&
-    rightName &&
-    leftName.base === rightName.base &&
-    leftName.channel === "L" &&
-    rightName.channel === "R"
-  ) {
-    return true;
-  }
-
-  const leftAlias = parseStereoAlias(left.alias);
-  const rightAlias = parseStereoAlias(right.alias);
-  return !!(
-    leftAlias &&
-    rightAlias &&
-    leftAlias.base === rightAlias.base &&
-    leftAlias.channel === "L" &&
-    rightAlias.channel === "R"
-  );
-}
-
-function stripStereoInfo(entry: InfEntry): { filenameBase: string; aliasBase: string } {
-  return {
-    filenameBase: parseStereoFilename(entry.filename)?.base ?? entry.filename,
-    aliasBase: parseStereoAlias(entry.alias)?.base ?? entry.alias.trim(),
-  };
-}
-
-interface PackedEntryAudio {
-  pcmData: Buffer;
-  decodedSamples: number;
-  detail?: string;
-}
-
-function decodePackedEntryAudio(entryData: Buffer, use16bit: boolean): PackedEntryAudio | null {
-  const result = decodePxdFile(entryData);
-  if (!result) return null;
-
-  const meta = parseMetadataFields(result.metadataText);
-  return {
-    pcmData: use16bit ? applyDpcm(result.pcm) : result.pcm,
-    decodedSamples: result.decodedSize,
-    detail: meta.detail,
-  };
-}
-
-function interleaveStereoChannels(left: Buffer, right: Buffer, sampleWidth: number): Buffer {
-  const silenceByte = sampleWidth === 1 ? 0x80 : 0x00;
-  const silenceSample = Buffer.alloc(sampleWidth, silenceByte);
-  const frameCount = Math.max(left.length / sampleWidth, right.length / sampleWidth);
-  const interleaved = Buffer.alloc(frameCount * sampleWidth * 2);
-
-  for (let frame = 0; frame < frameCount; frame++) {
-    const sourceOffset = frame * sampleWidth;
-    const targetOffset = frame * sampleWidth * 2;
-
-    if (sourceOffset + sampleWidth <= left.length) {
-      left.copy(interleaved, targetOffset, sourceOffset, sourceOffset + sampleWidth);
-    } else {
-      silenceSample.copy(interleaved, targetOffset);
-    }
-
-    if (sourceOffset + sampleWidth <= right.length) {
-      right.copy(interleaved, targetOffset + sampleWidth, sourceOffset, sourceOffset + sampleWidth);
-    } else {
-      silenceSample.copy(interleaved, targetOffset + sampleWidth);
-    }
-  }
-
-  return interleaved;
-}
-
 // --- Extraction Modes ---
 
 export interface CatalogEntry {
@@ -839,49 +744,6 @@ export function extractPackedArchive(
       continue;
     }
 
-    const nextEntry = entryIndex + 1 < entries.length ? entries[entryIndex + 1] : null;
-    if (nextEntry && isStereoPair(entry, nextEntry)) {
-      const nextPart = archiveParts[partIndices[entryIndex + 1]];
-      const nextData = sliceArchiveEntry(nextPart, nextEntry);
-      const leftAudio = nextData ? decodePackedEntryAudio(pxdData, use16bit) : null;
-      const rightAudio = nextData ? decodePackedEntryAudio(nextData, use16bit) : null;
-
-      if (leftAudio && rightAudio) {
-        const { filenameBase, aliasBase } = stripStereoInfo(entry);
-        const safeName = filenameBase.replace(/[/\\]/g, "_");
-        const wavName = `${safeName}.wav`;
-        const wavOut = join(outputDir, wavName);
-        const sampleWidth = use16bit ? 2 : 1;
-        const interleaved = interleaveStereoChannels(leftAudio.pcmData, rightAudio.pcmData, sampleWidth);
-        writeWav(wavOut, interleaved, SAMPLE_RATE, 2, sampleWidth);
-        decodedCount++;
-
-        const durationSec = Math.max(leftAudio.decodedSamples, rightAudio.decodedSamples) / SAMPLE_RATE;
-        const beats = beatsFromDuration(durationSec, bpm);
-        const detail = leftAudio.detail ?? rightAudio.detail;
-
-        const stereoEntry: CatalogEntry = {
-          filename: wavName,
-          source_archive: basename(archivePath),
-          internal_name: filenameBase,
-          sample_id: entry.sample_id,
-          alias: aliasBase || entry.alias || filenameBase,
-          category: entry.category || nextEntry.category,
-          duration_sec: Math.round(durationSec * 10000) / 10000,
-          beats,
-          decoded_size: interleaved.length,
-          sample_rate: SAMPLE_RATE,
-          bit_depth: use16bit ? 16 : 8,
-          channels: 2,
-        };
-        if (detail) stereoEntry.detail = detail;
-
-        catalog.push(stereoEntry);
-        entryIndex++;
-        continue;
-      }
-    }
-
     const { filename, category, alias } = entry;
     const safeName = filename.replace(/[/\\]/g, "_");
     const wavName = `${safeName}.wav`;
@@ -952,37 +814,6 @@ export function extractPackedArchive(
   if (wavCount) console.log(`  Copied:  ${wavCount} embedded WAV files`);
   if (skipped) console.log(`  Skipped: ${skipped} unrecognized entries`);
 
-  return catalog;
-}
-
-/**
- * Identify stereo L/R pairs in the catalog and mark them.
- */
-export function mergeStereoPairs(catalog: CatalogEntry[]): CatalogEntry[] {
-  const byBase: Record<string, Record<string, CatalogEntry>> = {};
-
-  for (const entry of catalog) {
-    const alias = entry.alias ?? "";
-    if (alias.endsWith(" L") || alias.endsWith(" R")) {
-      const base = alias.slice(0, -2);
-      const channel = alias.slice(-1);
-      if (!byBase[base]) byBase[base] = {};
-      byBase[base][channel] = entry;
-    }
-  }
-
-  let paired = 0;
-  for (const channels of Object.values(byBase)) {
-    if (channels["L"] && channels["R"]) {
-      channels["L"].stereo_pair = channels["R"].filename;
-      channels["L"].stereo_channel = "L";
-      channels["R"].stereo_pair = channels["L"].filename;
-      channels["R"].stereo_channel = "R";
-      paired++;
-    }
-  }
-
-  if (paired) console.log(`  Stereo:  ${paired} L/R pairs identified`);
   return catalog;
 }
 
@@ -1292,9 +1123,6 @@ function main(): void {
       console.log("  Decoded: 1 PXD file");
     }
   }
-
-  // Identify stereo pairs
-  catalog = mergeStereoPairs(catalog);
 
   // Enrich with category data
   if (values.catalog) {

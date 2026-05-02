@@ -93,7 +93,6 @@ scripts/pxd-parser.ts        ← PXD format parser and packed archive extractor
 scripts/reorganize.ts        ← channel folder organizer using INF metadata
 scripts/normalize.ts         ← flatten all products into a single channel tree
 scripts/enrich-metadata.ts   ← backfill missing BPM/category data in metadata
-scripts/find-duplicates.ts   ← duplicate sample detection by PCM hash
 scripts/gen1-catalog.ts      ← Gen 1 MAX/Pxddance/PXD.TXT catalog parser
 scripts/mix-grid-analyzer.ts ← Gen 1 `.mix` grid and trailer analyzer
 scripts/mix-parser.ts        ← unified `.mix` parser emitting MixIR
@@ -362,7 +361,7 @@ When loading a `.mix` file in the browser, sample references emitted by
 `src/mix-parser.ts` (`MixIR.sampleRef`-style entries) are currently resolved
 directly against `data/index.json` / `output/<product>/metadata.json`. Some
 references fail because the original sample lives under a different product
-folder (deduplicated by `scripts/find-duplicates.ts`) or under a renamed
+folder (after library cleanup/reorganization) or under a renamed
 filename (`scripts/rename-samples.ts`). Today these failures silently drop
 the voice from playback.
 
@@ -465,8 +464,7 @@ timestamp_iso,mix_path,product,channel,filename,reason
 
 ### Out of Scope
 
-- Editing `logs/duplicates.csv` (read-only input produced by
-  `scripts/find-duplicates.ts`).
+- Editing legacy `logs/duplicates.csv` files (if present).
 - Mutating any `output/**/metadata.json` file at runtime.
 - Persisting `logs/log.csv` from the browser without a developer-driven
   download/POST step (no silent server writes from the SPA).

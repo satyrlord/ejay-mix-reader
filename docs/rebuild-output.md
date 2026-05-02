@@ -75,7 +75,7 @@ output/metadata.json                     ← consolidated catalog
 output/categories.json                   ← subcategory tab config
         │
         │ 6. rename-samples.ts --apply (filename normalisation)
-        │ 7. find-duplicates.ts        (optional cleanup)
+        │ 7. preserve duplicates      (default: keep per-product identity)
         │ 8. mix:extract-embedded      (optional: recover audio from oversized .mix)
         │ 9. samples:recover           (optional: pull in missing referenced samples)
         ▼
@@ -223,22 +223,14 @@ This rewrites both the `.wav` filenames on disk and the `filename`
 field of every entry in `output/metadata.json`. All other metadata
 fields are preserved.
 
-## 7. Deduplicate (optional but recommended)
+## 7. Preserve duplicates (default)
 
-Detect WAV files whose PCM payload is byte-identical (regardless of
-filename or product) and remove redundant copies.
+Keep duplicate PCM files across products to preserve original product-local
+sample identity for MIX resolution.
 
-```bash
-# Cross-product duplicates (same PCM in two different products)
-npx tsx scripts/find-duplicates.ts --output-dir output --cross-product
-
-# Same-product duplicates (same PCM under two different filenames)
-npx tsx scripts/find-duplicates.ts --output-dir output --same-product
-```
-
-Both runs write a CSV report under `logs/` for review. The
-[`deduplicate` skill](../.github/skills/deduplicate/SKILL.md) describes
-the recommended retention rules.
+- Do not delete duplicates during rebuild.
+- Treat duplicate detection as optional analysis only, never as a cleanup step
+  in the default pipeline.
 
 ## 8. Recover embedded MIX audio (optional)
 

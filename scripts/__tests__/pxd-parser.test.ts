@@ -12,7 +12,6 @@ import {
   parsePxdHeader,
   decodePxdFile,
   parseMetadataFields,
-  mergeStereoPairs,
   buildCategoryMap,
   enrichWithCategories,
   writeWav,
@@ -406,42 +405,6 @@ describe("parseMetadataFields", () => {
     const result = parseMetadataFields(text);
     expect(result.alias).toBe("Alias");
     expect(result.detail).toBe("Detail");
-  });
-});
-
-// ── mergeStereoPairs ─────────────────────────────────────────
-
-describe("mergeStereoPairs", () => {
-  it("pairs L/R entries with matching base", () => {
-    const catalog: CatalogEntry[] = [
-      { filename: "bass_L.wav", alias: "Bass L" },
-      { filename: "bass_R.wav", alias: "Bass R" },
-    ];
-    mergeStereoPairs(catalog);
-    expect(catalog[0].stereo_pair).toBe("bass_R.wav");
-    expect(catalog[0].stereo_channel).toBe("L");
-    expect(catalog[1].stereo_pair).toBe("bass_L.wav");
-    expect(catalog[1].stereo_channel).toBe("R");
-  });
-
-  it("does not pair entries without L/R suffix", () => {
-    const catalog: CatalogEntry[] = [
-      { filename: "kick.wav", alias: "Kick" },
-      { filename: "snare.wav", alias: "Snare" },
-    ];
-    mergeStereoPairs(catalog);
-    expect(catalog[0].stereo_pair).toBeUndefined();
-    expect(catalog[1].stereo_pair).toBeUndefined();
-  });
-
-  it("does not pair unmatched L or R entries", () => {
-    const catalog: CatalogEntry[] = [
-      { filename: "bass_L.wav", alias: "Bass L" },
-      { filename: "drum_R.wav", alias: "Drum R" },
-    ];
-    mergeStereoPairs(catalog);
-    expect(catalog[0].stereo_pair).toBeUndefined();
-    expect(catalog[1].stereo_pair).toBeUndefined();
   });
 });
 
@@ -1084,7 +1047,7 @@ describe("extractPackedArchive", () => {
     rmSync(tmpDir, { recursive: true });
   });
 
-  it("interleaves stereo L/R pairs into a single stereo WAV", () => {
+  it("keeps L/R entries as separate mono WAV files", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "pack-"));
     const outDir = join(tmpDir, "out");
 
@@ -1104,15 +1067,16 @@ describe("extractPackedArchive", () => {
     writeFileSync(infPath, infContent, "ascii");
 
     const catalog = extractPackedArchive(archPath, outDir, infPath, false);
-    expect(catalog.length).toBe(1);
-    expect(catalog[0].filename).toBe("BASS01.wav");
-    expect(catalog[0].alias).toBe("Bass");
-    expect(catalog[0].channels).toBe(2);
+    expect(catalog.length).toBe(2);
+    expect(catalog.map((entry) => entry.filename)).toEqual(["BASS01L.wav", "BASS01R.wav"]);
+    expect(catalog.every((entry) => entry.channels === 1)).toBe(true);
 
-    const wavData = readFileSync(join(outDir, "BASS01.wav"));
-    expect(wavData.readUInt16LE(22)).toBe(2);
-    expect(wavData.readUInt32LE(40)).toBe(4);
-    expect([...wavData.subarray(44)]).toEqual([0x80, 0x80, 0x81, 0x7f]);
+    const leftWav = readFileSync(join(outDir, "BASS01L.wav"));
+    const rightWav = readFileSync(join(outDir, "BASS01R.wav"));
+    expect(leftWav.readUInt16LE(22)).toBe(1);
+    expect(rightWav.readUInt16LE(22)).toBe(1);
+    expect([...leftWav.subarray(44)]).toEqual([0x80, 0x81]);
+    expect([...rightWav.subarray(44)]).toEqual([0x80, 0x7f]);
     rmSync(tmpDir, { recursive: true });
   });
 
