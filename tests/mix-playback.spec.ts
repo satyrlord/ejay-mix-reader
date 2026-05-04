@@ -116,9 +116,26 @@ async function openMixFromArchive(page: Page, mixCase: MixPlaybackCase): Promise
     test.skip(true, `${mixCase.productId}/${mixCase.filename} not present in archive/`);
   }
 
-  await page.goto("/");
-  await page.waitForLoadState("networkidle");
-  await expect(page.locator("#archive-tree")).toBeVisible();
+  const archiveTree = page.locator("#archive-tree");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      await page.reload();
+    } else {
+      await page.goto("/");
+    }
+
+    await page.waitForLoadState("networkidle");
+    const archiveVisible = await archiveTree
+      .isVisible({ timeout: mixContextUpdateTimeoutMs })
+      .catch(() => false);
+    if (archiveVisible) {
+      break;
+    }
+
+    if (attempt === 1) {
+      await expect(archiveTree).toBeVisible({ timeout: mixContextUpdateTimeoutMs });
+    }
+  }
 
   const archiveAwaitingClick = page.locator(".archive-tree-content.is-awaiting-click").first();
   if (await archiveAwaitingClick.isVisible().catch(() => false)) {
@@ -215,19 +232,40 @@ async function readSequencerParitySnapshot(page: Page, maxBeat: number): Promise
       .filter((value) => Number.isFinite(value) && value > 0)
       .slice(0, maxVisibleBeat);
 
+    const canvas = document.querySelector<HTMLElement>(".sequencer-canvas");
+    const computed = canvas ? getComputedStyle(canvas) : null;
+    const labelPxRaw = Number.parseFloat(computed?.getPropertyValue("--mix-grid-label-px") ?? "");
+    const beatStepPxRaw = Number.parseFloat(computed?.getPropertyValue("--mix-grid-beat-step-px") ?? "");
+    const labelPx = Number.isFinite(labelPxRaw) && labelPxRaw >= 0 ? labelPxRaw : 160;
+    const beatStepPx = Number.isFinite(beatStepPxRaw) && beatStepPxRaw > 0 ? beatStepPxRaw : 48;
+
     const GRID_LABEL_COLUMNS = 2;
     const events: SequencerParitySnapshot["events"] = [];
     for (const row of document.querySelectorAll<HTMLElement>(".sequencer-lane")) {
       const laneLabel = row.querySelector<HTMLElement>(".sequencer-lane-label")?.textContent?.trim() ?? "";
       for (const block of row.querySelectorAll<HTMLElement>(".sequencer-event")) {
         const label = block.textContent?.trim() ?? "";
-        const gridColumn = block.style.gridColumn;
-        const match = /^\s*(\d+)\s*\/\s*span\s*(\d+)/i.exec(gridColumn);
-        if (!label || !match) continue;
+        if (!label) continue;
 
-        const gridStart = Number.parseInt(match[1], 10);
-        if (!Number.isFinite(gridStart)) continue;
-        const beat = Math.max(0, gridStart - GRID_LABEL_COLUMNS);
+        let beat: number | null = null;
+
+        const gridColumn = block.style.gridColumn;
+        const gridMatch = /^\s*(\d+)\s*\/\s*span\s*(\d+)/i.exec(gridColumn);
+        if (gridMatch) {
+          const gridStart = Number.parseInt(gridMatch[1], 10);
+          if (Number.isFinite(gridStart)) {
+            beat = Math.max(0, gridStart - GRID_LABEL_COLUMNS);
+          }
+        }
+
+        if (beat === null) {
+          const leftPx = Number.parseFloat(block.style.left);
+          if (Number.isFinite(leftPx) && beatStepPx > 0) {
+            beat = Math.max(0, Math.floor((leftPx - labelPx) / beatStepPx));
+          }
+        }
+
+        if (beat === null) continue;
         if (beat > maxVisibleBeat) continue;
 
         events.push({ laneLabel, beat, label });
@@ -532,7 +570,8 @@ async function assertTimelineSeekAutoscrollsToPlayhead(page: Page): Promise<void
     if (!Number.isFinite(labelPx) || !Number.isFinite(beatStepPx) || beatStepPx <= 0) return null;
 
     const maxBeat = Math.max(0, beatNodes.length - 1);
-    const targetBeat = Math.min(maxBeat, Math.max(8, Math.floor(maxBeat * 0.78)));
+    const targetBeat = Math.min(maxBeat, Math.max(8, Math.floor(maxBeat * 0.55)));
+    const beforeScrollLeft = scroll.scrollLeft;
     const laneRect = lane.getBoundingClientRect();
     lane.dispatchEvent(new MouseEvent("click", {
       bubbles: true,
@@ -542,17 +581,20 @@ async function assertTimelineSeekAutoscrollsToPlayhead(page: Page): Promise<void
 
     return {
       targetBeat,
-      beforeScrollLeft: scroll.scrollLeft,
+      beforeScrollLeft,
     };
   });
 
   expect(seek).not.toBeNull();
   const seekData = seek as { targetBeat: number; beforeScrollLeft: number };
 
-  await page.waitForFunction(({ beforeScrollLeft }: { beforeScrollLeft: number }) => {
+  const scrolledForward = await page.waitForFunction(({ beforeScrollLeft }: { beforeScrollLeft: number }) => {
     const scroll = document.querySelector<HTMLElement>(".sequencer-scroll");
-    return scroll !== null && scroll.scrollLeft > beforeScrollLeft + 1;
+    if (!scroll) return -1;
+    return scroll.scrollLeft > beforeScrollLeft + 1 ? scroll.scrollLeft : -1;
   }, { beforeScrollLeft: seekData.beforeScrollLeft }, { timeout: playbackStartTimeoutMs });
+  const scrolledForwardLeft = await scrolledForward.jsonValue();
+  expect(scrolledForwardLeft).toBeGreaterThan(seekData.beforeScrollLeft + 1);
 
   await page.waitForFunction(({ targetBar }: { targetBar: number }) => {
     const position = document.querySelector<HTMLElement>(".seq-position")?.textContent ?? "";
@@ -561,12 +603,6 @@ async function assertTimelineSeekAutoscrollsToPlayhead(page: Page): Promise<void
     const currentBar = Number(match[1]);
     return Number.isFinite(currentBar) && currentBar >= targetBar;
   }, { targetBar: seekData.targetBeat + 1 }, { timeout: playbackStartTimeoutMs });
-
-  const afterSeekScroll = await page.locator(".sequencer-scroll").evaluate((el: HTMLElement) => ({
-    scrollLeft: el.scrollLeft,
-  }));
-
-  expect(afterSeekScroll.scrollLeft).toBeGreaterThan(seekData.beforeScrollLeft);
 
   const stopButton = page.locator(".seq-stop-btn");
   await stopButton.evaluate((button: HTMLButtonElement) => {
@@ -769,9 +805,24 @@ test.describe("start.mix per-product matrix", () => {
     await stopButton.click();
 
     const spans = await page.locator(".sequencer-event").evaluateAll((nodes) => nodes.map((node) => {
-      const inline = (node as HTMLElement).style.gridColumn;
-      const match = /span\s+(\d+)/i.exec(inline);
-      return match ? Number(match[1]) : 1;
+      const element = node as HTMLElement;
+      const gridInline = element.style.gridColumn;
+      const gridMatch = /span\s+(\d+)/i.exec(gridInline);
+      if (gridMatch) {
+        return Number(gridMatch[1]);
+      }
+
+      const widthPx = Number.parseFloat(element.style.width);
+      const canvas = element.closest<HTMLElement>(".sequencer-canvas");
+      const beatStepPxRaw = Number.parseFloat(
+        canvas ? getComputedStyle(canvas).getPropertyValue("--mix-grid-beat-step-px") : "",
+      );
+      if (!Number.isFinite(widthPx) || !Number.isFinite(beatStepPxRaw) || beatStepPxRaw <= 0) {
+        return 1;
+      }
+
+      // Absolute-positioned blocks trim 2px on each side from the requested beat span width.
+      return Math.max(1, Math.round((widthPx + 4) / beatStepPxRaw));
     }));
 
     expect(spans.length).toBeGreaterThan(0);

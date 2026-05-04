@@ -3,6 +3,11 @@
 This document is a safe place to capture ideas, epics, user stories, and feature
 breakdowns for planning sessions.
 
+## Active Migration References
+
+1. ADR: [docs/decisions/ADR-001-electron-react-migration.md](decisions/ADR-001-electron-react-migration.md)
+2. Backlog: [docs/electron-react-migration-backlog.md](electron-react-migration-backlog.md)
+
 ## Chronological Action Plan
 
 Execution order is intentional and should be followed top to bottom.

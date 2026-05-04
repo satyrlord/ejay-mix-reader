@@ -3,11 +3,18 @@
   "version": "1.27",
   "private": true,
   "type": "module",
+  "main": "dist-electron/electron/main.js",
   "description": "Extract and browse audio samples from eJay music software titles.",
   "scripts": {
     "serve": "vite",
     "setup": "tsx scripts/build-library.ts",
-    "build": "tsx scripts/build-index.ts && vite build",
+    "build:web": "tsx scripts/build-index.ts && vite build",
+    "build": "npm run build:web",
+    "build:electron": "node ./node_modules/typescript/lib/tsc.js -p tsconfig.electron.json",
+    "build:desktop": "npm run build:web && npm run build:electron",
+    "electron": "electron ./dist-electron/electron/main.js",
+    "electron:dev": "tsx scripts/run-electron-dev.ts",
+    "dist:win": "npm run build:desktop && electron-builder --win nsis portable --x64",
     "mix:extract-embedded": "tsx scripts/extract-embedded-mix-audio.ts",
     "mix:meta": "tsx scripts/extract-mix-metadata.ts",
     "mix:dump-cd": "tsx scripts/mix-format-cd-records.ts",
@@ -21,7 +28,7 @@
     "test:unit:coverage": "vitest run --coverage",
     "test:coverage": "tsx scripts/test-coverage.ts",
     "test:ui": "playwright test --ui",
-    "typecheck": "node ./node_modules/typescript/lib/tsc.js -p tsconfig.json && node ./node_modules/typescript/lib/tsc.js -p tsconfig.browser.json && node ./node_modules/typescript/lib/tsc.js -p tsconfig.config.json && node ./node_modules/typescript/lib/tsc.js -p tsconfig.test.json",
+    "typecheck": "node ./node_modules/typescript/lib/tsc.js -p tsconfig.json && node ./node_modules/typescript/lib/tsc.js -p tsconfig.browser.json && node ./node_modules/typescript/lib/tsc.js -p tsconfig.config.json && node ./node_modules/typescript/lib/tsc.js -p tsconfig.test.json && node ./node_modules/typescript/lib/tsc.js -p tsconfig.electron.json",
     "lint": "eslint .",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\"",
     "validate": "npm run typecheck && npm run lint && npm run test:unit:coverage && npm run lint:md"
@@ -29,6 +36,33 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/satyrlord/ejay-mix-reader.git"
+  },
+  "build": {
+    "appId": "com.ejay.mixreader",
+    "productName": "eJay Mix Reader",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "data/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "arch": [
+        "x64"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "license": "MIT",
   "devDependencies": {
@@ -38,6 +72,8 @@
     "@types/node": "^25.6.0",
     "@vitest/coverage-v8": "^4.1.5",
     "daisyui": "^5.5.19",
+    "electron": "^36.0.0",
+    "electron-builder": "^26.0.12",
     "eslint": "^10.3.0",
     "globals": "^17.6.0",
     "istanbul-lib-coverage": "^3.2.2",

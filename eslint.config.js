@@ -7,6 +7,7 @@ const ignores = [
   "coverage/**",
   "coverage-unit/**",
   "dist/**",
+  "dist-electron/**",
   "node_modules/**",
   "output/**",
   "playwright-report/**",

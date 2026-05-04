@@ -87,6 +87,9 @@ npm run serve              # start the browser app
 npm run setup              # (re)build output/ after adding products
 npm run setup -- --force   # re-extract even products already done
 npm run build              # regenerate data/index.json and dist/
+npm run build:electron     # compile Electron main/preload into dist-electron/
+npm run build:desktop      # build web assets + Electron runtime
+npm run electron:dev       # launch Electron against local Vite dev server
 npm run mix:meta           # rescan archive/ for .mix file metadata
 npm run mix:dump-cd -- --product Dance_eJay3  # dump Format C/D track records for one product
 npm test                   # run Playwright tests

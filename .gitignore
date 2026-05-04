@@ -29,6 +29,7 @@ exported/
 # Node.js
 node_modules/
 dist/
+dist-electron/
 data/
 coverage/
 coverage-unit/
