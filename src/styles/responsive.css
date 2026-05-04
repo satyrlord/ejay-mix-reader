@@ -28,11 +28,6 @@
     display: none;
   }
 
-  .transport-build-label {
-    max-width: min(34vw, 12rem);
-    font-size: 0.8rem;
-  }
-
   .context-strip {
     grid-template-columns: 1fr;
     gap: 0.35rem;
@@ -94,6 +89,19 @@
 
   .sample-lane {
     grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .sequencer-controls {
+    gap: 0.5rem;
+    padding-inline: 0.5rem;
+  }
+
+  .seq-timer {
+    font-size: 0.84rem;
+  }
+
+  .seq-position {
+    font-size: 0.8rem;
   }
 
   .subcategory-tab {

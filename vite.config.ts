@@ -16,9 +16,12 @@ import { injectContentSecurityPolicy } from "./scripts/dev-server/csp-plugin.js"
 import { resolveDevWebSocketPort } from "./scripts/dev-server/csp.js";
 import { manageCategoryConfig } from "./scripts/dev-server/category-config-plugin.js";
 import { serveMixFiles } from "./scripts/dev-server/mix-files-plugin.js";
+import { serveOutputFiles } from "./scripts/dev-server/output-files-plugin.js";
+import { managePathConfig } from "./scripts/dev-server/path-config-plugin.js";
 import { manageSampleMetadata } from "./scripts/dev-server/sample-metadata-plugin.js";
 import { blockingWarmup } from "./scripts/dev-server/warmup-plugin.js";
 import { COVERAGE_SOURCE_FILES, WARMUP_FILES as _WARMUP_FILES } from "./scripts/dev-server/warmup.js";
+import { createPathConfigStore } from "./scripts/path-config.js";
 import { buildDisplayVersion } from "./scripts/version.js";
 
 export { applySampleMoveToManifest, resolveMixUrl, validateSampleMovePaths } from "./scripts/dev-server/index.js";
@@ -42,43 +45,49 @@ const APP_VERSION = (() => {
 
 const DEV_WEBSOCKET_PORT = resolveDevWebSocketPort(process.env.VITE_DEV_SERVER_PORT, 3000);
 
-export default defineConfig(({ command }) => ({
-  appType: "spa",
-  base: "/",
-  define: {
-    __APP_VERSION__: JSON.stringify(APP_VERSION),
-  },
-  build: {
-    outDir: "dist",
-    sourcemap: true,
-    rollupOptions: {
-      input: {
-        index: resolve(process.cwd(), "index.html"),
+export default defineConfig(({ command }) => {
+  const pathConfigStore = createPathConfigStore(process.cwd());
+
+  return {
+    appType: "spa",
+    base: "/",
+    define: {
+      __APP_VERSION__: JSON.stringify(APP_VERSION),
+    },
+    build: {
+      outDir: "dist",
+      sourcemap: true,
+      rollupOptions: {
+        input: {
+          index: resolve(process.cwd(), "index.html"),
+        },
       },
     },
-  },
-  plugins: [
-    tailwindcss(),
-    injectContentSecurityPolicy(command === "serve", DEV_WEBSOCKET_PORT),
-    manageCategoryConfig(resolve(process.cwd(), "output")),
-    manageSampleMetadata(resolve(process.cwd(), "output")),
-    serveMixFiles(resolve(process.cwd(), "archive")),
-    ...(process.env.VITE_COVERAGE === "true"
-      ? [istanbulPlugin({
-          include: [...COVERAGE_SOURCE_FILES],
-          extension: [".ts", ".js"],
-          requireEnv: true,
-        }),
-        blockingWarmup([...WARMUP_FILES]),
-        ]
-      : []),
-  ],
-  server: {
-    host: "127.0.0.1",
-    port: 3000,
-    strictPort: true,
-    warmup: {
-      clientFiles: [...WARMUP_FILES],
+    plugins: [
+      tailwindcss(),
+      injectContentSecurityPolicy(command === "serve", DEV_WEBSOCKET_PORT),
+      managePathConfig(pathConfigStore),
+      serveOutputFiles(() => pathConfigStore.getSnapshot().config.outputRoot),
+      manageCategoryConfig(() => pathConfigStore.getSnapshot().config.outputRoot),
+      manageSampleMetadata(() => pathConfigStore.getSnapshot().config.outputRoot),
+      serveMixFiles(() => pathConfigStore.getSnapshot().config.archiveRoots),
+      ...(process.env.VITE_COVERAGE === "true"
+        ? [istanbulPlugin({
+            include: [...COVERAGE_SOURCE_FILES],
+            extension: [".ts", ".js"],
+            requireEnv: true,
+          }),
+          blockingWarmup([...WARMUP_FILES]),
+          ]
+        : []),
+    ],
+    server: {
+      host: "127.0.0.1",
+      port: 3000,
+      strictPort: true,
+      warmup: {
+        clientFiles: [...WARMUP_FILES],
+      },
     },
-  },
-}));
+  };
+});

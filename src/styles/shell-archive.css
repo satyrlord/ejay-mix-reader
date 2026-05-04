@@ -37,7 +37,8 @@
 .shell-splitter::before {
   content: "";
   position: absolute;
-  left: 50%;
+  /* Align the grip with the sequencer center (right column), not the full shell center. */
+  left: calc(50% + (var(--shell-sidebar-width) / 2));
   top: 50%;
   width: clamp(3rem, 9vw, 8rem);
   height: 2px;

@@ -82,10 +82,13 @@ function renderSequencerPlaceholder(container: HTMLElement): void {
   const controls = document.createElement("div");
   controls.className = "sequencer-controls";
   controls.innerHTML = `
-    <button type="button" class="seq-home-btn" aria-label="Move playhead to start" title="Move playhead to start"></button>
-    <button type="button" class="seq-play-btn" aria-label="Play mix" title="Play mix" disabled></button>
-    <button type="button" class="seq-stop-btn" aria-label="Stop mix" disabled></button>
-    <span class="seq-position">0:00 / 0:00</span>
+    <div class="sequencer-controls-left">
+      <button type="button" class="seq-home-btn" aria-label="Move playhead to start" title="Move playhead to start"></button>
+      <button type="button" class="seq-play-btn" aria-label="Play mix" title="Play mix" disabled></button>
+      <button type="button" class="seq-stop-btn" aria-label="Stop mix" disabled></button>
+    </div>
+    <span class="seq-timer" role="timer" aria-live="off">00:00</span>
+    <span class="seq-position">0 events · 0 ready</span>
   `;
 
   const homeBtn = controls.querySelector<HTMLButtonElement>(".seq-home-btn");

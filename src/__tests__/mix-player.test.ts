@@ -306,6 +306,7 @@ describe("buildMixPlaybackPlan", () => {
       ],
     }));
     expect(fallbackPlan.bpm).toBe(120);
+    expect(fallbackPlan.sourceBpm).toBeNull();
 
     const adjustedPlan = buildMixPlaybackPlan(makeMix({
       bpm: 0,
@@ -325,6 +326,51 @@ describe("buildMixPlaybackPlan", () => {
       ],
     }));
     expect(adjustedPlan.bpm).toBe(96);
+    expect(adjustedPlan.sourceBpm).toBeNull();
+  });
+
+  it("prefers bpmAdjusted over base BPM for playback tempo", () => {
+    const plan = buildMixPlaybackPlan(makeMix({
+      bpm: 140,
+      bpmAdjusted: 136,
+      tracks: [
+        {
+          beat: 2,
+          channel: 0,
+          sampleRef: {
+            rawId: 1930,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: 1024,
+          },
+        },
+      ],
+    }));
+
+    expect(plan.bpm).toBe(136);
+    expect(plan.sourceBpm).toBe(140);
+  });
+
+  it("treats Format B timeline positions as bar units", () => {
+    const plan = buildMixPlaybackPlan(makeMix({
+      format: "B",
+      tracks: [
+        {
+          beat: 4,
+          channel: 0,
+          sampleRef: {
+            rawId: 1930,
+            internalName: null,
+            displayName: null,
+            resolvedPath: null,
+            dataLength: 1024,
+          },
+        },
+      ],
+    }));
+
+    expect(plan.timelineUnitBeats).toBe(4);
   });
 
   it("clamps recovered beat positions and loop length to avoid runaway timelines", () => {
@@ -702,6 +748,37 @@ describe("buildMixPlaybackPlan", () => {
     expect(lane1[0]?.lengthBeats).toBe(8);
   });
 
+  it("preserves fractional beat timing and computes sub-beat lane cutoffs", () => {
+    const plan = buildMixPlaybackPlan(makeMix({
+      tracks: [
+        { beat: 17.75, channel: 0, sampleRef: { rawId: 1, internalName: null, displayName: "a", resolvedPath: null, dataLength: null } },
+        { beat: 18.25, channel: 0, sampleRef: { rawId: 2, internalName: null, displayName: "b", resolvedPath: null, dataLength: null } },
+      ],
+    }));
+
+    expect(plan.loopBeats).toBe(20);
+    const lane0 = plan.events.filter((event) => event.channelId === "lane-0");
+    expect(lane0).toHaveLength(2);
+    expect(lane0.map((event) => event.beat)).toEqual([17.75, 18.25]);
+    expect(lane0[0]?.lengthBeats).toBeCloseTo(0.5, 6);
+    expect(lane0[1]?.lengthBeats).toBeCloseTo(1.75, 6);
+  });
+
+  it("keeps only the latest event when two samples start on the same lane beat", () => {
+    const plan = buildMixPlaybackPlan(makeMix({
+      tracks: [
+        { beat: 10, channel: 3, sampleRef: { rawId: 1, internalName: null, displayName: "first", resolvedPath: null, dataLength: null } },
+        { beat: 10, channel: 3, sampleRef: { rawId: 2, internalName: null, displayName: "second", resolvedPath: null, dataLength: null } },
+        { beat: 12, channel: 3, sampleRef: { rawId: 3, internalName: null, displayName: "third", resolvedPath: null, dataLength: null } },
+      ],
+    }));
+
+    const lane3 = plan.events.filter((event) => event.channelId === "lane-3");
+    expect(lane3).toHaveLength(2);
+    expect(lane3.map((event) => event.displayLabel)).toEqual(["second", "third"]);
+    expect(lane3[0]?.lengthBeats).toBe(2);
+  });
+
   it("prefers metadata sample beat lengths and clamps to the lane gap", () => {
     const sampleIndex: Record<string, SampleLookupEntry> = {
       Rave: {
@@ -731,9 +808,46 @@ describe("buildMixPlaybackPlan", () => {
 
     expect(plan.loopBeats).toBe(8);
     const lane0 = plan.events.filter((event) => event.channelId === "lane-0");
-    // First event uses metadata beats (2) even though next event starts much later.
+    // Format B timeline units are bars, so metadata quarter-note beats are
+    // converted to bars (`2 / 4 = 0.5`) before lane-gap clamping.
     // Second event is clamped to lane gap (loop end at beat 8 => gap 2).
-    expect(lane0.map((event) => event.lengthBeats)).toEqual([2, 2]);
+    expect(lane0.map((event) => event.lengthBeats)).toEqual([0.5, 2]);
+  });
+
+  it("retains metadata sample length for tempo compensation after overlap clamping", () => {
+    const sampleIndex: Record<string, SampleLookupEntry> = {
+      Rave: {
+        byAlias: {},
+        bySource: {},
+        byStem: {},
+        byInternalName: {},
+        bySampleId: {
+          "1": "Loop/a.wav",
+          "2": "Loop/b.wav",
+        },
+        byGen1Id: {},
+        byPathBeats: {
+          // Format B timeline units are bars, so 8 quarter-note beats = 2 bars.
+          "Loop/a.wav": 8,
+          "Loop/b.wav": 4,
+        },
+      },
+    };
+
+    const plan = buildMixPlaybackPlan(makeMix({
+      product: "Rave",
+      tracks: [
+        { beat: 0, channel: 0, sampleRef: { rawId: 1, internalName: null, displayName: "a", resolvedPath: null, dataLength: null } },
+        { beat: 1, channel: 0, sampleRef: { rawId: 2, internalName: null, displayName: "b", resolvedPath: null, dataLength: null } },
+      ],
+    }), sampleIndex);
+
+    const lane0 = plan.events.filter((event) => event.channelId === "lane-0");
+    expect(lane0).toHaveLength(2);
+    // First event is clamped to lane gap (1 bar) but keeps the intrinsic
+    // sample length (2 bars) for runtime tempo compensation.
+    expect(lane0[0]?.lengthBeats).toBe(1);
+    expect(lane0[0]?.sourceLengthBeats).toBe(2);
   });
 
   it("converts metadata quarter-note beats for Format A and extends loop to 2-bar boundary", () => {
@@ -1296,6 +1410,121 @@ describe("MixPlayerHost", () => {
     const started = host.play(120, 10);
     expect(started).toBe(2);
     expect(host.isPlaying).toBe(true);
+  });
+
+  it("applies tempo compensation rate when referenceBeats is provided", () => {
+    const ctx = makeCtx();
+    const sources: AudioBufferSourceNodeLike[] = [];
+    ctx.createBufferSource = () => {
+      const src: AudioBufferSourceNodeLike = {
+        buffer: null,
+        playbackRate: { value: 1 },
+        connect: () => {},
+        disconnect: () => {},
+        start: vi.fn(),
+        stop: vi.fn(),
+      };
+      sources.push(src);
+      return src;
+    };
+
+    const host = new MixPlayerHost(ctx);
+    host.registerChannel("bass");
+    // 1-second sample, 2 beats at 60 BPM => target duration 2 seconds => rate 0.5.
+    host.scheduleSample({
+      buffer: makeAudioBuffer(1, 44_100, 44_100),
+      beat: 0,
+      channelId: "bass",
+      referenceBeats: 2,
+    });
+    host.play(60, 0);
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.playbackRate.value).toBeCloseTo(0.5, 6);
+  });
+
+  it("falls back to referenceBpm when referenceBeats is unavailable", () => {
+    const ctx = makeCtx();
+    const sources: AudioBufferSourceNodeLike[] = [];
+    ctx.createBufferSource = () => {
+      const src: AudioBufferSourceNodeLike = {
+        buffer: null,
+        playbackRate: { value: 1 },
+        connect: () => {},
+        disconnect: () => {},
+        start: vi.fn(),
+        stop: vi.fn(),
+      };
+      sources.push(src);
+      return src;
+    };
+
+    const host = new MixPlayerHost(ctx);
+    host.registerChannel("bass");
+    host.scheduleSample({
+      buffer: makeAudioBuffer(),
+      beat: 0,
+      channelId: "bass",
+      referenceBpm: 70,
+    });
+    host.play(68, 0);
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.playbackRate.value).toBeCloseTo(68 / 70, 6);
+  });
+
+  it("applies click-safe edge ramps when AudioParam automation is available", () => {
+    const ctx = makeCtx();
+    const channelGainParam = { value: 1 };
+    const envelopeGainParam: {
+      value: number;
+      setValueAtTime: ReturnType<typeof vi.fn>;
+      linearRampToValueAtTime: ReturnType<typeof vi.fn>;
+    } = {
+      value: 1,
+      setValueAtTime: vi.fn((value: number) => {
+        envelopeGainParam.value = value;
+        return envelopeGainParam;
+      }),
+      linearRampToValueAtTime: vi.fn((value: number) => {
+        envelopeGainParam.value = value;
+        return envelopeGainParam;
+      }),
+    };
+    let gainCalls = 0;
+    ctx.createGain = () => {
+      gainCalls += 1;
+      return {
+        gain: gainCalls === 1 ? channelGainParam : envelopeGainParam,
+        connect: () => {},
+        disconnect: () => {},
+      };
+    };
+
+    const host = new MixPlayerHost(ctx);
+    host.registerChannel("bass");
+    host.scheduleSample({
+      buffer: makeAudioBuffer(),
+      beat: 4,
+      channelId: "bass",
+      durationBeats: 2,
+    });
+    host.play(120, 10);
+
+    expect(envelopeGainParam.setValueAtTime).toHaveBeenCalledTimes(2);
+    expect(envelopeGainParam.linearRampToValueAtTime).toHaveBeenCalledTimes(2);
+
+    const setCalls = envelopeGainParam.setValueAtTime.mock.calls;
+    const rampCalls = envelopeGainParam.linearRampToValueAtTime.mock.calls;
+
+    expect(setCalls[0]?.[0]).toBe(0);
+    expect(setCalls[0]?.[1]).toBeCloseTo(12, 6);
+    expect(rampCalls[0]?.[0]).toBe(1);
+    expect(rampCalls[0]?.[1]).toBeCloseTo(12.004, 6);
+    expect(setCalls[1]?.[0]).toBe(1);
+    expect(setCalls[1]?.[1]).toBeCloseTo(12.992, 6);
+    expect(rampCalls[1]?.[0]).toBe(0);
+    expect(rampCalls[1]?.[1]).toBeCloseTo(13, 6);
   });
 
   it("ignores scheduled specs for unknown channels", () => {

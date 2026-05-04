@@ -87,6 +87,18 @@ function isContainedRealpath(pathToCheck: string, rootPath: string): boolean {
  */
 export function resolveMixUrl(
   url: string,
+  archiveRoots: string | string[],
+): { absolutePath: string; productId: string; filename: string } | null {
+  const roots = Array.isArray(archiveRoots) ? archiveRoots : [archiveRoots];
+  for (const archiveRoot of roots) {
+    const resolved = resolveMixUrlInArchiveRoot(url, archiveRoot);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolveMixUrlInArchiveRoot(
+  url: string,
   archiveRoot: string,
 ): { absolutePath: string; productId: string; filename: string } | null {
   const match = /^\/mix\/([^/?#]+)\/([^/?#]+)(?:[?#].*)?$/.exec(url);

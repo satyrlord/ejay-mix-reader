@@ -105,6 +105,23 @@ describe("resolveMixUrl", () => {
     expect(resolveMixUrl("/mix/Dance_eJay1/nested/START.MIX", archiveRoot)).toBeNull();
   });
 
+  it("checks multiple archive roots in order and resolves from the first match", () => {
+    const secondaryArchiveRoot = mkdtempSync(join(tmpdir(), "vite-mix-url-secondary-"));
+    try {
+      mkdirSync(join(secondaryArchiveRoot, "Dance_eJay1", "MIX"), { recursive: true });
+      writeFileSync(join(secondaryArchiveRoot, "Dance_eJay1", "MIX", "SECONDARY.MIX"), "payload");
+
+      const resolved = resolveMixUrl(
+        "/mix/Dance_eJay1/SECONDARY.MIX",
+        [archiveRoot, secondaryArchiveRoot],
+      );
+      expect(resolved).not.toBeNull();
+      expect(resolved?.absolutePath).toBe(resolve(secondaryArchiveRoot, "Dance_eJay1", "MIX", "SECONDARY.MIX"));
+    } finally {
+      rmSync(secondaryArchiveRoot, { recursive: true, force: true });
+    }
+  });
+
   describe("_userdata groups", () => {
     beforeEach(() => {
       mkdirSync(join(archiveRoot, "_userdata", "mysets"), { recursive: true });

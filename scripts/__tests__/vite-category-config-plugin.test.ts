@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
@@ -190,6 +190,89 @@ describe("manageCategoryConfig", () => {
         event: CATEGORY_CONFIG_UPDATED_EVENT,
         data: null,
       });
+    });
+
+    it("updates watched path when output root provider changes", () => {
+      const outputRootA = mkdtempSync(join(tmpdir(), "cat-cfg-provider-a-"));
+      const outputRootB = mkdtempSync(join(tmpdir(), "cat-cfg-provider-b-"));
+      let currentRoot = outputRootA;
+      const dynamicServer = makeMockServer();
+
+      (manageCategoryConfig(() => currentRoot).configureServer as ((s: never) => void) | undefined)!(dynamicServer as never);
+      const middleware = dynamicServer.middlewares.use.mock.calls[0][0] as (
+        req: { url?: string; method?: string },
+        res: {
+          statusCode: number;
+          headers: Record<string, string>;
+          setHeader(n: string, v: string): void;
+          end(s?: string): void;
+        },
+        next: () => void,
+      ) => void;
+
+      currentRoot = outputRootB;
+      const next = vi.fn();
+      middleware(
+        { url: "/other", method: "GET" },
+        {
+          statusCode: 200,
+          headers: {},
+          setHeader() {},
+          end() {},
+        },
+        next,
+      );
+
+      expect(next).toHaveBeenCalledOnce();
+      expect(dynamicServer.watcher.add).toHaveBeenCalledWith(resolve(outputRootB, "categories.json"));
+
+      rmSync(outputRootA, { recursive: true, force: true });
+      rmSync(outputRootB, { recursive: true, force: true });
+    });
+
+    it("writes category config to the remapped output root", () => {
+      const outputRootA = mkdtempSync(join(tmpdir(), "cat-cfg-remap-a-"));
+      const outputRootB = mkdtempSync(join(tmpdir(), "cat-cfg-remap-b-"));
+      let currentRoot = outputRootA;
+      const dynamicServer = makeMockServer();
+
+      (manageCategoryConfig(() => currentRoot).configureServer as ((s: never) => void) | undefined)!(dynamicServer as never);
+      const middleware = dynamicServer.middlewares.use.mock.calls[0][0] as (
+        req: NodeJS.EventEmitter & { url?: string; method?: string; setEncoding(e: string): void },
+        res: {
+          statusCode: number;
+          headers: Record<string, string>;
+          setHeader(n: string, v: string): void;
+          end(s?: string): void;
+        },
+        next: () => void,
+      ) => void;
+
+      currentRoot = outputRootB;
+
+      const req = Object.assign(new EventEmitter(), {
+        url: "/__category-config",
+        method: "PUT",
+        setEncoding: vi.fn(),
+      });
+      const res = {
+        statusCode: 200,
+        headers: {} as Record<string, string>,
+        setHeader(n: string, v: string) { this.headers[n] = v; },
+        end() {},
+      };
+
+      middleware(req, res, vi.fn());
+      req.emit("data", JSON.stringify({ version: 1, categories: [] }));
+      req.emit("end");
+
+      const remappedConfigPath = resolve(outputRootB, "categories.json");
+      expect(res.statusCode).toBe(204);
+      expect(existsSync(remappedConfigPath)).toBe(true);
+      expect(JSON.parse(readFileSync(remappedConfigPath, "utf-8"))).toEqual({ categories: [] });
+
+      rmSync(outputRootA, { recursive: true, force: true });
+      rmSync(outputRootB, { recursive: true, force: true });
     });
   });
 });

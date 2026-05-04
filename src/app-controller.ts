@@ -13,6 +13,7 @@ import {
 import { parseMixBrowser } from "./mix-parser.js";
 import { buildMixPlaybackPlan, MixPlayerHost } from "./mix-player.js";
 import type { AudioBufferLike, MixPlaybackPlan } from "./mix-player.js";
+import { firstPathConfigIssue } from "./path-config.js";
 import { createSampleGridContextMenuController } from "./sample-grid-context-menu.js";
 import {
   addSubcategoryToCategoryConfig,
@@ -53,7 +54,6 @@ import {
   renderSampleGrid,
   renderSpaShell,
   setMixSampleLoadingOverlay,
-  setTransportBuildLabelAudioPlaying,
   renderSubcategoryTabs,
   showErrorToast,
   type SubcategoryAddOptions,
@@ -100,6 +100,7 @@ interface MixUiRefs {
   homeButton: HTMLButtonElement;
   playButton: HTMLButtonElement;
   stopButton: HTMLButtonElement;
+  timer: HTMLElement;
   position: HTMLElement;
   scroll: HTMLElement;
   playhead: HTMLElement | null;
@@ -128,6 +129,19 @@ const SHELL_SPLITTER_KEY_STEP_PX = 24;
 const SUBCATEGORY_CONTEXT_MENU_ID = "subcategory-context-menu";
 
 const noop = (): void => {};
+
+function formatTransportTimerSeconds(totalSeconds: number): string {
+  const safeSeconds = Number.isFinite(totalSeconds) && totalSeconds > 0
+    ? Math.floor(totalSeconds)
+    : 0;
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function mixBeatToElapsedSeconds(beat: number, plan: MixPlaybackPlan): number {
+  return (Math.max(0, beat) * 60) / timelineBpm(plan);
+}
 
 export function createAppController(app: HTMLElement): () => void {
   const state: AppState = {
@@ -302,7 +316,6 @@ export function createAppController(app: HTMLElement): () => void {
   }
 
   player.onStateChange((playerState) => {
-    setTransportBuildLabelAudioPlaying("sample", playerState === "playing");
     updatePlayingBlock(player.activePath);
     updateTransport(player.activePath, player);
 
@@ -347,6 +360,7 @@ export function createAppController(app: HTMLElement): () => void {
       homeButton: sequencer.querySelector<HTMLButtonElement>(".seq-home-btn")!,
       playButton: sequencer.querySelector<HTMLButtonElement>(".seq-play-btn")!,
       stopButton: sequencer.querySelector<HTMLButtonElement>(".seq-stop-btn")!,
+      timer: sequencer.querySelector<HTMLElement>(".seq-timer")!,
       position: sequencer.querySelector<HTMLElement>(".seq-position")!,
       scroll: sequencer.querySelector<HTMLElement>(".sequencer-scroll")!,
       playhead: sequencer.querySelector<HTMLElement>(".sequencer-playhead"),
@@ -623,6 +637,8 @@ export function createAppController(app: HTMLElement): () => void {
     const ui = getMixUi();
     if (!ui || !activeMixPlan) return;
 
+    ui.timer.textContent = formatTransportTimerSeconds(mixBeatToElapsedSeconds(beat, activeMixPlan));
+
     if (activeMixPlan.loopBeats === null) {
       ui.position.textContent = `${activeMixPlan.events.length} events · ${activeMixPlan.resolvedEvents} ready · list view`;
       return;
@@ -712,11 +728,6 @@ export function createAppController(app: HTMLElement): () => void {
     laneVisibilityToggle.title = laneVisibilityLabel;
     laneVisibilityToggle.appendChild(createLaneVisibilityIcon(showEmptyLanesForCurrentMix));
 
-    const laneVisibilityText = document.createElement("span");
-    laneVisibilityText.className = "sequencer-empty-lanes-toggle-text";
-    laneVisibilityText.textContent = "Empty lanes";
-    laneVisibilityToggle.appendChild(laneVisibilityText);
-
     laneVisibilityToggle.disabled = !canToggleLaneVisibility;
     laneVisibilityToggle.addEventListener("click", (event) => {
       event.preventDefault();
@@ -800,6 +811,7 @@ export function createAppController(app: HTMLElement): () => void {
 
       const label = document.createElement("span");
       label.className = "sequencer-lane-label";
+      label.style.gridRow = "1";
       label.textContent = labelText;
       row.appendChild(label);
 
@@ -810,19 +822,28 @@ export function createAppController(app: HTMLElement): () => void {
       });
 
       for (const event of events) {
+        const eventStartBeat = Math.max(0, Math.min(beatCount, event.beat));
+        const requestedSpanBeats = Math.max(0, event.lengthBeats);
+        const maxSpanBeats = Math.max(0, beatCount - eventStartBeat);
+        const spanBeats = Math.min(requestedSpanBeats, maxSpanBeats);
+        if (spanBeats <= 0) {
+          continue;
+        }
+
         const block = document.createElement("div");
         block.className = `sequencer-event${event.resolved ? "" : " is-missing"}`;
         const categoryToken = categoryTokenFromAudioUrl(event.audioUrl);
         block.dataset.category = categoryToken;
         block.style.setProperty("--seq-event-color", categoryColorFromAudioUrl(event.audioUrl));
-        // Column offset: +2 accounts for the 1-based CSS grid column
-        // numbering and the label column occupying column 1.
-        const GRID_LABEL_COLUMNS = 2;
-        const gridCol = Math.min(beatCount + 1, event.beat + GRID_LABEL_COLUMNS);
-        const requestedSpan = Math.max(1, Math.round(event.lengthBeats));
-        const maxSpan = Math.max(1, beatCount - (gridCol - GRID_LABEL_COLUMNS));
-        const span = Math.min(requestedSpan, maxSpan);
-        block.style.gridColumn = `${gridCol} / span ${span}`;
+        const HORIZONTAL_INSET_PX = 2;
+        const leftPx = MIX_TIMELINE_LABEL_PX + (eventStartBeat * MIX_TIMELINE_BEAT_PX);
+        const widthPx = Math.max(2, (spanBeats * MIX_TIMELINE_BEAT_PX) - (HORIZONTAL_INSET_PX * 2));
+        block.style.position = "absolute";
+        block.style.left = `${leftPx + HORIZONTAL_INSET_PX}px`;
+        block.style.width = `${widthPx}px`;
+        block.style.top = "50%";
+        block.style.transform = "translateY(-50%)";
+        block.style.margin = "0";
         block.textContent = event.displayLabel;
         block.title = event.audioUrl
           ? `${event.displayLabel} · ${event.audioUrl}`
@@ -874,9 +895,10 @@ export function createAppController(app: HTMLElement): () => void {
     }
 
     const laneCount = Math.max(1, lanesEl.childElementCount);
-    lanesEl.style.gridTemplateRows = `repeat(${laneCount}, minmax(0, 1fr))`;
 
     if (laneCount >= MIX_DENSE_LANE_THRESHOLD) {
+      lanesEl.style.gridTemplateRows = `repeat(${laneCount}, minmax(0, 1fr))`;
+      lanesEl.style.removeProperty("align-content");
       const availableLaneHeightPx = Math.max(
         1,
         Math.floor(ui.scroll.clientHeight - ui.header.clientHeight),
@@ -895,6 +917,10 @@ export function createAppController(app: HTMLElement): () => void {
       lanesEl.style.height = `${availableLaneHeightPx}px`;
       ui.scroll.classList.add("is-dense-lanes");
     } else {
+      lanesEl.style.gridTemplateRows = `repeat(${laneCount}, auto)`;
+      // Keep non-dense lanes at natural row height instead of stretching
+      // each visible lane to fill the full sequencer viewport.
+      lanesEl.style.setProperty("align-content", "start");
       lanesEl.classList.remove("sequencer-lanes--dense");
       lanesEl.style.removeProperty("--sequencer-lane-height-px");
       lanesEl.style.removeProperty("--sequencer-event-height-px");
@@ -918,6 +944,7 @@ export function createAppController(app: HTMLElement): () => void {
       renderedMixPlan = null;
       ui.mixName.textContent = "No mix loaded";
       ui.bpmDisplay.innerHTML = "&mdash; BPM";
+      ui.timer.textContent = "00:00";
       ui.position.textContent = "0 events · 0 ready";
       ui.playButton.disabled = true;
       syncPlayPauseButton(ui.playButton, "play");
@@ -933,6 +960,7 @@ export function createAppController(app: HTMLElement): () => void {
 
     ui.mixName.textContent = formatLoadedMixName(activeMixName);
     ui.bpmDisplay.textContent = `${activeMixPlan.bpm} BPM`;
+    ui.timer.textContent = formatTransportTimerSeconds(mixBeatToElapsedSeconds(mixPlayheadBeat, activeMixPlan));
     if (mixSamplesLoading) {
       if (mixSamplesTotalCount > 0) {
         const loaded = Math.max(0, Math.min(mixSamplesTotalCount, mixSamplesLoadedCount));
@@ -1055,7 +1083,6 @@ export function createAppController(app: HTMLElement): () => void {
     mixTransportPlaying = false;
     mixPlaybackHost?.clear();
     mixPlaybackHost = null;
-    setTransportBuildLabelAudioPlaying("mix", false);
     syncMixUi();
     if (resetScrollToStart) {
       const ui = getMixUi();
@@ -1103,6 +1130,9 @@ export function createAppController(app: HTMLElement): () => void {
 
     const plan = activeMixPlan;
     const requestedStartBeat = plan.loopBeats === null ? 0 : clampMixStartBeat(startBeat);
+    const sourceTimelineBpm = (typeof plan.sourceBpm === "number" && Number.isFinite(plan.sourceBpm) && plan.sourceBpm > 0)
+      ? (plan.sourceBpm / Math.max(1, plan.timelineUnitBeats))
+      : null;
     const resetScrollToStart = requestedStartBeat <= 0;
     stopMixPlayback(resetScrollToStart);
     player.stop();
@@ -1119,7 +1149,6 @@ export function createAppController(app: HTMLElement): () => void {
     // progression (playhead/autoscroll/stop control).
     mixTransportPlaying = true;
     const startAtMs = performance.now() + 50;
-    setTransportBuildLabelAudioPlaying("mix", true);
     scheduleMixPlaybackStop(plan, requestedStartBeat);
     syncMixUi();
     startMixPlaybackAnimation(startAtMs, requestedStartBeat);
@@ -1157,6 +1186,8 @@ export function createAppController(app: HTMLElement): () => void {
             buffer,
             beat: Math.max(0, event.beat - requestedStartBeat),
             channelId: event.channelId,
+            referenceBeats: event.sourceLengthBeats ?? undefined,
+            referenceBpm: sourceTimelineBpm ?? undefined,
             durationBeats: event.lengthBeats,
           });
         }
@@ -1202,11 +1233,11 @@ export function createAppController(app: HTMLElement): () => void {
   async function handleMixSelection(ref: MixFileRef): Promise<void> {
     const requestId = ++mixLoadRequestId;
     stopMixPlayback();
-    setMixSampleLoadingState(false, 0, 0);
     mixAutoScrollSuppressedByUser = false;
-    activeMixName = null;
+    activeMixName = ref.label;
     activeMixPlan = null;
     renderedMixPlan = null;
+    setMixSampleLoadingState(true, 0, 0);
     syncMixUi();
 
     try {
@@ -1218,7 +1249,6 @@ export function createAppController(app: HTMLElement): () => void {
         throw new Error(`Could not parse ${ref.label}`);
       }
 
-      activeMixName = ref.label;
       activeMixPlan = buildMixPlaybackPlan(mix, state.sampleIndex);
       syncMixUi();
       await preloadMixPlanAudio(activeMixPlan, requestId);
@@ -1364,6 +1394,20 @@ export function createAppController(app: HTMLElement): () => void {
       handleSubcategoryTabContextMenu(event);
     });
 
+    const pathConfigStatus = library.loadPathConfig?.()
+      .then((pathConfig) => {
+        const firstIssue = firstPathConfigIssue(pathConfig);
+        const hasBlockingIssue = Boolean(pathConfig.parseError || !pathConfig.validation.ok);
+        if (firstIssue && hasBlockingIssue && pathConfig.source === "file") {
+          showErrorToast(`Path setup issue: ${firstIssue}`);
+        } else if (firstIssue) {
+          console.warn(`Path setup warning: ${firstIssue}`);
+        }
+      })
+      .catch((error) => {
+        console.warn("Failed to load path config; continuing with built-in defaults.", error);
+      });
+
     const [index, samples, categoryConfig] = await Promise.all([
       library.loadIndex(),
       library.loadSamples().catch((error) => {
@@ -1375,6 +1419,8 @@ export function createAppController(app: HTMLElement): () => void {
         return buildDefaultCategoryConfig();
       }) ?? Promise.resolve(buildDefaultCategoryConfig()),
     ]);
+
+    void pathConfigStatus;
 
     initMixFileBrowser(currentSlots.archiveTree, {
       mixLibrary: index.mixLibrary,

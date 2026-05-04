@@ -18,6 +18,12 @@ import type { Plugin } from "vite";
 import { CATEGORY_CONFIG_FILENAME, CATEGORY_CONFIG_UPDATED_EVENT } from "../../src/data.js";
 import { createCategoryConfigMiddleware } from "./index.js";
 
+type OutputRootProvider = string | (() => string);
+
+function resolveOutputRoot(provider: OutputRootProvider): string {
+  return typeof provider === "function" ? provider() : provider;
+}
+
 /**
  * Returns a Vite dev-server plugin that:
  * 1. Watches `<outputRoot>/categories.json` for external changes and pushes
@@ -28,11 +34,19 @@ import { createCategoryConfigMiddleware } from "./index.js";
  * @param outputRoot Absolute path to the `output/` directory that contains
  *   `categories.json`.
  */
-export function manageCategoryConfig(outputRoot: string): Plugin {
+export function manageCategoryConfig(outputRoot: OutputRootProvider): Plugin {
   return {
     name: "manage-category-config",
     configureServer(server) {
-      const configPath = resolve(outputRoot, CATEGORY_CONFIG_FILENAME);
+      let watchedConfigPath = resolve(resolveOutputRoot(outputRoot), CATEGORY_CONFIG_FILENAME);
+
+      const ensureWatchedConfigPath = (): string => {
+        const nextPath = resolve(resolveOutputRoot(outputRoot), CATEGORY_CONFIG_FILENAME);
+        if (nextPath === watchedConfigPath) return watchedConfigPath;
+        watchedConfigPath = nextPath;
+        server.watcher.add(watchedConfigPath);
+        return watchedConfigPath;
+      };
 
       const emitCategoryConfigUpdated = (): void => {
         server.ws.send({
@@ -43,22 +57,23 @@ export function manageCategoryConfig(outputRoot: string): Plugin {
       };
 
       const handleWatchedConfigChange = (filePath: string): void => {
-        if (resolve(filePath) !== configPath) return;
+        if (resolve(filePath) !== watchedConfigPath) return;
         emitCategoryConfigUpdated();
       };
 
-      server.watcher.add(configPath);
+      server.watcher.add(watchedConfigPath);
       server.watcher.on("add", handleWatchedConfigChange);
       server.watcher.on("change", handleWatchedConfigChange);
       server.watcher.on("unlink", handleWatchedConfigChange);
 
-      server.middlewares.use(
+      server.middlewares.use((req, res, next) => {
+        const configPath = ensureWatchedConfigPath();
         createCategoryConfigMiddleware(
           configPath,
           emitCategoryConfigUpdated,
           (msg) => server.config.logger.warn(msg),
-        ),
-      );
+        )(req, res, next);
+      });
     },
   };
 }

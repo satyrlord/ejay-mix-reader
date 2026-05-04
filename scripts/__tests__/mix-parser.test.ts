@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { describe, expect, it, vi } from "vitest";
@@ -18,6 +18,9 @@ import {
   detectFormat,
   parseMix,
   parseFormatA,
+  parseFormatB,
+  parseFormatC,
+  parseFormatD,
   parseMixerKV,
   parseCatalogs,
   locateGridTrailer,
@@ -225,6 +228,22 @@ describe("Format A synthetic parsing", () => {
   });
 });
 
+describe("format wrapper shims", () => {
+  it("parses minimal synthetic Format B/C/D buffers", () => {
+    const b = parseFormatB(Buffer.from("#SKKENNUNG#:1234567", "latin1"));
+    expect(b.format).toBe("B");
+    expect(b.tracks).toEqual([]);
+
+    const c = parseFormatC(Buffer.from("#SKKENNUNG#:1234567BOOU1_0#\xB0_#500%\xB0_%", "latin1"));
+    expect(c.format).toBe("C");
+    expect(c.tracks).toEqual([]);
+
+    const d = parseFormatD(Buffer.from("#SKKENNUNG#:1234567MixVolume1#\xB0_#500%\xB0_%", "latin1"));
+    expect(d.format).toBe("D");
+    expect(d.tracks).toEqual([]);
+  });
+});
+
 describe("file helpers", () => {
   it("lists .mix files case-insensitively and ignores missing directories", () => {
     const dir = mkdtempSync(join(tmpdir(), "mix-parser-"));
@@ -301,6 +320,63 @@ describe("CLI entry", () => {
     } finally {
       logSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("records entry-level read errors in directory mode", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mix-parser-dir-errors-"));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      writeFileSync(join(dir, "good.mix"), buildFormatA(APP_SIG_DANCE1, [{ row: 0, col: 0, id: 99 }]));
+      mkdirSync(join(dir, "bad.mix"));
+
+      const code = main(["--dir", dir]);
+      expect(code).toBe(1);
+      expect(logSpy.mock.calls.some((call) => String(call[0]).includes("ERROR:"))).toBe(true);
+    } finally {
+      logSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("scans --all from the cwd archive tree", () => {
+    const root = mkdtempSync(join(tmpdir(), "mix-parser-all-"));
+    const previousCwd = process.cwd();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      const mixDir = join(root, "archive", "Synthetic Product", "Mix");
+      mkdirSync(mixDir, { recursive: true });
+      writeFileSync(join(mixDir, "good.mix"), buildFormatA(APP_SIG_DANCE1, [{ row: 0, col: 0, id: 7 }]));
+      mkdirSync(join(mixDir, "bad.mix"));
+
+      process.chdir(root);
+      const code = main(["--all"]);
+      expect(code).toBe(1);
+      expect(logSpy.mock.calls.some((call) => String(call[0]).includes("ERROR:"))).toBe(true);
+      expect(logSpy.mock.calls.some((call) => String(call[0]).includes("Total: 2 files, 1 parsed"))).toBe(true);
+    } finally {
+      process.chdir(previousCwd);
+      logSpy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("handles --all when archive root is missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "mix-parser-no-archive-"));
+    const previousCwd = process.cwd();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      process.chdir(root);
+      const code = main(["--all"]);
+      expect(code).toBe(0);
+      expect(logSpy.mock.calls.some((call) => String(call[0]).includes("Total: 0 files, 0 parsed"))).toBe(true);
+    } finally {
+      process.chdir(previousCwd);
+      logSpy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

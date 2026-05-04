@@ -1,6 +1,8 @@
 // Library abstraction for the normalized output tree.
 
 import type { CategoryConfig, IndexData, MetadataCatalog, Sample } from "./data.js";
+import type { PathConfigSnapshot } from "./path-config.js";
+import { isPathConfigSnapshot } from "./path-config.js";
 import {
   buildDefaultCategoryConfig,
   CATEGORY_CONFIG_FILENAME,
@@ -56,6 +58,8 @@ async function parseEmbeddedMixSamplesResponse(response: Response): Promise<Samp
 export interface Library {
   loadIndex(): Promise<IndexData>;
   loadSamples(options?: { force?: boolean }): Promise<Sample[]>;
+  loadPathConfig?(options?: { force?: boolean }): Promise<PathConfigSnapshot>;
+  updatePathConfig?(patch: { archiveRoots?: string[] | string; outputRoot?: string }): Promise<PathConfigSnapshot>;
   loadCategoryConfig?(options?: { force?: boolean }): Promise<CategoryConfig>;
   saveCategoryConfig?(config: CategoryConfig): Promise<void>;
   canWriteCategoryConfig?(): boolean;
@@ -67,6 +71,7 @@ export interface Library {
 export class FetchLibrary implements Library {
   private indexPromise: Promise<IndexData> | null = null;
   private samplesPromise: Promise<Sample[]> | null = null;
+  private pathConfigPromise: Promise<PathConfigSnapshot> | null = null;
   private categoryConfigPromise: Promise<CategoryConfig> | null = null;
 
   async loadIndex(): Promise<IndexData> {
@@ -118,6 +123,52 @@ export class FetchLibrary implements Library {
     }
 
     return this.samplesPromise;
+  }
+
+  async loadPathConfig(options?: { force?: boolean }): Promise<PathConfigSnapshot> {
+    const force = options?.force ?? false;
+    if (force) {
+      this.pathConfigPromise = null;
+    }
+    if (!this.pathConfigPromise) {
+      this.pathConfigPromise = (async () => {
+        const response = await fetch("/__path-config", {
+          cache: force ? "no-store" : "default",
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to load path config: ${response.status}`);
+        }
+
+        const parsed: unknown = await response.json();
+        if (!isPathConfigSnapshot(parsed)) {
+          throw new Error("Invalid /__path-config payload");
+        }
+
+        return parsed;
+      })();
+    }
+
+    return this.pathConfigPromise;
+  }
+
+  async updatePathConfig(patch: { archiveRoots?: string[] | string; outputRoot?: string }): Promise<PathConfigSnapshot> {
+    const response = await fetch("/__path-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to save path config: ${response.status}`);
+    }
+
+    const parsed: unknown = await response.json();
+    if (!isPathConfigSnapshot(parsed)) {
+      throw new Error("Invalid /__path-config payload");
+    }
+
+    this.pathConfigPromise = Promise.resolve(parsed);
+    return parsed;
   }
 
   async loadCategoryConfig(options?: { force?: boolean }): Promise<CategoryConfig> {
@@ -178,6 +229,7 @@ export class FetchLibrary implements Library {
   dispose(): void {
     this.indexPromise = null;
     this.samplesPromise = null;
+    this.pathConfigPromise = null;
     this.categoryConfigPromise = null;
   }
 }

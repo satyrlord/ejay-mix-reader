@@ -16,6 +16,15 @@ import type { Plugin } from "vite";
 
 import { resolveMixUrl } from "./index.js";
 
+type ArchiveRootsProvider = string | string[] | (() => string[]);
+
+function resolveArchiveRoots(provider: ArchiveRootsProvider): string[] {
+  if (typeof provider === "function") {
+    return provider();
+  }
+  return Array.isArray(provider) ? provider : [provider];
+}
+
 // Re-usable narrow type for the res object used in respondWithReadError.
 type MinimalResponse = NodeJS.WritableStream & {
   statusCode: number;
@@ -28,7 +37,7 @@ type MinimalResponse = NodeJS.WritableStream & {
  * `/mix/<productId>/<filename>`. Only products in the `ARCHIVE_MIX_DIRS`
  * allow-list and files whose names end with `.mix` are reachable.
  */
-export function serveMixFiles(archiveRoot: string): Plugin {
+export function serveMixFiles(archiveRoot: ArchiveRootsProvider): Plugin {
   return {
     name: "serve-mix-files",
     configureServer(server) {
@@ -50,7 +59,7 @@ export function serveMixFiles(archiveRoot: string): Plugin {
           next();
           return;
         }
-        const resolved = resolveMixUrl(req.url, archiveRoot);
+        const resolved = resolveMixUrl(req.url, resolveArchiveRoots(archiveRoot));
         if (!resolved) {
           res.statusCode = 404;
           res.setHeader("Content-Type", "text/plain; charset=utf-8");

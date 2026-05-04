@@ -177,14 +177,35 @@ Timeline diagnostics strategy (Phase C decision):
 - `src/mix-file-browser.ts::mixMetaFromIr` remains the runtime fallback for
   selected `.mix` entries that do not include prebuilt index metadata.
 
-During local development, the Vite server also exposes three project-specific
+During local development, the Vite server also exposes path-aware project
 endpoints:
 
-1. `/mix/<product>/<filename>` — allow-listed access to archived `.mix` files.
-2. `PUT /__category-config` — persistence for `output/categories.json`.
-3. `PUT /__sample-move` — sample moves between category/subcategory
-  folders; patches `output/metadata.json` and emits a hot-update event so the
-  grid reloads in place.
+1. `/mix/<product>/<filename>` — allow-listed access to archived `.mix` files
+  across configured archive roots.
+2. `/output/<path>` — read-only file serving from the configured output root,
+  so browser fetches keep using stable `output/...` URLs.
+3. `GET /__path-config` — returns the effective path configuration plus
+  validation status.
+4. `PUT /__path-config` — updates persisted archive/output roots for the local
+  machine profile and emits a hot-update event.
+5. `PUT /__category-config` — persistence for `output/categories.json`.
+6. `PUT /__sample-move` — sample moves between category/subcategory folders;
+  patches `output/metadata.json` and emits a hot-update event so the grid
+  reloads in place.
+
+Path-config selection supports two environment variables for multi-machine
+workflows:
+
+1. `EJAY_PATH_CONFIG` — explicit file path override.
+2. `EJAY_PATH_PROFILE` — selects `data/path-config.<profile>.json` when no
+  explicit override is set.
+3. `EJAY_DEFAULT_ARCHIVE_ROOTS` — fallback archive roots used only when no
+  configured path file is present.
+4. `EJAY_DEFAULT_OUTPUT_ROOT` — fallback output root used only when no
+  configured path file is present.
+
+These values can be provided through process environment variables or a local
+`.env.local` file at the repository root.
 
 `npm run test` runs Playwright tests against `http://127.0.0.1:3000/`.
 If that Vite dev server is already running, Playwright reuses it; otherwise it

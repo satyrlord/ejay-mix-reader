@@ -309,6 +309,165 @@ test.describe("library edge cases", () => {
     expect(result.canWrite).toBe(true);
   });
 
+  test("FetchLibrary loads and updates path config with cache and force behavior", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { FetchLibrary } = await import(/* @vite-ignore */ modPath);
+      const originalFetch = globalThis.fetch;
+      let getCount = 0;
+      let putCount = 0;
+      const seenCaches: Array<RequestCache | undefined> = [];
+
+      const firstSnapshot = {
+        repoRoot: "D:/dev/eJay",
+        configPath: "D:/dev/eJay/data/path-config.json",
+        source: "defaults",
+        parseError: null,
+        config: {
+          archiveRoots: ["D:/dev/eJay/archive"],
+          outputRoot: "D:/dev/eJay/output",
+        },
+        validation: {
+          ok: true,
+          errors: [],
+          warnings: [],
+        },
+      };
+      const forcedSnapshot = {
+        ...firstSnapshot,
+        source: "file",
+      };
+      const updatedSnapshot = {
+        ...forcedSnapshot,
+        config: {
+          archiveRoots: ["D:/_assets/archive"],
+          outputRoot: "D:/_assets/output",
+        },
+      };
+
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/__path-config") && (init?.method ?? "GET") === "GET") {
+          getCount += 1;
+          seenCaches.push(init?.cache);
+          const body = getCount >= 2 ? forcedSnapshot : firstSnapshot;
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url.endsWith("/__path-config") && init?.method === "PUT") {
+          putCount += 1;
+          return new Response(JSON.stringify(updatedSnapshot), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response(null, { status: 404 });
+      };
+
+      try {
+        const library = new FetchLibrary();
+        const first = await library.loadPathConfig();
+        const cached = await library.loadPathConfig();
+        const forced = await library.loadPathConfig({ force: true });
+        const updated = await library.updatePathConfig({ outputRoot: "D:/_assets/output" });
+        const afterUpdate = await library.loadPathConfig();
+
+        return {
+          sameCachedObject: first === cached,
+          forcedChangedSource: forced.source,
+          getCount,
+          putCount,
+          seenCaches,
+          updatedOutputRoot: updated.config.outputRoot,
+          afterUpdateUsesCache: afterUpdate === updated,
+        };
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }, LIBRARY_MOD);
+
+    expect(result.sameCachedObject).toBe(true);
+    expect(result.forcedChangedSource).toBe("file");
+    expect(result.getCount).toBe(2);
+    expect(result.putCount).toBe(1);
+    expect(result.seenCaches).toEqual(["default", "no-store"]);
+    expect(result.updatedOutputRoot).toBe("D:/_assets/output");
+    expect(result.afterUpdateUsesCache).toBe(true);
+  });
+
+  test("FetchLibrary path-config methods surface error branches", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async (modPath) => {
+      const { FetchLibrary } = await import(/* @vite-ignore */ modPath);
+      const originalFetch = globalThis.fetch;
+
+      let loadStatusError = "";
+      let loadShapeError = "";
+      let saveStatusError = "";
+      let saveShapeError = "";
+
+      try {
+        globalThis.fetch = async () => new Response("", { status: 500 });
+        try {
+          await new FetchLibrary().loadPathConfig();
+        } catch (error) {
+          loadStatusError = (error as Error).message;
+        }
+
+        globalThis.fetch = async () => new Response(JSON.stringify({ invalid: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+        try {
+          await new FetchLibrary().loadPathConfig();
+        } catch (error) {
+          loadShapeError = (error as Error).message;
+        }
+
+        globalThis.fetch = async () => new Response("", { status: 500 });
+        try {
+          await new FetchLibrary().updatePathConfig({ outputRoot: "D:/tmp" });
+        } catch (error) {
+          saveStatusError = (error as Error).message;
+        }
+
+        globalThis.fetch = async () => new Response(JSON.stringify({ invalid: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+        try {
+          await new FetchLibrary().updatePathConfig({ outputRoot: "D:/tmp" });
+        } catch (error) {
+          saveShapeError = (error as Error).message;
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      return {
+        loadStatusError,
+        loadShapeError,
+        saveStatusError,
+        saveShapeError,
+      };
+    }, LIBRARY_MOD);
+
+    expect(result.loadStatusError).toContain("Failed to load path config");
+    expect(result.loadShapeError).toContain("Invalid /__path-config payload");
+    expect(result.saveStatusError).toContain("Failed to save path config");
+    expect(result.saveShapeError).toContain("Invalid /__path-config payload");
+  });
+
 });
 
 

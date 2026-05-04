@@ -154,6 +154,35 @@ describe("serveMixFiles", () => {
     }
   });
 
+  it("supports dynamic archive root providers", () => {
+    const archiveRootA = mkdtempSync(join(tmpdir(), "serve-mix-provider-a-"));
+    const archiveRootB = mkdtempSync(join(tmpdir(), "serve-mix-provider-b-"));
+    try {
+      mkdirSync(join(archiveRootB, "Dance_eJay1", "MIX"), { recursive: true });
+      writeFileSync(join(archiveRootB, "Dance_eJay1", "MIX", "ALT.MIX"), "data");
+
+      const server = makeMockServer();
+      (serveMixFiles(() => [archiveRootA, archiveRootB]).configureServer as ((s: never) => void) | undefined)!(server as never);
+      const mw = server.middlewares.use.mock.calls[0][0] as (
+        req: unknown,
+        res: unknown,
+        next: () => void,
+      ) => void;
+
+      const fakeStream = new EventEmitter() as EventEmitter & { pipe: Mock };
+      fakeStream.pipe = vi.fn();
+      vi.mocked(createReadStream).mockReturnValueOnce(fakeStream as never);
+
+      const res = makeMockRes();
+      mw({ url: "/mix/Dance_eJay1/ALT.MIX" }, res, vi.fn());
+
+      expect(fakeStream.pipe).toHaveBeenCalledWith(res);
+    } finally {
+      rmSync(archiveRootA, { recursive: true, force: true });
+      rmSync(archiveRootB, { recursive: true, force: true });
+    }
+  });
+
   it("handles a stream error by logging and responding 500", () => {
     const archiveRoot = mkdtempSync(join(tmpdir(), "serve-mix-err-"));
     try {

@@ -11,6 +11,7 @@ import { detectFormat, parseMix } from "./mix-parser.js";
 import { canonicalizeProduct, loadGen1Catalogs, PRODUCT_FALLBACKS } from "./mix-resolver.js";
 import { normalisePxdPath, parsePxddanceFile } from "./gen1-catalog.js";
 import { parseInfCatalog } from "./pxd-parser.js";
+import { loadPathConfigSnapshot } from "./path-config.js";
 import type { MixFormat } from "./mix-types.js";
 import {
   buildCategoryEntries,
@@ -52,6 +53,16 @@ const OUTPUT_DIR = join(ROOT, "output");
 const ARCHIVE_DIR = join(ROOT, "archive");
 const DATA_DIR = join(ROOT, "data");
 const INDEX_FILE = join(DATA_DIR, "index.json");
+
+function resolveConfiguredRoots(): { outputDir: string; archiveDir: string } {
+  const snapshot = loadPathConfigSnapshot(ROOT);
+  const firstExistingArchiveRoot = snapshot.config.archiveRoots.find((candidate) => existsSync(candidate));
+  const archiveDir = firstExistingArchiveRoot ?? snapshot.config.archiveRoots[0] ?? ARCHIVE_DIR;
+  return {
+    outputDir: snapshot.config.outputRoot,
+    archiveDir,
+  };
+}
 
 /** Minimum valid `.mix` file size. Files smaller than this are skipped
  *  (covers the 2-byte `archive/Dance_eJay4/Mix/.mix` placeholder). */
@@ -1029,8 +1040,9 @@ function appendGen1Lookups(
 
 /* v8 ignore start -- CLI entrypoint, exercised via `npm run build`. */
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const roots = resolveConfiguredRoots();
   mkdirSync(DATA_DIR, { recursive: true });
-  const index = buildIndex();
+  const index = buildIndex(roots.outputDir, roots.archiveDir);
   writeFileSync(INDEX_FILE, JSON.stringify(index, null, 2), "utf-8");
   const mixTotal = index.mixLibrary.reduce((s, p) => s + p.mixes.length, 0);
   const sampleTotal = index.categories.reduce((sum, category) => sum + category.sampleCount, 0);

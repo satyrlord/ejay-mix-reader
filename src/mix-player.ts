@@ -96,6 +96,12 @@ export interface MixPlaybackPlanEvent {
    * new sample on a track stops the currently playing one).
    */
   lengthBeats: number;
+  /**
+   * Nominal sample duration (in timeline beats) resolved from metadata before
+   * lane-overlap clamping. Used at playback time to derive a tempo
+   * compensation rate when the mix BPM differs from the sample library BPM.
+   */
+  sourceLengthBeats: number | null;
   channelId: string;
   displayLabel: string;
   audioUrl: string | null;
@@ -115,6 +121,8 @@ export interface LaneDescriptor {
 
 export interface MixPlaybackPlan {
   bpm: number;
+  /** Original mix header BPM before any adjusted BPM override. */
+  sourceBpm: number | null;
   /**
    * Number of quarter-note beats represented by one timeline unit in
    * `events[].beat` / `loopBeats`.
@@ -181,9 +189,11 @@ export function maxRecoveredBeat(tracks: readonly { beat: number | null }[]): nu
 const MAX_TIMELINE_BEAT = 16_384;
 const DEFAULT_PLAYBACK_BPM = 120;
 const MAX_PLAYBACK_BPM = 400;
+const TIMELINE_BEAT_PRECISION_FACTOR = 1024;
+const BEAT_EQUALITY_EPSILON = 1 / TIMELINE_BEAT_PRECISION_FACTOR;
 
-function normalizePlaybackBpm(primaryBpm: number, fallbackBpm: number | null): number {
-  if (Number.isFinite(primaryBpm) && primaryBpm > 0 && primaryBpm <= MAX_PLAYBACK_BPM) {
+function normalizePlaybackBpm(primaryBpm: number | null, fallbackBpm: number | null): number {
+  if (typeof primaryBpm === "number" && Number.isFinite(primaryBpm) && primaryBpm > 0 && primaryBpm <= MAX_PLAYBACK_BPM) {
     return primaryBpm;
   }
   if (typeof fallbackBpm === "number" && Number.isFinite(fallbackBpm) && fallbackBpm > 0 && fallbackBpm <= MAX_PLAYBACK_BPM) {
@@ -192,11 +202,22 @@ function normalizePlaybackBpm(primaryBpm: number, fallbackBpm: number | null): n
   return DEFAULT_PLAYBACK_BPM;
 }
 
+function normalizeSourceBpm(sourceBpm: number | null): number | null {
+  if (typeof sourceBpm !== "number") {
+    return null;
+  }
+  if (!Number.isFinite(sourceBpm) || sourceBpm <= 0 || sourceBpm > MAX_PLAYBACK_BPM) {
+    return null;
+  }
+  return sourceBpm;
+}
+
 function normalizeTimelineBeat(beat: number | null): number {
   if (typeof beat !== "number" || !Number.isFinite(beat)) {
     return 0;
   }
-  return Math.max(0, Math.min(MAX_TIMELINE_BEAT, Math.floor(beat)));
+  const clampedBeat = Math.max(0, Math.min(MAX_TIMELINE_BEAT, beat));
+  return Math.round(clampedBeat * TIMELINE_BEAT_PRECISION_FACTOR) / TIMELINE_BEAT_PRECISION_FACTOR;
 }
 
 const MIX_PLAYBACK_PRODUCT_ALIASES: Record<string, string> = {
@@ -415,8 +436,10 @@ export function buildMixPlaybackPlan(
   const products = playbackLookupOrder(mix);
   const primaryProduct = products[0] ?? canonicalPlaybackProduct(mix.product);
   const lanes = lanesForMix(mix);
-  const bpm = normalizePlaybackBpm(mix.bpm, mix.bpmAdjusted);
-  const timelineUnitBeats = mix.format === "A" ? 4 : 1;
+  const sourceBpm = normalizeSourceBpm(mix.bpm);
+  const bpm = normalizePlaybackBpm(mix.bpmAdjusted, sourceBpm);
+  // Format B timeline coordinates are bar-based (like Format A), not quarter-note beats.
+  const timelineUnitBeats = (mix.format === "A" || mix.format === "B") ? 4 : 1;
   const authoritativeLoopBeats = typeof mix.loopBeats === "number" && Number.isFinite(mix.loopBeats) && mix.loopBeats > 0
     ? Math.min(MAX_TIMELINE_BEAT, Math.max(1, Math.round(mix.loopBeats)))
     : null;
@@ -444,6 +467,7 @@ export function buildMixPlaybackPlan(
       // 0 means "no explicit sample length known"; it is replaced later
       // with lane-gap fallback when we compute final durations per lane.
       lengthBeats: resolvedBeats ?? 0,
+      sourceLengthBeats: resolvedBeats,
       channelId,
       // Prefer the alias from the sample library when the event resolves
       // to a real audio file — Format A mixes only carry numeric ids in
@@ -463,8 +487,6 @@ export function buildMixPlaybackPlan(
     : null;
   const anyBeatKnown = recoveredMaxBeat !== null;
 
-  const resolvedEvents = events.filter((event) => event.resolved).length;
-
   const eventsByLaneId = new Map<string, MixPlaybackPlanEvent[]>();
   for (const event of events) {
     const laneList = eventsByLaneId.get(event.channelId);
@@ -476,6 +498,29 @@ export function buildMixPlaybackPlan(
   }
   for (const laneEvents of eventsByLaneId.values()) {
     laneEvents.sort((a, b) => a.beat - b.beat);
+  }
+
+  // Same-lane events that start at the exact same beat should behave as a
+  // hard overwrite: the later event supersedes the earlier one.
+  const supersededEventIds = new Set<string>();
+  for (const [laneId, laneEvents] of eventsByLaneId) {
+    if (laneEvents.length < 2) continue;
+
+    const dedupedLaneEvents: MixPlaybackPlanEvent[] = [laneEvents[0]!];
+    for (let index = 1; index < laneEvents.length; index++) {
+      const candidateEvent = laneEvents[index]!;
+      const previousEvent = dedupedLaneEvents[dedupedLaneEvents.length - 1]!;
+
+      if (Math.abs(candidateEvent.beat - previousEvent.beat) <= BEAT_EQUALITY_EPSILON) {
+        supersededEventIds.add(previousEvent.id);
+        dedupedLaneEvents[dedupedLaneEvents.length - 1] = candidateEvent;
+        continue;
+      }
+
+      dedupedLaneEvents.push(candidateEvent);
+    }
+
+    eventsByLaneId.set(laneId, dedupedLaneEvents);
   }
 
   let loopBeats: number | null;
@@ -526,9 +571,9 @@ export function buildMixPlaybackPlan(
       const current = laneEvents[i]!;
       const next = laneEvents[i + 1];
       const endBeat = next ? next.beat : (loopBeats ?? current.beat + 1);
-      const gapLength = Math.max(1, endBeat - current.beat);
+      const gapLength = Math.max(0, endBeat - current.beat);
       const explicitLength = current.lengthBeats > 0
-        ? Math.max(1, Math.round(current.lengthBeats))
+        ? Math.max(0, current.lengthBeats)
         : null;
       // Prefer true sample length when known, but clamp to lane gap so
       // bubbles and scheduling stay monophonic.
@@ -538,17 +583,21 @@ export function buildMixPlaybackPlan(
     }
   }
 
+  const timelineEvents = events.filter((event) => !supersededEventIds.has(event.id));
+  const resolvedEvents = timelineEvents.filter((event) => event.resolved).length;
+
   return {
     bpm,
+    sourceBpm,
     timelineUnitBeats,
     loopBeats,
     timelineRecovered: anyBeatKnown,
     lanes,
     sourceTrackCount: mix.tracks.length,
     resolvedEvents,
-    unresolvedEvents: events.length - resolvedEvents,
+    unresolvedEvents: timelineEvents.length - resolvedEvents,
     channelIds,
-    events,
+    events: timelineEvents,
   };
 }
 
@@ -604,6 +653,8 @@ export interface AudioNodeLike {
 
 export interface AudioParamLike {
   value: number;
+  setValueAtTime?(value: number, startTime: number): AudioParamLike;
+  linearRampToValueAtTime?(value: number, endTime: number): AudioParamLike;
 }
 
 export interface AudioBufferLike {
@@ -1007,11 +1058,50 @@ export interface MixPlayerSampleSpec {
   /** Optional semitone transpose for the scheduled source. */
   semitones?: number;
   /**
+   * Optional nominal sample length in timeline beats (from metadata before
+   * overlap clamping). When provided, playback derives a tempo compensation
+   * rate so samples still fill the intended beat span at custom mix BPMs.
+   */
+  referenceBeats?: number;
+  /**
+   * Optional fallback source tempo (same beat unit as the `play()` BPM).
+   * Used when `referenceBeats` is unavailable.
+   */
+  referenceBpm?: number;
+  /**
    * Optional duration in beats. When provided, the source is hard-stopped
    * after this many beats so the lane stays monophonic — matches eJay's
    * "starting a new sample on a track stops the old one" behaviour.
    */
   durationBeats?: number;
+}
+
+const MIX_SAMPLE_MIN_RATE = 0.25;
+const MIX_SAMPLE_MAX_RATE = 4;
+const MIX_SAMPLE_FADE_IN_SEC = 0.004;
+const MIX_SAMPLE_FADE_OUT_SEC = 0.008;
+
+function clampSampleRate(rate: number): number {
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return 1;
+  }
+  return Math.max(MIX_SAMPLE_MIN_RATE, Math.min(MIX_SAMPLE_MAX_RATE, rate));
+}
+
+function setAudioParamAtTime(param: AudioParamLike, value: number, time: number): void {
+  if (typeof param.setValueAtTime === "function") {
+    param.setValueAtTime(value, time);
+    return;
+  }
+  param.value = value;
+}
+
+function rampAudioParamToValueAtTime(param: AudioParamLike, value: number, time: number): void {
+  if (typeof param.linearRampToValueAtTime === "function") {
+    param.linearRampToValueAtTime(value, time);
+    return;
+  }
+  param.value = value;
 }
 
 /**
@@ -1048,6 +1138,48 @@ export class MixPlayerHost {
     return this.playing;
   }
 
+  private tempoCompensationRate(spec: MixPlayerSampleSpec, bpm: number): number {
+    if (typeof spec.referenceBeats === "number" && Number.isFinite(spec.referenceBeats) && spec.referenceBeats > 0) {
+      const sampleDurationSec = spec.buffer.duration;
+      if (Number.isFinite(sampleDurationSec) && sampleDurationSec > 0) {
+        let targetDurationSec = 0;
+        try {
+          targetDurationSec = beatsToSeconds(spec.referenceBeats, bpm);
+        } catch {
+          targetDurationSec = 0;
+        }
+
+        if (Number.isFinite(targetDurationSec) && targetDurationSec > 0) {
+          const rate = sampleDurationSec / targetDurationSec;
+          if (Number.isFinite(rate) && rate > 0) {
+            return clampSampleRate(rate);
+          }
+        }
+      }
+    }
+
+    if (typeof spec.referenceBpm !== "number" || !Number.isFinite(spec.referenceBpm) || spec.referenceBpm <= 0) {
+      return 1;
+    }
+
+    return clampSampleRate(bpm / spec.referenceBpm);
+  }
+
+  private applyEdgeRamps(param: AudioParamLike, startTime: number, stopTime: number | null): void {
+    const attackEnd = startTime + MIX_SAMPLE_FADE_IN_SEC;
+    setAudioParamAtTime(param, 0, startTime);
+    rampAudioParamToValueAtTime(param, 1, attackEnd);
+
+    if (stopTime === null) {
+      return;
+    }
+
+    const safeStop = Math.max(attackEnd, stopTime);
+    const releaseStart = Math.max(attackEnd, safeStop - MIX_SAMPLE_FADE_OUT_SEC);
+    setAudioParamAtTime(param, 1, releaseStart);
+    rampAudioParamToValueAtTime(param, 0, safeStop);
+  }
+
   play(bpm: number, startAt: number = this.ctx.currentTime): number {
     if (this.playing) {
       console.warn("MixPlayerHost.play() called while already playing — ignoring duplicate call.");
@@ -1062,13 +1194,22 @@ export class MixPlayerHost {
       }
       const src = this.ctx.createBufferSource();
       src.buffer = spec.buffer;
-      src.playbackRate.value = semitonesToRate(spec.semitones ?? 0);
-      src.connect(channel.input);
+      const playbackRate = semitonesToRate(spec.semitones ?? 0) * this.tempoCompensationRate(spec, bpm);
+      src.playbackRate.value = playbackRate;
+
+      const envelopeGain = this.ctx.createGain();
+      src.connect(envelopeGain);
+      envelopeGain.connect(channel.input);
+
       const startTime = startAt + beatsToSeconds(spec.beat, bpm);
+      const stopTime = (typeof spec.durationBeats === "number" && spec.durationBeats > 0)
+        ? startTime + beatsToSeconds(spec.durationBeats, bpm)
+        : null;
+      this.applyEdgeRamps(envelopeGain.gain, startTime, stopTime);
       src.start(startTime);
-      if (typeof spec.durationBeats === "number" && spec.durationBeats > 0) {
+      if (stopTime !== null) {
         try {
-          src.stop(startTime + beatsToSeconds(spec.durationBeats, bpm));
+          src.stop(stopTime);
         } catch {
           /* environments without scheduled-stop support fall back to natural end */
         }

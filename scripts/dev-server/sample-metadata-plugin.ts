@@ -28,6 +28,12 @@ import {
 } from "./index.js";
 import type { SampleMetadataManifest, SampleMoveRequest } from "./index.js";
 
+type OutputRootProvider = string | (() => string);
+
+function resolveOutputRoot(provider: OutputRootProvider): string {
+  return typeof provider === "function" ? provider() : provider;
+}
+
 /** Maximum allowed body size for a `PUT /__sample-move` request (1 MiB). */
 const MAX_BODY_BYTES = 1_048_576;
 
@@ -38,7 +44,7 @@ const MAX_BODY_BYTES = 1_048_576;
  * @param outputRoot Absolute path to the `output/` directory that contains
  *   the WAV files and `metadata.json`.
  */
-export function manageSampleMetadata(outputRoot: string): Plugin {
+export function manageSampleMetadata(outputRoot: OutputRootProvider): Plugin {
   return {
     name: "manage-sample-metadata",
     configureServer(server) {
@@ -80,6 +86,7 @@ export function manageSampleMetadata(outputRoot: string): Plugin {
             return;
           }
           try {
+            const activeOutputRoot = resolveOutputRoot(outputRoot);
             if (
               typeof parsed !== "object" ||
               parsed === null ||
@@ -100,7 +107,7 @@ export function manageSampleMetadata(outputRoot: string): Plugin {
             // Security: validate all path components and enforce containment within
             // outputRoot before touching the filesystem.
             const validationError = validateSampleMovePaths(
-              outputRoot,
+              activeOutputRoot,
               safeFilename,
               oldCategory,
               oldSubcategory,
@@ -116,13 +123,13 @@ export function manageSampleMetadata(outputRoot: string): Plugin {
 
             // Build source and destination paths (already validated above).
             const oldParts = [
-              outputRoot,
+              activeOutputRoot,
               oldCategory,
               ...(oldSubcategory ? [oldSubcategory] : []),
               safeFilename,
             ];
             const newParts = [
-              outputRoot,
+              activeOutputRoot,
               newCategory,
               ...(newSubcategory ? [newSubcategory] : []),
               safeFilename,
@@ -130,14 +137,14 @@ export function manageSampleMetadata(outputRoot: string): Plugin {
             const oldWav = resolve(...(oldParts as [string, ...string[]]));
             const newWav = resolve(...(newParts as [string, ...string[]]));
             const newDir = resolve(
-              outputRoot,
+              activeOutputRoot,
               newCategory,
               ...(newSubcategory ? [newSubcategory] : []),
             );
             const isSamePath = oldWav === newWav;
 
             // Patch output/metadata.json first so invalid requests fail before any file mutation.
-            const metaPath = resolve(outputRoot, "metadata.json");
+            const metaPath = resolve(activeOutputRoot, "metadata.json");
             const meta = JSON.parse(readFileSync(metaPath, "utf-8")) as SampleMetadataManifest;
             const manifestUpdated = applySampleMoveToManifest(meta, {
               filename: safeFilename,

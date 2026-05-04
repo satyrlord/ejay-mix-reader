@@ -24,6 +24,7 @@ output/
 *.log
 decompiled/
 exported/
+.env.local
 
 # Node.js
 node_modules/

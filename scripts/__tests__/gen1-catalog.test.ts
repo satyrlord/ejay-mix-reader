@@ -14,6 +14,7 @@ import {
 } from "../gen1-catalog.js";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -164,7 +165,7 @@ describe("parsePxdTxtChannelRanges", () => {
   });
 
   it("stops at the first non-numeric line", () => {
-    const text = '"0"\r\n"10"\r\n"not a number"\r\n';
+    const text = '"0"\r\n"10"\r\n"not a number"\r\n"25"\r\n';
     const { ranges } = parsePxdTxtChannelRanges(text);
     expect(ranges).toHaveLength(1);
   });
@@ -367,6 +368,20 @@ describe("resolveProductPaths", () => {
     ]);
   });
 
+  it("falls back to HipHop h/eJay/eJay MAX when classic path is missing", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "gen1-hiphop-path-"));
+    try {
+      const fallbackMax = join(tmp, "HipHop eJay 1", "h", "eJay", "eJay", "MAX");
+      mkdirSync(join(tmp, "HipHop eJay 1", "h", "eJay", "eJay"), { recursive: true });
+      writeFileSync(fallbackMax, '"ba\\test.pxd"\r\n', "utf8");
+
+      const resolved = resolveProductPaths("HipHop_eJay1", tmp);
+      expect(resolved.maxPath).toBe(resolve(fallbackMax));
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("returns sample-kit overlays for Dance SuperPack", () => {
     const resolved = resolveProductPaths("Dance_SuperPack", "D:/archive");
     expect(
@@ -425,6 +440,46 @@ describe("runCli", () => {
       const parsed = JSON.parse(readFileSync(outPath, "utf8"));
       expect(parsed.entries).toHaveLength(2);
       expect(parsed.entries[0].bank).toBe("BA");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves product paths and splices available sample-kit catalogs", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "gen1-product-cli-"));
+    try {
+      const productRoot = join(tmp, "Dance eJay 1", "eJay", "eJay");
+      mkdirSync(productRoot, { recursive: true });
+
+      writeFileSync(join(productRoot, "MAX"), '"ba\\aaaf.pxd"\r\n', "utf8");
+      writeFileSync(
+        join(productRoot, "kit1.txt"),
+        [
+          '"01\\rap301.pxd"',
+          '""',
+          '"rap"',
+          '"2"',
+          '"grp"',
+          '"vers"',
+          "",
+        ].join("\r\n"),
+        "utf8",
+      );
+
+      const cat = runCli({
+        product: "Dance_eJay1",
+        archiveRoot: tmp,
+        outputRoot: tmp,
+      });
+
+      expect(cat.product).toBe("Dance_eJay1");
+      expect(cat.entries[3400]).toMatchObject({
+        path: "dmkit1/01/rap301.pxd",
+        category: "rap",
+        group: "grp",
+        version: "vers",
+      });
+      expect(existsSync(join(tmp, "Dance_eJay1", "gen1-catalog.json"))).toBe(true);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

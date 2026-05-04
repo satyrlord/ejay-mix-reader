@@ -9,84 +9,10 @@ import type { GridSortDir, GridSortKey } from "../data.js";
 import type { Player } from "../player.js";
 
 const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "v0.0.0";
-const BUILD_LABEL = "eJay mix reader";
-
-const GLOBAL_UI_1000MS_EFFECT_CSS_VAR = "--ui-deliberate-1000ms-effect-duration";
-
-// 1000 ms is deliberate UX pacing so these fades read as intentional, not as layout or rendering bugs.
-export const GLOBAL_UI_1000MS_EFFECT_MS = 1000;
-export const TRANSPORT_BUILD_LABEL_REVEAL_DELAY_MS = GLOBAL_UI_1000MS_EFFECT_MS;
-
-function applyGlobalUiTimingConstants(): void {
-  if (typeof document === "undefined") return;
-  document.documentElement.style.setProperty(
-    GLOBAL_UI_1000MS_EFFECT_CSS_VAR,
-    `${GLOBAL_UI_1000MS_EFFECT_MS}ms`,
-  );
-}
-
-applyGlobalUiTimingConstants();
-
-const transportBuildLabelAudioSources = new Set<string>();
-let transportBuildLabelRevealTimeoutId: number | null = null;
 
 const MIX_SAMPLE_LOADING_OVERLAY_ID = "mix-sample-loading-overlay";
 const MIX_SAMPLE_LOADING_TITLE_SELECTOR = ".mix-loading-title";
 const MIX_SAMPLE_LOADING_DETAIL_SELECTOR = ".mix-loading-detail";
-
-function getTransportBuildLabel(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(".transport-build-label");
-}
-
-function clearTransportBuildLabelRevealTimeout(): void {
-  if (transportBuildLabelRevealTimeoutId === null) return;
-  window.clearTimeout(transportBuildLabelRevealTimeoutId);
-  transportBuildLabelRevealTimeoutId = null;
-}
-
-function getTransportBuildLabelSoundState(): "idle" | "playing" | "cooldown" {
-  if (transportBuildLabelAudioSources.size > 0) return "playing";
-  if (transportBuildLabelRevealTimeoutId !== null) return "cooldown";
-  return "idle";
-}
-
-function syncTransportBuildLabelVisibility(): void {
-  const label = getTransportBuildLabel();
-  if (!label) return;
-
-  const soundState = getTransportBuildLabelSoundState();
-  label.dataset.soundState = soundState;
-  label.classList.toggle("is-hidden", soundState !== "idle");
-}
-
-export function setTransportBuildLabelAudioPlaying(sourceId: string, isPlaying: boolean): void {
-  const normalizedSourceId = sourceId.trim();
-  if (!normalizedSourceId) return;
-
-  if (isPlaying) {
-    clearTransportBuildLabelRevealTimeout();
-    transportBuildLabelAudioSources.add(normalizedSourceId);
-    syncTransportBuildLabelVisibility();
-    return;
-  }
-
-  const hadActiveSource = transportBuildLabelAudioSources.delete(normalizedSourceId);
-  if (transportBuildLabelAudioSources.size > 0) {
-    syncTransportBuildLabelVisibility();
-    return;
-  }
-  if (!hadActiveSource) {
-    syncTransportBuildLabelVisibility();
-    return;
-  }
-
-  clearTransportBuildLabelRevealTimeout();
-  transportBuildLabelRevealTimeoutId = window.setTimeout(() => {
-    transportBuildLabelRevealTimeoutId = null;
-    syncTransportBuildLabelVisibility();
-  }, TRANSPORT_BUILD_LABEL_REVEAL_DELAY_MS);
-  syncTransportBuildLabelVisibility();
-}
 
 export function renderTransportBar(container: HTMLElement): HTMLElement {
   const bar = document.createElement("div");
@@ -100,18 +26,13 @@ export function renderTransportBar(container: HTMLElement): HTMLElement {
       <span id="transport-name" class="transport-name is-idle">No sample playing</span>
       <progress id="transport-progress" class="transport-progress" value="0" max="100"></progress>
     </div>
-    <div class="transport-center">
-      <span class="transport-build-label"></span>
-    </div>
     <div class="transport-right">
       <span class="transport-version"></span>
       <a class="transport-github" href="https://github.com/satyrlord/ejay-mix-reader" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">GitHub</a>
     </div>
   `;
-  bar.querySelector<HTMLElement>(".transport-build-label")!.textContent = BUILD_LABEL;
   bar.querySelector<HTMLElement>(".transport-version")!.textContent = APP_VERSION;
   container.appendChild(bar);
-  syncTransportBuildLabelVisibility();
   return bar;
 }
 
