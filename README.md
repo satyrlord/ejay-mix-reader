@@ -101,6 +101,19 @@ npm run typecheck          # check TypeScript types
 analysis only. It writes diagnostics to `logs/format-cd/` and is not part of
 the normal extraction/index build pipeline.
 
+## Windows Desktop Releases
+
+- Current Windows desktop release artifacts are intentionally unsigned.
+- The GitHub release workflow packages with `CSC_IDENTITY_AUTO_DISCOVERY=false`
+  and does not require signing secrets.
+- On Windows 10/11, installer and portable binaries are expected to show
+  `Unknown Publisher` and may trigger SmartScreen prompts.
+- Release integrity is still verifiable via the published `SHA256SUMS.txt`
+  checksum file.
+
+For the operational release steps and rollback flow, see
+[docs/release-checklist.md](docs/release-checklist.md).
+
 ## More information
 
 | Document | What it covers |

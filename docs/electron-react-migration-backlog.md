@@ -3,6 +3,16 @@
 This backlog is tailored to the current module layout and is intended to be
 executed in small, reversible slices.
 
+## Progress Snapshot
+
+As of 2026-05-04:
+
+1. Slice 1 through Slice 6 are complete.
+2. Stage 2 React shell entrypoint is implemented and validated.
+3. Stage 3 typed desktop IPC bridge is implemented for local runtime routes.
+4. Stage 4 release hardening is in place (tag publish, unsigned packaging
+  defaults, checksum artifacts).
+
 ## Slice 0: Planning Baseline
 
 1. Confirm endpoint/runtime dependencies used by src modules.
@@ -104,9 +114,10 @@ Note: Playwright and coverage commands require explicit user approval per repo p
 
 ## Slice 6: Stage 4 Release Hardening
 
-1. Add code signing configuration and secret handling.
-2. Add update channel strategy (if desired).
-3. Add release checklist and rollback guidance.
+1. Keep unsigned packaging defaults in CI (`CSC_IDENTITY_AUTO_DISCOVERY=false`).
+2. Document optional future code-signing enablement.
+3. Add update channel strategy (if desired).
+4. Add release checklist and rollback guidance.
 
 ## Task Mapping to Current Modules
 

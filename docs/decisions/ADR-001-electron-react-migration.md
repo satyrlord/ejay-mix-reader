@@ -2,11 +2,30 @@
 
 ## Status
 
-Accepted
+Accepted (Completed)
 
 ## Date
 
 2026-05-04
+
+## Execution Snapshot
+
+As of 2026-05-04:
+
+- Stage 1: Completed.
+  Electron shell, preload, packaged runtime HTTP bridge, and Windows packaging
+  workflow are implemented and validated.
+- Stage 2: Completed.
+  A React renderer shell is in place and can host the existing UI controller
+  lifecycle while preserving current behavior.
+- Stage 3: Completed.
+  Desktop local-route requests are bridged through a typed Electron IPC
+  contract (`window.ejayDesktop.request`) with compatibility routing retained
+  for browser/dev workflows.
+- Stage 4: Completed.
+  Windows CI/release flow includes tagged release publishing for unsigned
+  artifacts, SHA256 checksum artifact generation, and an optional future path
+  for code signing.
 
 ## Context
 
@@ -32,7 +51,7 @@ create unnecessary risk for mix parsing/playback parity and path-config behavior
 
 Adopt a staged migration with strict compatibility gates:
 
-1. Stage 1 (this ADR execution phase): Electronize first, keep current UI.
+1. Stage 1 (completed): Electronize first, keep current UI.
 
 - Add an Electron main process and preload.
 - Run existing Vite UI unchanged in development.
@@ -40,18 +59,18 @@ Adopt a staged migration with strict compatibility gates:
   preserves the existing endpoint contract used by src/*.ts.
 - Keep path configuration writable via user-scoped config file.
 
-2. Stage 2: Introduce React renderer incrementally.
+2. Stage 2 (completed): Introduce React renderer incrementally.
 
 - Start with shell and non-critical views.
 - Preserve existing parser/player modules and endpoint contract.
 - Migrate feature areas by slice, not by full rewrite.
 
-3. Stage 3: Replace fetch-based local endpoints with typed IPC contracts.
+3. Stage 3 (completed): Replace fetch-based local endpoints with typed IPC contracts.
 
 - Keep compatibility shims while React migration is in progress.
 - Remove HTTP shim only after full parity tests pass.
 
-4. Stage 4: Harden packaging, signing, and release automation.
+4. Stage 4 (completed): Harden packaging and release automation (unsigned by default).
 
 ## Alternatives Considered
 
@@ -90,7 +109,9 @@ Adopt a staged migration with strict compatibility gates:
 ### Operational
 
 - CI/CD must build both renderer and Electron main/preload outputs.
-- Windows signing and release assets become part of normal delivery flow.
+- Windows release assets and checksum verification become part of normal delivery flow.
+- Code signing remains optional and can be enabled later without changing the
+  Electron runtime architecture.
 
 ## Compatibility Rules
 

@@ -6,14 +6,27 @@
 index.html                 ← SPA entry point; Vite serves and bundles from here
 package.json               ← npm scripts: serve, build, test,
                               test:unit, test:unit:coverage, test:coverage,
-                              typecheck, lint:md, validate
+                              build:electron, build:desktop, electron:dev,
+                              dist:win, typecheck, lint:md, validate
 vite.config.ts             ← Vite config: Tailwind/DaisyUI integration,
                               Istanbul instrumentation
 playwright.config.ts       ← Playwright config with auto-started Vite web server
 tsconfig.json              ← Node/tooling TypeScript project
 tsconfig.browser.json      ← Browser-runtime TypeScript project
 tsconfig.config.json       ← TypeScript project for root config files
+tsconfig.electron.json     ← TypeScript project for Electron main/preload/runtime code
 .nycrc.json                ← nyc coverage reporting config
+
+electron/main.ts           ← Electron main process entry; creates BrowserWindow
+                              and wires desktop IPC request handling
+electron/preload.ts        ← Electron preload bridge (`window.ejayDesktop`)
+                              exposing typed `request(...)` runtime calls
+electron/ipc-runtime.ts    ← Typed desktop route handler for `/mix`, `/output`,
+                              `/data`, `/__path-config`, `/__category-config`,
+                              and `/__sample-move`
+electron/runtime-server.ts ← Internal HTTP compatibility bridge used by
+                              packaged Electron for static app hosting and
+                              browser/dev route parity
 
 src/app.css                ← shared stylesheet (Tailwind import, DaisyUI theme,
                               custom component CSS)
@@ -21,7 +34,7 @@ src/data.ts                ← data loading and product/sample catalog access
 src/library.ts             ← library/domain helpers used by the browser UI
 src/main.ts                ← browser entry point and app controller; wires the
                               mix browser, sequencer viewport, and playback
-                              transport
+                              transport, plus desktop fetch-to-IPC bridge
 src/mix-buffer.ts          ← browser Buffer/DataView wrapper for MIX parsing
 src/mix-parser.ts          ← canonical browser-side `.mix` parser emitting MixIR
 src/mix-player.ts          ← browser playback-plan builder, sample resolver,
@@ -60,6 +73,9 @@ scripts/dev-server/        ← Vite dev-server plugin and helper modules
 
 scripts/test-coverage.ts   ← Playwright + nyc coverage runner and threshold
                               enforcement
+scripts/run-electron-dev.ts ← Electron dev orchestrator; boots Vite, waits for
+                              readiness, compiles Electron TS, then launches
+                              Electron against the dev URL
 scripts/build-index.ts     ← generates data/index.json from extracted output;
                               also populates MixFileMeta on each MixFileEntry,
                               merges embedded-MIX manifest samples into the
@@ -103,6 +119,9 @@ scripts/wav-decode.ts        ← minimal WAV reader for sequence/loop analysis
 
 docs/file-formats.md       ← sample/archive/container format reference
 docs/mix-format-analysis.md ← canonical `.mix` format reference
+docs/release-checklist.md  ← unsigned Windows release checklist and rollback flow
+.github/workflows/windows-electron-build.yml ← Windows CI pipeline for
+                              typecheck/lint/unit tests plus Electron .exe build
 
 output/                    ← normalized browser library root: metadata.json,
                               categories.json, WAV folders grouped by
@@ -114,6 +133,8 @@ archive/                   ← read-only source data (14 product folders +
 codec/                     ← proprietary DLLs and verification scripts (optional)
 
 dist/                      ← generated Vite build output
+dist-electron/             ← generated Electron TypeScript build output
+release/                   ← generated electron-builder packaging artifacts
 coverage/                  ← generated Istanbul HTML/LCOV report
 playwright-report/         ← generated Playwright HTML report
 test-results/              ← generated Playwright artifacts
@@ -148,8 +169,8 @@ logic itself. The dev-server module layout is:
   `playwright.config.ts`, `tsconfig.json`, `tsconfig.browser.json`, and
   `.nycrc.json` are loaded from the workspace root by their respective tools.
 - **Generated artifact folders are disposable**: `dist/`, `coverage/`,
-  `playwright-report/`, `test-results/`, and `.nyc_output/` are not
-  hand-maintained source folders.
+  `dist-electron/`, `release/`, `playwright-report/`, `test-results/`,
+  and `.nyc_output/` are not hand-maintained source folders.
 - **Generated artifact locations are hard-coded**: moving them requires
   coordinated edits in `.gitignore`, `.nycrc.json`, `playwright.config.ts`,
   `scripts/test-coverage.ts`, and `tests/baseFixtures.ts`.
@@ -158,8 +179,18 @@ logic itself. The dev-server module layout is:
 
 `npm run serve` starts the Vite dev server on `http://127.0.0.1:3000/`.
 
+`npm run electron:dev` starts the Vite dev server, waits for readiness, builds
+Electron TS output into `dist-electron/`, and launches Electron against the
+dev URL.
+
 `npm run build` regenerates `data/index.json` and writes a local Vite bundle
 to `dist/`.
+
+`npm run build:desktop` builds both the Vite renderer bundle and Electron
+runtime output.
+
+`npm run dist:win` runs `electron-builder` to produce Windows artifacts in
+`release/` (NSIS installer + portable x64 build).
 
 Before Vite bundles the app, `scripts/build-index.ts` regenerates
 `data/index.json`. That step merges recovered embedded-MIX samples into the
@@ -193,6 +224,11 @@ endpoints:
   patches `output/metadata.json` and emits a hot-update event so the grid
   reloads in place.
 
+In desktop mode, local runtime fetches are bridged through
+`window.ejayDesktop.request(...)` (preload IPC) into
+`electron/ipc-runtime.ts`, while `electron/runtime-server.ts` remains available
+as the compatibility/static host in packaged builds.
+
 Path-config selection supports two environment variables for multi-machine
 workflows:
 
@@ -221,8 +257,14 @@ starts Vite itself on port 3000 with `--strictPort`.
 
 `npm run typecheck` checks all four TypeScript projects separately:
 `tsconfig.json` (Node/tools), `tsconfig.browser.json` (browser runtime in
-`src/`), `tsconfig.config.json` (root config files), and `tsconfig.test.json`
-(test files).
+`src/`), `tsconfig.config.json` (root config files), `tsconfig.test.json`
+(test files), and `tsconfig.electron.json` (Electron runtime code).
+
+`windows-electron-build.yml` runs on `windows-latest` and validates
+typecheck/lint/unit tests before packaging Windows Electron artifacts.
+Tag-triggered releases package unsigned artifacts
+(`CSC_IDENTITY_AUTO_DISCOVERY=false`), generate `SHA256SUMS.txt`, and publish
+assets to GitHub Releases.
 
 `npm run validate` runs typecheck, Vitest unit tests with coverage, and
 markdownlint.
