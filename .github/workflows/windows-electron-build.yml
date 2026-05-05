@@ -13,9 +13,6 @@ on:
       - "v*"
   pull_request:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   build-windows-electron:
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -25,10 +22,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -46,7 +43,7 @@ jobs:
         run: npm run test:unit
 
       - name: Build and package Windows app (unsigned)
-        run: npm run dist:win
+        run: npm run dist:win -- --config.win.signAndEditExecutable=true
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
@@ -65,7 +62,7 @@ jobs:
           $hashLines | Out-File -FilePath release/SHA256SUMS.txt -Encoding utf8
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: electron-windows-build
           path: release/**
@@ -79,10 +76,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -100,7 +97,7 @@ jobs:
         run: npm run test:unit
 
       - name: Build and package Windows app (unsigned)
-        run: npm run dist:win
+        run: npm run dist:win -- --config.win.signAndEditExecutable=true
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
@@ -119,7 +116,7 @@ jobs:
           $hashLines | Out-File -FilePath release/SHA256SUMS.txt -Encoding utf8
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: electron-windows-release-${{ github.ref_name }}
           path: release/**

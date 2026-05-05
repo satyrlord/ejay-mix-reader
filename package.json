@@ -50,7 +50,7 @@
       "package.json"
     ],
     "win": {
-      "signAndEditExecutable": false,
+      "signAndEditExecutable": true,
       "icon": "images/app-icon.ico",
       "executableName": "MixJam",
       "target": [
