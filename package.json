@@ -51,6 +51,7 @@
     ],
     "win": {
       "signAndEditExecutable": false,
+      "icon": "images/app-icon.ico",
       "executableName": "MixJam",
       "target": [
         "nsis",
@@ -60,7 +61,10 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "images/app-icon.ico",
+      "uninstallerIcon": "images/app-icon.ico",
+      "installerHeaderIcon": "images/app-icon.ico"
     },
     "portable": {
       "artifactName": "MixJam.exe"
