@@ -30,6 +30,7 @@ exported/
 node_modules/
 dist/
 dist-electron/
+release/
 data/
 coverage/
 coverage-unit/
