@@ -62,7 +62,7 @@ jobs:
           $hashLines | Out-File -FilePath release/SHA256SUMS.txt -Encoding utf8
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: electron-windows-build
           path: release/**
@@ -116,7 +116,7 @@ jobs:
           $hashLines | Out-File -FilePath release/SHA256SUMS.txt -Encoding utf8
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: electron-windows-release-${{ github.ref_name }}
           path: release/**
